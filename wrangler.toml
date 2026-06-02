@@ -1,0 +1,17 @@
+# Cloudflare Pages configuration
+# Used when deploying via GitHub integration or CLI
+
+name = "receipts-app"
+pages_build_output_dir = "dist"
+
+[build]
+command = "npm run build"
+
+# Environment variables for Functions (runtime secrets — set in Cloudflare dashboard, NOT here)
+# GEMINI_API_KEY
+# SUPABASE_SERVICE_ROLE_KEY
+# VITE_SUPABASE_URL
+
+# Environment variables for the frontend (build-time — set in Cloudflare dashboard)
+# VITE_SUPABASE_URL
+# VITE_SUPABASE_ANON_KEY
