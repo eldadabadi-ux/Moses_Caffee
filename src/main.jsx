@@ -1,0 +1,43 @@
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.jsx'
+
+function cacheBustingReload() {
+  const url = new URL(window.location.href)
+  url.searchParams.set('_r', Date.now().toString())
+  window.location.replace(url.toString())
+}
+
+const isCacheBustReload = new URLSearchParams(window.location.search).has('_r')
+
+if (isCacheBustReload) {
+  const u = new URL(window.location.href)
+  u.searchParams.delete('_r')
+  window.history.replaceState({}, '', u.toString())
+} else {
+  fetch('/version.json', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(({ version }) => {
+      if (version && version !== import.meta.env.VITE_APP_VERSION) cacheBustingReload()
+    })
+    .catch(() => {})
+}
+
+if ('serviceWorker' in navigator) {
+  let reloading = false
+  function swReload() { if (reloading) return; reloading = true; cacheBustingReload() }
+  navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'SW_RESET_RELOAD') swReload() })
+  navigator.serviceWorker.addEventListener('controllerchange', swReload)
+  if (!isCacheBustReload) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {})
+    })
+  }
+}
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)

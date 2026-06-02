@@ -1,0 +1,90 @@
+/* ─── Design Tokens — Notion/Attio Light ──────────────────────── */
+:root {
+  --bg:            #fafaf7;
+  --panel:         #ffffff;
+  --panel-2:       #f5f5f2;
+  --border:        #e8e6df;
+  --border-strong: #d4d1c7;
+  --text:          #1a1a17;
+  --text-dim:      #52524d;
+  --text-mute:     #8a8982;
+  --accent:        #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-bg:     #eff6ff;
+  --violet:        #7c3aed;
+  --ok:            #16a34a;
+  --warn:          #d97706;
+  --danger:        #dc2626;
+  --info:          #2563eb;
+  --font-main:  'Assistant', 'Heebo', system-ui, sans-serif;
+  --font-mono:  ui-monospace, 'SF Mono', monospace;
+  --r-control: 6px;
+  --r-btn:     8px;
+  --r-card:    12px;
+  --r-hero:    14px;
+  --r-pill:    999px;
+  --logo-bg: var(--text);
+  --btn-primary-bg:    var(--text);
+  --btn-primary-hover: #2c2c29;
+  --btn-primary-text:  #ffffff;
+  --shadow-card:  0 1px 2px rgba(0,0,0,0.04);
+  --shadow-modal: 0 20px 50px rgba(0,0,0,0.12);
+  --accent-tint-1:      #eff6ff;
+  --accent-tint-2:      #f5f3ff;
+  --accent-tint-border: #bfdbfe;
+  --success-tint-1:     #f0fdf4;
+  --success-tint-2:     #ecfdf5;
+  --success-tint-border:#bbf7d0;
+  --warn-tint-1:        #fffbeb;
+  --warn-tint-border:   #fde68a;
+  --danger-tint-1:      #fef2f2;
+  --danger-tint-border: #fecaca;
+  --info-tint-1:        #fef9c3;
+  --info-tint-border:   #fef08a;
+  --ease:     cubic-bezier(0.16, 1, 0.3, 1);
+  --duration: 140ms;
+}
+
+html.dark {
+  color-scheme: dark;
+  --bg:            #111110;
+  --panel:         #1c1c1a;
+  --panel-2:       #242422;
+  --border:        #2e2e2b;
+  --border-strong: #3a3a36;
+  --text:          #e8e6df;
+  --text-dim:      #a8a69f;
+  --text-mute:     #6e6c65;
+  --accent-bg:     rgba(37,99,235,0.18);
+  --shadow-card:   0 1px 2px rgba(0,0,0,0.3);
+  --shadow-modal:  0 20px 50px rgba(0,0,0,0.6);
+  --logo-bg:           #2e2e2c;
+  --btn-primary-bg:    #4a4a46;
+  --btn-primary-hover: #5a5a55;
+  --btn-primary-text:  #ffffff;
+  --accent-tint-1:      rgba(37,99,235,0.14);
+  --accent-tint-2:      rgba(124,58,237,0.12);
+  --accent-tint-border: rgba(37,99,235,0.30);
+  --success-tint-1:     rgba(34,197,94,0.12);
+  --success-tint-2:     rgba(16,185,129,0.10);
+  --success-tint-border:rgba(34,197,94,0.30);
+  --warn-tint-1:        rgba(217,119,6,0.14);
+  --warn-tint-border:   rgba(217,119,6,0.35);
+  --danger-tint-1:      rgba(220,38,38,0.12);
+  --danger-tint-border: rgba(220,38,38,0.30);
+  --info-tint-1:        rgba(234,179,8,0.12);
+  --info-tint-border:   rgba(234,179,8,0.30);
+}
+:root { color-scheme: light; }
+
+html.dark input, html.dark select, html.dark textarea {
+  background-color: var(--panel);
+  color: var(--text);
+  border-color: var(--border);
+}
+html.dark input::placeholder, html.dark textarea::placeholder { color: var(--text-mute); }
+html.dark input::-webkit-calendar-picker-indicator { filter: invert(0.85); cursor: pointer; }
+html.dark input:disabled, html.dark input[readonly], html.dark select:disabled, html.dark textarea:disabled {
+  background-color: var(--panel-2);
+  color: var(--text-mute);
+}
