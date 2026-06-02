@@ -1,5 +1,5 @@
 {
-  "name": "receipts-app",
+  "name": "Moses_Caffee",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && wrangler pages deploy dist --project-name receipts-app --branch=master --commit-dirty=true",
-    "deploy:manual": "npm run build && wrangler pages deploy dist --project-name receipts-app --branch=master --commit-dirty=true"
+    "deploy": "npm run build && wrangler pages deploy dist --project-name Moses_Caffee --branch=master --commit-dirty=true",
+    "deploy:manual": "npm run build && wrangler pages deploy dist --project-name Moses_Caffee --branch=master --commit-dirty=true"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1",
