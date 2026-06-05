@@ -48,7 +48,8 @@ function fileToBase64(file) {
   })
 }
 
-async function compressImage(file, maxDim = 1600, quality = 0.82) {
+// Higher quality for AI scanning (2400px / 95% — keeps Hebrew text sharp)
+async function compressImage(file, maxDim = 2400, quality = 0.95) {
   const fallback = () => fileToBase64(file).then(dataUrl => ({ dataUrl, mimeType: file.type || 'image/jpeg' }))
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

@@ -4,24 +4,18 @@
  * POST body:  { imageBase64: string, mimeType: string }
  * Response:   { vendor_name, receipt_date, total_amount, currency, original_amount, items[] }
  *
- * AUTH: Requires Supabase JWT (Authorization: Bearer <token>).
- * Categories are loaded from the `categories` table for the authenticated user.
- *
- * ENV VARS:
- *   GEMINI_API_KEY             — Google AI Studio key
- *   SUPABASE_SERVICE_ROLE_KEY  — reads categories server-side
- *   VITE_SUPABASE_URL          — or SUPABASE_URL
+ * Uses gemini-2.5-pro for maximum accuracy on Hebrew receipts.
+ * Falls back to gemini-2.5-flash if pro is unavailable.
  */
 
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+const GEMINI_PRO   = 'gemini-2.5-pro'
+const GEMINI_FLASH = 'gemini-2.5-flash'
 
 function getSupabaseUrl(env) {
   return env.VITE_SUPABASE_URL || env.SUPABASE_URL || ''
 }
-
-const ALLOWED_ORIGINS_ENV = ['receipts-app.pages.dev']
 
 function corsHeaders(request, env) {
   const origin  = (request.headers.get('origin') || '').trim()
@@ -42,56 +36,43 @@ export async function onRequestOptions(context) {
   })
 }
 
-// ── Default Israeli expense categories ────────────────────────────────────────
-const DEFAULT_CATEGORIES = `- דלק
-  - דלק › תדלוק רכב
-- חניה
-  - חניה › חניון פרטי
-  - חניה › פארקומט
-- רכב ותחבורה
-  - רכב ותחבורה › אחזקת רכב
-  - רכב ותחבורה › נסיעה במונית / אובר
-  - רכב ותחבורה › תחבורה ציבורית
-  - רכב ותחבורה › השכרת רכב
-- אוכל ושתייה
-  - אוכל ושתייה › ארוחות עסקיות
-  - אוכל ושתייה › קפה ומשקאות
-  - אוכל ושתייה › סופרמרקט / מכולת
-- ציוד משרדי
-  - ציוד משרדי › נייר וכלי כתיבה
-  - ציוד משרדי › מדפסות וצריכה מתכלה
-  - ציוד משרדי › ריהוט ואביזרי משרד
-- תקשורת וטכנולוגיה
-  - תקשורת וטכנולוגיה › טלפון נייד
-  - תקשורת וטכנולוגיה › אינטרנט וקווי תקשורת
-  - תקשורת וטכנולוגיה › תוכנות ומנויים דיגיטליים
-  - תקשורת וטכנולוגיה › ציוד מחשוב
-- שכירות ומשכנתא
-  - שכירות ומשכנתא › שכירות משרד
-  - שכירות ומשכנתא › ארנונה וועד בית
-- חשמל מים וגז
-- ביטוח
-  - ביטוח › ביטוח רכב
-  - ביטוח › ביטוח עסק
-  - ביטוח › ביטוח בריאות
-- שכר טרחה מקצועי
-  - שכר טרחה מקצועי › רואה חשבון
-  - שכר טרחה מקצועי › יעוץ משפטי
-- פרסום ושיווק
-  - פרסום ושיווק › פרסום מקוון
-  - פרסום ושיווק › הדפסה וחומרי שיווק
-- הכשרה והשתלמות
-  - הכשרה והשתלמות › כנסים וסמינרים
-  - הכשרה והשתלמות › קורסים וספרות מקצועית
-- נסיעות לחו"ל
-  - נסיעות לחו"ל › כרטיסי טיסה
-  - נסיעות לחו"ל › מלונות
-  - נסיעות לחו"ל › הוצאות שהייה
-- מתנות ואירוח עסקי
-- בריאות ורפואה
-  - בריאות ורפואה › בית מרקחת
-  - בריאות ורפואה › רופא ובדיקות
-- שיפוצים ואחזקה
+// ── Default categories — tailored for a café/food-service business ────────────
+const DEFAULT_CATEGORIES = `- ירקות ופירות
+  - ירקות ופירות › ירקות טריים
+  - ירקות ופירות › פירות טריים
+  - ירקות ופירות › ירקות חתוכים מוכנים
+  - ירקות ופירות › ירקות קפואים
+- מוצרי מזון ומכולת
+  - מוצרי מזון ומכולת › מוצרי חלב (חלב, גבינות, יוגורט)
+  - מוצרי מזון ומכולת › לחם ומאפים
+  - מוצרי מזון ומכולת › סלטים מוכנים וממרחים (חומוס, טחינה, סלטים)
+  - מוצרי מזון ומכולת › דגנים ומוצרים יבשים (גרנולה, דגני בוקר, קמח)
+  - מוצרי מזון ומכולת › שמנים ותבלינים
+  - מוצרי מזון ומכולת › שימורים ומוצרים ארוזים
+- קפה ומשקאות
+  - קפה ומשקאות › פולי קפה ואבקת קפה
+  - קפה ומשקאות › תה ותחליפי קפה
+  - קפה ומשקאות › מיצים ומשקאות קרים
+  - קפה ומשקאות › סירופים ותוספות למשקאות
+  - קפה ומשקאות › גז לסודה / CO2
+- ניקיון וחומרי ניקוי
+  - ניקיון וחומרי ניקוי › סבון כלים וניקוי משטחים
+  - ניקיון וחומרי ניקוי › סבון ידיים ומוצרי היגיינה
+  - ניקיון וחומרי ניקוי › מגבונים ומפיות
+  - ניקיון וחומרי ניקוי › שקיות אשפה ומוצרי ניקיון כלליים
+- ציוד וכלים
+  - ציוד וכלים › מכשירי חשמל גדולים (מדיח, מכונת קפה, טוסטר)
+  - ציוד וכלים › כלי מטבח וכלי הגשה
+  - ציוד וכלים › ריהוט ואביזרי עסק
+- גינון ותחזוקה
+  - גינון ותחזוקה › צינורות והשקיה (טפטפות, מתזים)
+  - גינון ותחזוקה › דשן וחומרי דישון
+  - גינון ותחזוקה › חומרי הדברה
+  - גינון ותחזוקה › כלי גינון (אתים, מזמרות, מגרפות)
+- חד פעמי ואריזות
+  - חד פעמי ואריזות › כוסות וצלחות חד פעמי
+  - חד פעמי ואריזות › אריזות לקחת הביתה
+  - חד פעמי ואריזות › נייר אפייה ועטיפות
 - שונות`
 
 export const onRequestPost = wrapAuthErrors(async (context) => {
@@ -114,7 +95,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     return Response.json({ error: 'Missing required fields: imageBase64, mimeType' }, { status: 400, headers: CORS })
   }
 
-  // ── Load user's categories from DB ────────────────────────────────────────
+  // ── Load user categories from DB ───────────────────────────────────────────
   let categoriesTree = DEFAULT_CATEGORIES
   let dbL1Names = null
   try {
@@ -140,54 +121,161 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
               }
             }
           }
-          if (lines.length > 0) { categoriesTree = lines.join('\n'); dbL1Names = l1.map(c => c.name) }
+          if (lines.length > 0) {
+            categoriesTree = lines.join('\n')
+            dbL1Names = l1.map(c => c.name)
+          }
         }
       }
     }
-  } catch (e) { console.warn('[scan-receipt] Could not fetch categories:', e?.message) }
+  } catch (e) {
+    console.warn('[scan-receipt] Could not fetch categories:', e?.message)
+  }
 
   const ALLOWED_CATEGORIES = dbL1Names ?? [
-    'דלק','חניה','אוכל ושתייה','ציוד משרדי','תקשורת וטכנולוגיה',
-    'רכב ותחבורה','שכירות ומשכנתא','חשמל מים וגז','ביטוח',
-    'שכר טרחה מקצועי','פרסום ושיווק','הכשרה והשתלמות',
-    'נסיעות לחו"ל','מתנות ואירוח עסקי','בריאות ורפואה',
-    'שיפוצים ואחזקה','שונות',
+    'ירקות ופירות', 'מוצרי מזון ומכולת', 'קפה ומשקאות',
+    'ניקיון וחומרי ניקוי', 'ציוד וכלים', 'גינון ותחזוקה',
+    'חד פעמי ואריזות', 'שונות',
   ]
 
-  const prompt = `אתה סוכן AI המנתח קבלות עסקיות ישראליות.
+  // ── Build prompt ───────────────────────────────────────────────────────────
+  const prompt = buildPrompt(ALLOWED_CATEGORIES, categoriesTree)
 
-נתח את הקבלה המצורפת והחזר JSON בלבד עם השדות:
+  // ── Call Gemini (Pro first, Flash fallback) ────────────────────────────────
+  let result = null
+  let lastError = null
 
-vendor_name (string) — שם העסק/הספק כפי שמופיע בקבלה.
-receipt_date (string) — תאריך בפורמט YYYY-MM-DD. אם לא ניתן לקרוא: "".
-total_amount (number) — הסכום הסופי לתשלום בשקלים.
-currency (string) — קוד מטבע: "ILS", "USD", "EUR" וכו'. ברירת מחדל "ILS".
-original_amount (number) — הסכום במטבע המקורי (=total_amount אם ILS).
-items (array) — כל פריט בקבלה.
+  for (const model of [GEMINI_PRO, GEMINI_FLASH]) {
+    try {
+      result = await callGemini(GEMINI_API_KEY, model, imageBase64, mimeType, prompt)
+      if (result && (result.total_amount > 0 || result.vendor_name)) break
+    } catch (err) {
+      lastError = err
+      console.warn(`[scan-receipt] ${model} failed:`, err?.message)
+    }
+  }
 
-לכל פריט:
-  item_name (string) — שם הפריט.
-  price (number) — מחיר הפריט בשקלים.
-  category_l1 (string) — חובה. בחר אחד מ: ${ALLOWED_CATEGORIES.join(' | ')}
-  category_l2 (string) — תת-קטגוריה אופציונלית.
-  is_new_category (boolean) — תמיד false.
+  // ── Retry if critical fields missing ──────────────────────────────────────
+  if (result && (!result.total_amount || result.total_amount === 0)) {
+    console.warn('[scan-receipt] Amount missing — retrying with focused prompt')
+    try {
+      const retryResult = await callGemini(
+        GEMINI_API_KEY, GEMINI_PRO, imageBase64, mimeType,
+        buildRetryPrompt(result)
+      )
+      if (retryResult?.total_amount > 0) {
+        result = { ...result, ...retryResult }
+      }
+    } catch (retryErr) {
+      console.warn('[scan-receipt] Retry failed:', retryErr?.message)
+    }
+  }
 
-חוקי סיווג:
-• תחנת דלק / פז / סונול / yellow → "דלק"
-• חניון / פארקינג / פארקומט → "חניה" (תמיד! לא "רכב ותחבורה")
-• מסעדה / קפה / סופרמרקט / שופרסל / רמי לוי → "אוכל ושתייה"
-• אובר / גט / מונית / רכבת / אגד → "רכב ותחבורה"
-• KSP / Office Depot / ציוד / מדפסת → "ציוד משרדי"
-• סלקום / פרטנר / HOT / בזק / אינטרנט → "תקשורת וטכנולוגיה"
-• כרטיסי טיסה / מלון בחו"ל / El Al / Booking → "נסיעות לחו\\"ל"
-• ביטוח ישיר / מנורה / הפניקס → "ביטוח"
-• סופר-פארם / בית מרקחת / מכבי → "בריאות ורפואה"
-• שאר המקרים → "שונות"
+  if (!result) {
+    return Response.json(
+      { error: 'Processing failed', detail: lastError?.message },
+      { status: 502, headers: CORS }
+    )
+  }
 
-החזר JSON תקני בלבד — ללא הסברים, ללא markdown.`
+  return Response.json(result, { headers: CORS })
+})
 
-  const geminiPayload = {
-    contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: imageBase64 } }] }],
+// ── Main extraction prompt ─────────────────────────────────────────────────────
+function buildPrompt(allowedCategories, categoriesTree) {
+  return `אתה מומחה לניתוח קבלות ישראליות עבור בית קפה ומסעדה קטנה.
+המטרה: לחלץ נתונים מדויקים מהקבלה כדי לנהל הוצאות עסקיות.
+
+## חוקי חילוץ חובה
+
+### שם הספק (vendor_name):
+- שם החברה / הספק כפי שמופיע בראש הקבלה (בדרך כלל שורה 1-3)
+- לא כתובת, לא מספר טלפון, לא ח.פ
+- אם מופיע שם עסק גדול (כגון "מחסני השוק", "חברת עמינח") — זה הספק
+- אם הקבלה היא ממסעדה/קפה — שם המסעדה הוא הספק
+- אם אין שם ברור — כתוב "ספק לא ידוע"
+
+### תאריך (receipt_date):
+- פורמט: YYYY-MM-DD
+- חפש "תאריך:", "date:", DD/MM/YYYY, DD.MM.YYYY
+- אם לא מופיע תאריך ברור — החזר ""
+
+### סכום סופי (total_amount):
+- זהו **הסכום הגבוה ביותר** בקבלה — הסכום לתשלום לאחר מע"מ
+- חפש: "סה"כ לתשלום", "סה"כ", "total", "לתשלום", "לחיוב", "סכום כולל מע"מ"
+- **אם יש כמה סכומים** — קח תמיד את **הגדול ביותר** (זה הסופי עם מע"מ)
+- אם מופיע "₪" או "ש"ח" ליד מספר — זה כנראה הסכום
+- **לעולם אל תחזיר 0** אם יש מספר כלשהו בקבלה
+- אם יש מע"מ (17%) — הסכום הסופי כולל אותו
+
+### פריטים (items):
+- רשום כל שורת מוצר בנפרד
+- אם יש כמות × מחיר ליחידה — חשב את הסכום (כמות × מחיר)
+- שמות מוצרים: **בעברית** גם אם מופיעים באנגלית בקבלה
+  - "Humus" → "חומוס"
+  - "Cucumber" → "מלפפון"
+  - "Milk 3%" → "חלב 3%"
+
+### קטגוריות זמינות:
+${allowedCategories.join(' | ')}
+
+### כללי סיווג לעסק זה:
+- ירקות, פירות, עלים, עגבניות, מלפפון, פלפל, בצל = "ירקות ופירות"
+- חומוס, טחינה, סלטים מוכנים, ממרחים = "מוצרי מזון ומכולת"
+- חלב, גבינה, שמנת, יוגורט = "מוצרי מזון ומכולת"
+- קפה, פולי קפה, אספרסו, קפוצ'ינו = "קפה ומשקאות"
+- תה, חליטות, מיצים = "קפה ומשקאות"
+- גז CO2, מכלי גז לסודה = "קפה ומשקאות"
+- סבון, חומרי ניקוי, מגבונים, מפיות = "ניקיון וחומרי ניקוי"
+- מדיח, מכונת קפה, טוסטר, מכשירי חשמל = "ציוד וכלים"
+- כלים, צלחות, כוסות, סכו"ם = "ציוד וכלים"
+- השקיה, טפטפות, צינורות, דשן, הדברה, כלי גינון = "גינון ותחזוקה"
+- כוסות חד פעמי, צלחות חד פעמי, שקיות = "חד פעמי ואריזות"
+
+## פורמט תשובה — JSON בלבד, ללא הסברים
+
+{
+  "vendor_name": "שם הספק",
+  "receipt_date": "YYYY-MM-DD או ריק",
+  "total_amount": מספר (לא 0 אם יש מספרים בקבלה),
+  "currency": "ILS",
+  "original_amount": אותו מספר,
+  "items": [
+    {
+      "item_name": "שם הפריט בעברית",
+      "price": מחיר הפריט,
+      "category_l1": "קטגוריה מהרשימה",
+      "category_l2": "תת-קטגוריה אם ידוע",
+      "is_new_category": false
+    }
+  ]
+}`
+}
+
+// ── Retry prompt when amount is missing ───────────────────────────────────────
+function buildRetryPrompt(prevResult) {
+  return `ניסיון שני: הסריקה הקודמת החזירה סכום 0. בדוק שוב את הקבלה.
+
+**חפש בעדיפות גבוהה:**
+1. הסכום הגבוה ביותר בקבלה (זהו הסכום הסופי)
+2. מלים: "סה"כ", "לתשלום", "total", "לחיוב", "סכום כולל"
+3. כל מספר ליד סמל ₪ או "ש"ח"
+4. שורה אחרונה בקבלה (בדרך כלל שם הסכום)
+
+שם הספק שזוהה: "${prevResult.vendor_name || 'לא ידוע'}"
+
+החזר JSON עם אותם שדות, עם הסכום הנכון:`
+}
+
+// ── Gemini API call ────────────────────────────────────────────────────────────
+async function callGemini(apiKey, model, imageBase64, mimeType, prompt) {
+  const payload = {
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mimeType, data: imageBase64 } },
+      ],
+    }],
     generationConfig: {
       responseMimeType: 'application/json',
       responseSchema: {
@@ -215,44 +303,37 @@ items (array) — כל פריט בקבלה.
         },
         required: ['vendor_name', 'total_amount', 'items'],
       },
-      temperature: 0.1,
+      temperature: 0.05,   // Very low — we want deterministic extraction
+      thinkingConfig: {    // Enable thinking for Pro model (improves accuracy)
+        thinkingBudget: 1024,
+      },
     },
   }
 
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
 
-  try {
-    const geminiRes = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(geminiPayload),
-    })
-
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text()
-      console.error('[scan-receipt] Gemini error:', geminiRes.status, errText)
-      return Response.json({ error: 'AI processing failed', detail: errText.slice(0, 300) }, { status: 502, headers: CORS })
-    }
-
-    const geminiData = await geminiRes.json()
-    const rawContent = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text
-    if (!rawContent) {
-      return Response.json({ error: 'Empty AI response' }, { status: 502, headers: CORS })
-    }
-
-    let result
-    try {
-      result = JSON.parse(rawContent)
-    } catch {
-      const match = rawContent.match(/```(?:json)?\s*([\s\S]+?)```/)
-      if (match) { result = JSON.parse(match[1]) }
-      else { throw new Error('Could not parse AI JSON response') }
-    }
-
-    return Response.json(result, { headers: CORS })
-
-  } catch (err) {
-    console.error('[scan-receipt] Fatal error:', err?.message)
-    return Response.json({ error: 'Processing failed', detail: err?.message }, { status: 500, headers: CORS })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Gemini ${model} ${res.status}: ${err.slice(0, 200)}`)
   }
-})
+
+  const data = await res.json()
+  const raw  = data?.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!raw) throw new Error('Empty response from Gemini')
+
+  let result
+  try {
+    result = JSON.parse(raw)
+  } catch {
+    const match = raw.match(/```(?:json)?\s*([\s\S]+?)```/)
+    if (match) result = JSON.parse(match[1])
+    else throw new Error('Cannot parse JSON from Gemini response')
+  }
+
+  return result
+}
