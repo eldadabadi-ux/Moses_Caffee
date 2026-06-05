@@ -624,7 +624,7 @@ export default function ReceiptsPage() {
       let result = null
       try {
         const controller = new AbortController()
-        const fetchTimer = setTimeout(() => controller.abort(), 40000)
+        const fetchTimer = setTimeout(() => controller.abort(), 60000)
         const res = await fetch('/api/scan-receipt', {
           method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },

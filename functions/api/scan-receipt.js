@@ -10,8 +10,10 @@
 
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
 
-const GEMINI_PRO   = 'gemini-2.5-pro'
-const GEMINI_FLASH = 'gemini-2.5-flash'
+// Model chain — flash models work on the free tier and are fast + accurate.
+// gemini-2.5-pro is intentionally NOT used: it returns 429 (quota) on the free tier.
+const GEMINI_PRIMARY  = 'gemini-2.5-flash'
+const GEMINI_FALLBACK = 'gemini-flash-latest'
 
 function getSupabaseUrl(env) {
   return env.VITE_SUPABASE_URL || env.SUPABASE_URL || ''
@@ -144,11 +146,12 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   // ── Build prompt ───────────────────────────────────────────────────────────
   const prompt = buildPrompt(ALLOWED_CATEGORIES, categoriesTree)
 
-  // ── Call Gemini (Pro first, Flash fallback) ────────────────────────────────
+  // ── Build prompt + call Gemini with retry across models ────────────────────
   let result = null
   let lastError = null
 
-  for (const model of [GEMINI_PRO, GEMINI_FLASH]) {
+  // Each model is tried with internal retry (handles transient 503/429/500).
+  for (const model of [GEMINI_PRIMARY, GEMINI_FALLBACK]) {
     try {
       result = await callGemini(GEMINI_API_KEY, model, imageBase64, mimeType, prompt)
       if (result && (result.total_amount > 0 || result.vendor_name)) break
@@ -158,12 +161,12 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     }
   }
 
-  // ── Retry if critical fields missing ──────────────────────────────────────
+  // ── Retry once with focused prompt if the amount is still missing ──────────
   if (result && (!result.total_amount || result.total_amount === 0)) {
     console.warn('[scan-receipt] Amount missing — retrying with focused prompt')
     try {
       const retryResult = await callGemini(
-        GEMINI_API_KEY, GEMINI_PRO, imageBase64, mimeType,
+        GEMINI_API_KEY, GEMINI_PRIMARY, imageBase64, mimeType,
         buildRetryPrompt(result)
       )
       if (retryResult?.total_amount > 0) {
@@ -176,7 +179,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
 
   if (!result) {
     return Response.json(
-      { error: 'Processing failed', detail: lastError?.message },
+      { error: 'AI processing failed', detail: lastError?.message || 'all models unavailable' },
       { status: 502, headers: CORS }
     )
   }
@@ -360,37 +363,60 @@ async function callGemini(apiKey, model, imageBase64, mimeType, prompt) {
         },
         required: ['vendor_name', 'total_amount', 'items'],
       },
-      temperature: 0.05,   // Very low — we want deterministic extraction
-      thinkingConfig: {    // Enable thinking for Pro model (improves accuracy)
-        thinkingBudget: 1024,
+      temperature: 0.05,   // Very low — deterministic extraction
+      thinkingConfig: {    // Disable thinking → fast (~2s) + reliable, leaves room for retries
+        thinkingBudget: 0,
       },
     },
   }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
 
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Gemini ${model} ${res.status}: ${err.slice(0, 200)}`)
+  // Retry up to 3 times on transient errors (503 high-demand, 429 rate, 500).
+  const MAX_ATTEMPTS = 3
+  let lastErr = null
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let res
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+    } catch (netErr) {
+      lastErr = new Error(`Network error: ${netErr?.message}`)
+      if (attempt < MAX_ATTEMPTS) { await sleep(attempt * 1500); continue }
+      throw lastErr
+    }
+
+    if (res.ok) {
+      const data = await res.json()
+      const raw  = data?.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!raw) {
+        lastErr = new Error('Empty response from Gemini')
+        if (attempt < MAX_ATTEMPTS) { await sleep(attempt * 1200); continue }
+        throw lastErr
+      }
+      try {
+        return JSON.parse(raw)
+      } catch {
+        const match = raw.match(/```(?:json)?\s*([\s\S]+?)```/)
+        if (match) return JSON.parse(match[1])
+        throw new Error('Cannot parse JSON from Gemini response')
+      }
+    }
+
+    // Non-OK response
+    const errText = await res.text()
+    lastErr = new Error(`Gemini ${model} ${res.status}: ${errText.slice(0, 160)}`)
+    // Retry only on transient codes
+    if ([429, 500, 502, 503, 504].includes(res.status) && attempt < MAX_ATTEMPTS) {
+      await sleep(attempt * 1500)   // 1.5s, 3s backoff
+      continue
+    }
+    throw lastErr
   }
-
-  const data = await res.json()
-  const raw  = data?.candidates?.[0]?.content?.parts?.[0]?.text
-  if (!raw) throw new Error('Empty response from Gemini')
-
-  let result
-  try {
-    result = JSON.parse(raw)
-  } catch {
-    const match = raw.match(/```(?:json)?\s*([\s\S]+?)```/)
-    if (match) result = JSON.parse(match[1])
-    else throw new Error('Cannot parse JSON from Gemini response')
-  }
-
-  return result
+  throw lastErr
 }
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
