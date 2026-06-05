@@ -2,12 +2,13 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useSettings } from '../hooks/useSettings'
 import { downloadFile } from '../lib/downloadFile'
 import toast from 'react-hot-toast'
 import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
-  CalendarDays, Filter, ChevronDown,
+  CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon,
 } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
@@ -105,7 +106,7 @@ async function buildStyledExcel(rows) {
       }
     }
   }
-  ws['!cols']  = [{ wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 6 }, { wch: 14 }]
+  ws['!cols']  = [{ wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 15 }, { wch: 13 }, { wch: 17 }]
   ws['!views'] = [{ rightToLeft: true }]
   const wb = XLSXs.utils.book_new()
   XLSXs.utils.book_append_sheet(wb, ws, 'קבלות')
@@ -342,7 +343,13 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, onClose }) 
     const fmt = d => d ? new Date(d).toLocaleDateString('he-IL', { day:'numeric', month:'long', year:'numeric' }) : ''
     const period = (filterFrom || filterTo) ? `${fmt(filterFrom) || '...'} — ${fmt(filterTo) || '...'}` : 'כל הזמנים'
     const sorted = [...receipts].sort((a,b) => (a.receipt_date||'').localeCompare(b.receipt_date||''))
-    const rows = sorted.map(r => `<tr><td>${r.receipt_date ? new Date(r.receipt_date).toLocaleDateString('he-IL') : '—'}</td><td>${esc(r.vendor_name)||'—'}</td><td>${esc(r.category_text||'')}</td><td style="font-weight:700;color:#059669">₪${parseFloat(r.amount||0).toLocaleString('he-IL',{minimumFractionDigits:2})}</td></tr>`).join('')
+    const cBefore = r => { const t = parseFloat(r.amount)||0; if (r.amount_before_vat>0) return parseFloat(r.amount_before_vat); const rt = r.vat_rate||18; return Math.round(t/(1+rt/100)*100)/100 }
+    const cVat    = r => { const t = parseFloat(r.amount)||0; if (r.vat_amount>0) return parseFloat(r.vat_amount); return Math.round((t-cBefore(r))*100)/100 }
+    const il = n => `₪${parseFloat(n||0).toLocaleString('he-IL',{minimumFractionDigits:2})}`
+    const sumBefore = sorted.reduce((s,r)=>s+cBefore(r),0)
+    const sumVat    = sorted.reduce((s,r)=>s+cVat(r),0)
+    const sumTotal  = sorted.reduce((s,r)=>s+(parseFloat(r.amount)||0),0)
+    const rows = sorted.map(r => `<tr><td>${r.receipt_date ? new Date(r.receipt_date).toLocaleDateString('he-IL') : '—'}</td><td>${esc(r.vendor_name)||'—'}</td><td>${esc(r.category_text||'')}</td><td>${il(cBefore(r))}</td><td style="color:#92400e">${il(cVat(r))}</td><td style="font-weight:700;color:#059669">${il(r.amount)}</td></tr>`).join('')
     return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח קבלות</title>
 <style>@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Heebo',Arial,sans-serif;direction:rtl;color:#1e293b;padding:32px;font-size:14px;}
@@ -355,10 +362,10 @@ tbody tr{border-bottom:1px solid #f1f5f9;}tbody tr:nth-child(even){background:#f
 tfoot tr{background:#f1f5f9;border-top:2px solid #e2e8f0;}tfoot td{padding:12px;font-weight:700;}
 td{padding:10px 12px;color:#334155;}@media print{body{padding:0;}}</style></head><body>
 <h1>דוח קבלות</h1><div class="subtitle">${period}</div>
-<div class="total-banner">סה"כ: <span>₪${totalAmount.toLocaleString('he-IL',{minimumFractionDigits:2})}</span> (${receipts.length} קבלות)</div>
-<table><thead><tr><th>תאריך</th><th>ספק</th><th>קטגוריה</th><th>סכום</th></tr></thead>
+<div class="total-banner">סה"כ כולל מע"מ: <span>${il(sumTotal)}</span> · מתוכו מע"מ: ${il(sumVat)} · לפני מע"מ: ${il(sumBefore)} (${receipts.length} קבלות)</div>
+<table><thead><tr><th>תאריך</th><th>ספק</th><th>קטגוריה</th><th>לפני מע"מ</th><th>מע"מ</th><th>סה"כ</th></tr></thead>
 <tbody>${rows}</tbody>
-<tfoot><tr><td colspan="3">סה"כ</td><td style="color:#059669">₪${totalAmount.toLocaleString('he-IL',{minimumFractionDigits:2})}</td></tr></tfoot></table>
+<tfoot><tr><td colspan="3">סה"כ</td><td>${il(sumBefore)}</td><td style="color:#92400e">${il(sumVat)}</td><td style="color:#059669">${il(sumTotal)}</td></tr></tfoot></table>
 <div style="color:#94a3b8;font-size:12px;margin-top:32px;border-top:1px solid #e2e8f0;padding-top:12px;">הופק ב-${new Date().toLocaleDateString('he-IL',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
 <script>window.onload=()=>{window.print();}<\/script></body></html>`
   }
@@ -371,10 +378,30 @@ td{padding:10px 12px;color:#334155;}@media print{body{padding:0;}}</style></head
       let excelBlob = null, pdfBlob = null, imagesBlob = null
 
       if (opts.excel) {
+        // Full VAT breakdown for the accountant
+        const calcBefore = r => {
+          const t = parseFloat(r.amount) || 0
+          if (r.amount_before_vat != null && r.amount_before_vat > 0) return parseFloat(r.amount_before_vat)
+          const rate = r.vat_rate || 18
+          return Math.round(t / (1 + rate / 100) * 100) / 100
+        }
+        const calcVat = r => {
+          const t = parseFloat(r.amount) || 0
+          if (r.vat_amount != null && r.vat_amount > 0) return parseFloat(r.vat_amount)
+          return Math.round((t - calcBefore(r)) * 100) / 100
+        }
+        const sumBefore = receipts.reduce((s, r) => s + calcBefore(r), 0)
+        const sumVat    = receipts.reduce((s, r) => s + calcVat(r), 0)
+        const sumTotal  = receipts.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
         const rows = [
-          ['תאריך', 'ספק', 'קטגוריה', 'AI', 'סכום (₪)'],
-          ...receipts.map(r => [fmtDate(r.receipt_date), r.vendor_name||'', r.category_text||'', r.ai_extracted?'כן':'', parseFloat(r.amount||0)]),
-          ['', '', '', 'סה"כ', totalAmount],
+          ['תאריך', 'ספק', 'קטגוריה', 'לפני מע"מ (₪)', 'מע"מ (₪)', 'סה"כ כולל מע"מ (₪)'],
+          ...receipts.map(r => [
+            fmtDate(r.receipt_date), r.vendor_name||'', r.category_text||'',
+            Math.round(calcBefore(r) * 100) / 100,
+            Math.round(calcVat(r) * 100) / 100,
+            parseFloat(r.amount||0),
+          ]),
+          ['', '', 'סה"כ', Math.round(sumBefore*100)/100, Math.round(sumVat*100)/100, Math.round(sumTotal*100)/100],
         ]
         const { XLSXs, wb } = await buildStyledExcel(rows)
         const buf = XLSXs.write(wb, { bookType:'xlsx', type:'array', cellStyles: true })
@@ -461,6 +488,7 @@ td{padding:10px 12px;color:#334155;}@media print{body{padding:0;}}</style></head
 // ── Main ReceiptsPage ─────────────────────────────────────────────────────────
 export default function ReceiptsPage() {
   const { user } = useAuth()
+  const { settings, displayAmount, toggleVatDisplay } = useSettings()
   const isMobile = useIsMobile()
   const [receipts, setReceipts]         = useState([])
   const [categories, setCategories]     = useState([])
@@ -479,13 +507,16 @@ export default function ReceiptsPage() {
   const [showReview, setShowReview]     = useState(false)
   const [reviewVendor, setReviewVendor] = useState('')
   const [reviewDate, setReviewDate]     = useState('')
-  const [reviewTotal, setReviewTotal]   = useState('')
+  const [reviewTotal, setReviewTotal]   = useState('')        // total WITH vat
+  const [reviewBeforeVat, setReviewBeforeVat] = useState('')  // amount before vat
+  const [reviewVatAmount, setReviewVatAmount] = useState('')  // vat amount
   const [reviewItems, setReviewItems]   = useState([])
   const [reviewCategory, setReviewCategory] = useState('שונות')
   const [reviewImage, setReviewImage]   = useState(null)
   const [approving, setApproving]       = useState(false)
   const [cropSrc, setCropSrc]           = useState(null)
   const [form, setForm]                 = useState({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'' })
+  const vatRate = settings?.vatRate ?? 18
   const [imagePreview, setImagePreview] = useState(null)
 
   const scanInputRef    = useRef(null)
@@ -533,7 +564,11 @@ export default function ReceiptsPage() {
     return matchSearch && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
   }), [receipts, search, filterFrom, filterTo])
 
-  const totalAmount = useMemo(() => filtered.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0), [filtered])
+  // Total respects the with/without-VAT display preference
+  const totalAmount = useMemo(
+    () => filtered.reduce((s, r) => s + displayAmount(parseFloat(r.amount) || 0, r.amount_before_vat), 0),
+    [filtered, displayAmount]
+  )
 
   const formCategories = useMemo(() => {
     const l1 = categories.filter(c => c.level === 1)
@@ -593,7 +628,7 @@ export default function ReceiptsPage() {
         const res = await fetch('/api/scan-receipt', {
           method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-          body: JSON.stringify({ imageBase64: dataUrl.split(',')[1], mimeType }),
+          body: JSON.stringify({ imageBase64: dataUrl.split(',')[1], mimeType, vatRate }),
         }).finally(() => clearTimeout(fetchTimer))
         if (res.ok) { result = await res.json() }
       } catch (aiErr) {
@@ -604,13 +639,20 @@ export default function ReceiptsPage() {
         toast('AI לא זמין — משתמש ב-OCR...', { icon: '🔍', duration: 5000 })
         const { extractReceiptData } = await import('../lib/ocrService')
         const ocrData = await extractReceiptData(dataUrl)
-        result = { vendor_name: ocrData.vendor_name, receipt_date: ocrData.receipt_date, total_amount: parseFloat(ocrData.amount) || 0, items: [] }
+        const t = parseFloat(ocrData.amount) || 0
+        const before = t > 0 ? Math.round(t / (1 + vatRate / 100) * 100) / 100 : 0
+        result = { vendor_name: ocrData.vendor_name, receipt_date: ocrData.receipt_date, total_amount: t, amount_before_vat: before, vat_amount: Math.round((t - before) * 100) / 100, items: [] }
       }
 
       const items = (result.items || []).map((item, idx) => ({ ...item, _id: idx }))
+      const t      = Number(result.total_amount) || 0
+      const before = Number(result.amount_before_vat) || (t > 0 ? Math.round(t / (1 + vatRate / 100) * 100) / 100 : 0)
+      const vat    = Number(result.vat_amount) || Math.round((t - before) * 100) / 100
       setReviewVendor(result.vendor_name || '')
       setReviewDate(result.receipt_date || new Date().toISOString().slice(0, 10))
-      setReviewTotal(String(result.total_amount || ''))
+      setReviewTotal(t ? String(t) : '')
+      setReviewBeforeVat(before ? String(before) : '')
+      setReviewVatAmount(vat ? String(vat) : '')
       setReviewItems(items)
       setReviewCategory(items[0]?.category_l1 || 'שונות')
       setReviewImage(dataUrl)
@@ -644,18 +686,28 @@ export default function ReceiptsPage() {
         } catch {}
       }
 
-      const { error } = await supabase.from('receipts').insert({
+      const totalAmt = parseFloat(reviewTotal) || 0
+      const beforeAmt = parseFloat(reviewBeforeVat) || Math.round(totalAmt / (1 + vatRate / 100) * 100) / 100
+      const vatAmt    = parseFloat(reviewVatAmount) || Math.round((totalAmt - beforeAmt) * 100) / 100
+      const base = {
         user_id: user.id, vendor_name: reviewVendor,
         receipt_date: reviewDate || new Date().toISOString().slice(0, 10),
-        amount: parseFloat(reviewTotal) || 0, currency: 'ILS',
+        amount: totalAmt, currency: 'ILS',
         category_id, category_text: reviewCategory,
         items: reviewItems.length > 0 ? reviewItems : null,
         receipt_image: finalImage || null, ai_extracted: true,
-        ai_summary: { vendor: reviewVendor, total: parseFloat(reviewTotal) || 0, model: 'gemini-2.5-flash' },
-      })
+        ai_summary: { vendor: reviewVendor, total: totalAmt, model: 'gemini-2.5-pro' },
+      }
+      let { error } = await supabase.from('receipts').insert({ ...base, amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate })
+      // Graceful fallback if VAT migration hasn't run yet
+      if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
+        ;({ error } = await supabase.from('receipts').insert(base))
+        if (!error) toast('הקבלה נשמרה ללא פירוט מע"מ — הרץ את ה-migration', { icon: 'ℹ️', duration: 6000 })
+      }
       if (error) throw error
       toast.success('קבלה נשמרה!')
       setShowReview(false); setReviewItems([]); setReviewImage(null)
+      setReviewBeforeVat(''); setReviewVatAmount('')
       loadData()
     } catch (err) {
       toast.error('שגיאה בשמירה: ' + (err?.message || ''))
@@ -665,22 +717,33 @@ export default function ReceiptsPage() {
   // ── Manual CRUD ───────────────────────────────────────────────────────────────
   async function saveReceipt() {
     if (!form.amount || parseFloat(form.amount) <= 0) { toast.error('נא להזין סכום תקין'); return }
+    const totalAmt  = parseFloat(form.amount)
+    const beforeAmt = Math.round(totalAmt / (1 + vatRate / 100) * 100) / 100
+    const vatAmt    = Math.round((totalAmt - beforeAmt) * 100) / 100
     const payload = {
       user_id: user.id, vendor_name: form.vendor_name || null,
       receipt_date: form.receipt_date || new Date().toISOString().slice(0, 10),
-      amount: parseFloat(form.amount), currency: 'ILS',
+      amount: totalAmt, currency: 'ILS',
       category_text: form.category_text || 'שונות', receipt_image: imagePreview || null,
     }
+    const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
+
     if (editId) {
-      const { error } = await supabase.from('receipts').update(payload).eq('id', editId)
+      let { error } = await supabase.from('receipts').update({ ...payload, ...vatCols }).eq('id', editId)
+      if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
+        ;({ error } = await supabase.from('receipts').update(payload).eq('id', editId))
+      }
       if (error) { toast.error('שגיאה בעדכון'); return }
       toast.success('קבלה עודכנה')
-      setReceipts(prev => prev.map(r => r.id === editId ? { ...r, ...payload } : r))
+      setReceipts(prev => prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols } : r))
     } else {
-      const { data: newRec, error } = await supabase.from('receipts').insert(payload).select().single()
-      if (error) { toast.error('שגיאה בשמירה'); return }
+      let resp = await supabase.from('receipts').insert({ ...payload, ...vatCols }).select().single()
+      if (resp.error && /amount_before_vat|vat_amount|vat_rate/.test(resp.error.message || '')) {
+        resp = await supabase.from('receipts').insert(payload).select().single()
+      }
+      if (resp.error) { toast.error('שגיאה בשמירה'); return }
       toast.success('קבלה נשמרה')
-      setReceipts(prev => [newRec, ...prev])
+      setReceipts(prev => [resp.data, ...prev])
     }
     setShowModal(false); setEditId(null); resetForm()
   }
@@ -813,12 +876,21 @@ export default function ReceiptsPage() {
         )}
       </div>
 
-      {/* ── Summary ─────────────────────────────────────────────────────────── */}
+      {/* ── Summary + VAT toggle ────────────────────────────────────────────── */}
       {filtered.length > 0 && (
-        <div style={{ display:'inline-flex', alignItems:'center', gap:'10px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 14px' : '12px 18px', boxShadow:'var(--shadow-card)', alignSelf:'flex-start' }}>
-          <span style={{ fontSize:'12.5px', color:'var(--text-mute)' }}>{filtered.length} קבלות</span>
-          <div style={{ width:1, height:14, background:'var(--border)' }} />
-          <span style={{ fontSize: isMobile ? '16px' : '18px', fontWeight:700, color:'var(--ok)' }}>{fmtILS(totalAmount)}</span>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
+          <div style={{ display:'inline-flex', alignItems:'center', gap:'10px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 14px' : '12px 18px', boxShadow:'var(--shadow-card)' }}>
+            <span style={{ fontSize:'12.5px', color:'var(--text-mute)' }}>{filtered.length} קבלות</span>
+            <div style={{ width:1, height:14, background:'var(--border)' }} />
+            <span style={{ fontSize: isMobile ? '16px' : '18px', fontWeight:700, color:'var(--ok)' }}>{fmtILS(totalAmount)}</span>
+          </div>
+          {/* VAT display toggle */}
+          <button onClick={toggleVatDisplay}
+            style={{ display:'inline-flex', alignItems:'center', gap:'6px', height: isMobile ? 'auto' : 44, padding:'8px 14px', borderRadius:'var(--r-card)', border:`1px solid ${settings.showWithVat ? 'var(--border)' : 'var(--accent)'}`, background: settings.showWithVat ? 'var(--panel)' : 'var(--accent-bg)', color: settings.showWithVat ? 'var(--text-dim)' : 'var(--accent)', fontSize:'12.5px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}
+            title="החלף בין הצגת מחירים כולל / ללא מע&quot;מ">
+            <ReceiptIcon size={14} />
+            {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
+          </button>
         </div>
       )}
 
@@ -858,7 +930,7 @@ export default function ReceiptsPage() {
 
               {/* Amount + actions */}
               <div style={{ display:'flex', alignItems:'center', gap: isMobile ? '4px' : '8px', flexShrink:0 }}>
-                <span style={{ fontSize: isMobile ? '15px' : '16px', fontWeight:700, color:'var(--ok)' }}>{fmtILS(r.amount)}</span>
+                <span style={{ fontSize: isMobile ? '15px' : '16px', fontWeight:700, color:'var(--ok)' }}>{fmtILS(displayAmount(parseFloat(r.amount) || 0, r.amount_before_vat))}</span>
                 {/* Action buttons — slightly larger on mobile for touch */}
                 <button onClick={() => openEdit(r)} style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Pencil size={14} /></button>
                 <button onClick={() => setDeleteId(r.id)} style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='#fef2f2';e.currentTarget.style.color='var(--danger)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><Trash2 size={14} /></button>
@@ -897,14 +969,44 @@ export default function ReceiptsPage() {
             </div>
             <div style={formGrid}>
               <div>
-                <label style={LS}>סכום (₪)</label>
-                <input type="number" value={reviewTotal} onChange={e => setReviewTotal(e.target.value)} style={{ ...FS, fontWeight:700, fontSize:'18px' }} dir="ltr" placeholder="0.00" />
+                <label style={LS}>סכום כולל מע"מ (₪)</label>
+                <input type="number" value={reviewTotal}
+                  onChange={e => {
+                    const v = e.target.value
+                    setReviewTotal(v)
+                    const t = parseFloat(v) || 0
+                    const before = t > 0 ? Math.round(t / (1 + vatRate / 100) * 100) / 100 : 0
+                    setReviewBeforeVat(before ? String(before) : '')
+                    setReviewVatAmount(before ? String(Math.round((t - before) * 100) / 100) : '')
+                  }}
+                  style={{ ...FS, fontWeight:700, fontSize:'18px' }} dir="ltr" placeholder="0.00" />
               </div>
               <div>
                 <label style={LS}>קטגוריה</label>
                 <select value={reviewCategory} onChange={e => setReviewCategory(e.target.value)} style={{ ...FS, paddingRight:'10px' }}>
                   {formCategories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
+              </div>
+            </div>
+
+            {/* VAT breakdown */}
+            <div style={{ display:'flex', gap:'10px', background:'var(--panel-2)', borderRadius:'10px', padding:'12px 14px', border:'1px solid var(--border)' }}>
+              <div style={{ flex:1 }}>
+                <label style={{ ...LS, marginBottom:6 }}>לפני מע"מ (₪)</label>
+                <input type="number" value={reviewBeforeVat}
+                  onChange={e => {
+                    const v = e.target.value
+                    setReviewBeforeVat(v)
+                    const b = parseFloat(v) || 0
+                    const t = parseFloat(reviewTotal) || 0
+                    setReviewVatAmount(t > b ? String(Math.round((t - b) * 100) / 100) : '')
+                  }}
+                  style={{ ...FS, height:'40px', fontSize:'14px' }} dir="ltr" placeholder="0.00" />
+              </div>
+              <div style={{ flex:1 }}>
+                <label style={{ ...LS, marginBottom:6 }}>מע"מ {vatRate}% (₪)</label>
+                <input type="number" value={reviewVatAmount} readOnly
+                  style={{ ...FS, height:'40px', fontSize:'14px', background:'var(--panel)', color:'var(--text-mute)' }} dir="ltr" placeholder="0.00" />
               </div>
             </div>
             {reviewItems.length > 0 && (

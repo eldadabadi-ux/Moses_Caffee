@@ -95,6 +95,9 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     return Response.json({ error: 'Missing required fields: imageBase64, mimeType' }, { status: 400, headers: CORS })
   }
 
+  // VAT rate from client (defaults to current Israeli rate 18%)
+  const vatRate = Number(body?.vatRate) > 0 ? Number(body.vatRate) : 18
+
   // ── Load user categories from DB ───────────────────────────────────────────
   let categoriesTree = DEFAULT_CATEGORIES
   let dbL1Names = null
@@ -178,8 +181,50 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     )
   }
 
+  // ── Normalize VAT breakdown ────────────────────────────────────────────────
+  // The model returns total_amount (with VAT). It MAY also return
+  // amount_before_vat and vat_amount if the receipt showed them explicitly.
+  // We reconcile all three so they are always consistent.
+  result = reconcileVat(result, vatRate)
+
   return Response.json(result, { headers: CORS })
 })
+
+/**
+ * Ensure total_amount, amount_before_vat, and vat_amount are consistent.
+ * Priority:
+ *  1. If the receipt explicitly listed a base ("בסיס חייב") and VAT, trust those.
+ *  2. Otherwise derive base + VAT from the total using the user's vatRate.
+ */
+function reconcileVat(result, vatRate) {
+  const factor = 1 + vatRate / 100
+  let total  = Number(result.total_amount) || 0
+  let before = Number(result.amount_before_vat) || 0
+  let vat    = Number(result.vat_amount) || 0
+
+  // Case A: model gave us an explicit base that's smaller than total → trust it
+  if (before > 0 && before < total) {
+    vat = Math.round((total - before) * 100) / 100
+  }
+  // Case B: only total known → derive base + vat from rate
+  else if (total > 0) {
+    before = Math.round((total / factor) * 100) / 100
+    vat    = Math.round((total - before) * 100) / 100
+  }
+  // Case C: only base known (rare) → derive total
+  else if (before > 0) {
+    total = Math.round(before * factor * 100) / 100
+    vat   = Math.round((total - before) * 100) / 100
+  }
+
+  return {
+    ...result,
+    total_amount:      total,
+    amount_before_vat: before,
+    vat_amount:        vat,
+    vat_rate:          vatRate,
+  }
+}
 
 // ── Main extraction prompt ─────────────────────────────────────────────────────
 function buildPrompt(allowedCategories, categoriesTree) {
@@ -201,12 +246,20 @@ function buildPrompt(allowedCategories, categoriesTree) {
 - אם לא מופיע תאריך ברור — החזר ""
 
 ### סכום סופי (total_amount):
-- זהו **הסכום הגבוה ביותר** בקבלה — הסכום לתשלום לאחר מע"מ
+- זהו **הסכום הגבוה ביותר** בקבלה — הסכום לתשלום **כולל מע"מ**
 - חפש: "סה"כ לתשלום", "סה"כ", "total", "לתשלום", "לחיוב", "סכום כולל מע"מ"
 - **אם יש כמה סכומים** — קח תמיד את **הגדול ביותר** (זה הסופי עם מע"מ)
 - אם מופיע "₪" או "ש"ח" ליד מספר — זה כנראה הסכום
 - **לעולם אל תחזיר 0** אם יש מספר כלשהו בקבלה
-- אם יש מע"מ (17%) — הסכום הסופי כולל אותו
+
+### פירוט מע"מ (amount_before_vat + vat_amount):
+חשוב מאוד — קבלות עסקיות בישראל בדרך כלל מציגות בנפרד:
+- **סכום לפני מע"מ** — חפש: "סכום לפני מע"מ", "בסיס חייב", "מחיר ללא מע"מ", "סה"כ לפני מע"מ", "subtotal", "before VAT"
+- **סכום המע"מ** — חפש: "מע"מ", "מע״מ 18%", "VAT", "מס ערך מוסף"
+- **amount_before_vat** = הסכום לפני המע"מ (אם מופיע במפורש בקבלה)
+- **vat_amount** = סכום המע"מ עצמו (אם מופיע במפורש בקבלה)
+- אם הקבלה **לא** מציגה פירוט מע"מ — החזר 0 בשני השדות (המערכת תחשב לבד)
+- ודא ש: amount_before_vat + vat_amount = total_amount
 
 ### פריטים (items):
 - רשום כל שורת מוצר בנפרד
@@ -237,9 +290,11 @@ ${allowedCategories.join(' | ')}
 {
   "vendor_name": "שם הספק",
   "receipt_date": "YYYY-MM-DD או ריק",
-  "total_amount": מספר (לא 0 אם יש מספרים בקבלה),
+  "total_amount": מספר כולל מע"מ (לא 0 אם יש מספרים בקבלה),
+  "amount_before_vat": מספר לפני מע"מ (0 אם לא מופיע בקבלה),
+  "vat_amount": סכום המע"מ (0 אם לא מופיע בקבלה),
   "currency": "ILS",
-  "original_amount": אותו מספר,
+  "original_amount": total_amount,
   "items": [
     {
       "item_name": "שם הפריט בעברית",
@@ -281,11 +336,13 @@ async function callGemini(apiKey, model, imageBase64, mimeType, prompt) {
       responseSchema: {
         type: 'OBJECT',
         properties: {
-          vendor_name:     { type: 'STRING' },
-          receipt_date:    { type: 'STRING' },
-          total_amount:    { type: 'NUMBER' },
-          currency:        { type: 'STRING' },
-          original_amount: { type: 'NUMBER' },
+          vendor_name:       { type: 'STRING' },
+          receipt_date:      { type: 'STRING' },
+          total_amount:      { type: 'NUMBER' },
+          amount_before_vat: { type: 'NUMBER' },
+          vat_amount:        { type: 'NUMBER' },
+          currency:          { type: 'STRING' },
+          original_amount:   { type: 'NUMBER' },
           items: {
             type: 'ARRAY',
             items: {

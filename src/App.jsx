@@ -2,14 +2,16 @@ import { Suspense, lazy, useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
+import { SettingsProvider } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
-import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2 } from 'lucide-react'
+import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings } from 'lucide-react'
 
 const LoginPage       = lazy(() => import('./pages/LoginPage'))
 const ReceiptsPage    = lazy(() => import('./pages/ReceiptsPage'))
 const CategoriesPage  = lazy(() => import('./pages/CategoriesPage'))
 const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
+const SettingsPage    = lazy(() => import('./pages/SettingsPage'))
 
 // Reactive mobile detection
 function useIsMobile() {
@@ -86,6 +88,9 @@ function TopNav({ onSignOut }) {
         <Link to="/categories" style={navBtn(isCategories)}>
           <Tag size={16} /> קטגוריות
         </Link>
+        <Link to="/settings" style={navBtn(location.pathname === '/settings')}>
+          <Settings size={16} /> הגדרות
+        </Link>
       </div>
       {/* Sign out */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -139,8 +144,14 @@ function BottomNav({ onSignOut }) {
     }} dir="rtl">
       {/* Receipts */}
       <Link to="/" style={tabStyle(isReceipts)}>
-        <Receipt size={22} />
+        <Receipt size={21} />
         <span>קבלות</span>
+      </Link>
+
+      {/* Dashboard */}
+      <Link to="/dashboard" style={tabStyle(location.pathname === '/dashboard')}>
+        <BarChart2 size={21} />
+        <span>דשבורד</span>
       </Link>
 
       {/* Scan FAB — elevated center button */}
@@ -166,16 +177,16 @@ function BottomNav({ onSignOut }) {
         </button>
       </div>
 
-      {/* Dashboard */}
-      <Link to="/dashboard" style={tabStyle(location.pathname === '/dashboard')}>
-        <BarChart2 size={22} />
-        <span>דשבורד</span>
-      </Link>
-
       {/* Categories */}
       <Link to="/categories" style={tabStyle(isCategories)}>
-        <Tag size={22} />
+        <Tag size={21} />
         <span>קטגוריות</span>
+      </Link>
+
+      {/* Settings */}
+      <Link to="/settings" style={tabStyle(location.pathname === '/settings')}>
+        <Settings size={21} />
+        <span>הגדרות</span>
       </Link>
     </nav>
   )
@@ -210,6 +221,7 @@ function AppShell() {
             <Route path="/"           element={<ReceiptsPage />} />
             <Route path="/dashboard"  element={<DashboardPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
+            <Route path="/settings"   element={<SettingsPage />} />
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
@@ -227,21 +239,23 @@ function AppShell() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Toaster
-          position="top-center"
-          toastOptions={{
-            style: { fontFamily: 'var(--font-main)', fontSize: '13.5px', direction: 'rtl', borderRadius: '10px', boxShadow: 'var(--shadow-modal)' },
-            duration: 4000,
-          }}
-        />
-        <Suspense fallback={<LoadingSpinner />}>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/*"     element={<AppShell />} />
-          </Routes>
-        </Suspense>
-      </BrowserRouter>
+      <SettingsProvider>
+        <BrowserRouter>
+          <Toaster
+            position="top-center"
+            toastOptions={{
+              style: { fontFamily: 'var(--font-main)', fontSize: '13.5px', direction: 'rtl', borderRadius: '10px', boxShadow: 'var(--shadow-modal)' },
+              duration: 4000,
+            }}
+          />
+          <Suspense fallback={<LoadingSpinner />}>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/*"     element={<AppShell />} />
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
+      </SettingsProvider>
     </AuthProvider>
   )
 }

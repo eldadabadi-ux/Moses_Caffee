@@ -4,8 +4,11 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 const COLORS = ['#2563eb','#7c3aed','#16a34a','#d97706','#dc2626','#0891b2','#c2410c','#0d9488','#be185d','#6366f1']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 
-export default function CategoryTree({ l1Data, categories, receipts, total }) {
+export default function CategoryTree({ l1Data, categories, receipts, total, amountOf }) {
   const [expanded, setExpanded] = useState({})
+
+  // Amount accessor — respects VAT display mode if provided
+  const amt = amountOf || (r => parseFloat(r.amount || 0))
 
   function toggle(id) { setExpanded(p => ({ ...p, [id]: !p[id] })) }
 
@@ -13,17 +16,17 @@ export default function CategoryTree({ l1Data, categories, receipts, total }) {
   function getL2(l1Cat) {
     const l2cats = categories.filter(c => c.level === 2 && c.parent_id === l1Cat.id)
     return l2cats.map(c => {
-      const amt = receipts
+      const sum = receipts
         .filter(r => r.category_id === c.id)
-        .reduce((s, r) => s + parseFloat(r.amount || 0), 0)
+        .reduce((s, r) => s + amt(r), 0)
       const cnt = receipts.filter(r => r.category_id === c.id).length
       // L3
       const l3cats = categories.filter(x => x.level === 3 && x.parent_id === c.id)
       const l3 = l3cats.map(x => {
-        const a = receipts.filter(r => r.category_id === x.id).reduce((s, r) => s + parseFloat(r.amount || 0), 0)
+        const a = receipts.filter(r => r.category_id === x.id).reduce((s, r) => s + amt(r), 0)
         return { ...x, total: a, count: receipts.filter(r => r.category_id === x.id).length }
       }).filter(x => x.total > 0)
-      return { ...c, total: amt, count: cnt, l3 }
+      return { ...c, total: sum, count: cnt, l3 }
     }).filter(c => c.total > 0).sort((a, b) => b.total - a.total)
   }
 

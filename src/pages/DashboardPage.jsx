@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useSettings } from '../hooks/useSettings'
 import { BarChart2, TrendingUp, TrendingDown, Receipt, Calendar, Tag, X, ChevronDown } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
@@ -59,8 +60,11 @@ function Section({ title, sub, children, action }) {
 // ── Main Dashboard ─────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user } = useAuth()
+  const { settings, displayAmount, toggleVatDisplay } = useSettings()
   const isMobile = window.innerWidth < 768
   const thisYear = new Date().getFullYear()
+  // Amount of a receipt respecting the with/without-VAT display preference
+  const amt = (r) => displayAmount(parseFloat(r.amount) || 0, r.amount_before_vat)
 
   const [receipts,    setReceipts]    = useState([])
   const [prevReceipts,setPrevReceipts]= useState([])
@@ -81,7 +85,7 @@ export default function DashboardPage() {
         // Current year
         const { data: recs } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name')
+          .select('id, amount, amount_before_vat, vat_amount, vat_rate, receipt_date, category_id, category_text, vendor_name')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year}-01-01`)
           .lte('receipt_date', `${year}-12-31`)
@@ -90,7 +94,7 @@ export default function DashboardPage() {
         // Previous year (for YoY)
         const { data: prevRecs } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name')
+          .select('id, amount, amount_before_vat, vat_amount, vat_rate, receipt_date, category_id, category_text, vendor_name')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year - 1}-01-01`)
           .lte('receipt_date', `${year - 1}-12-31`)
@@ -128,8 +132,8 @@ export default function DashboardPage() {
     return true
   }), [receipts, filterCat, filterVendor])
 
-  const total     = useMemo(() => active.reduce((s, r) => s + parseFloat(r.amount || 0), 0), [active])
-  const totalPrev = useMemo(() => prevReceipts.reduce((s, r) => s + parseFloat(r.amount || 0), 0), [prevReceipts])
+  const total     = useMemo(() => active.reduce((s, r) => s + amt(r), 0), [active, settings.showWithVat])
+  const totalPrev = useMemo(() => prevReceipts.reduce((s, r) => s + amt(r), 0), [prevReceipts, settings.showWithVat])
   const yoy       = totalPrev > 0 ? ((total - totalPrev) / totalPrev) * 100 : null
 
   const avgMonthly = useMemo(() => {
@@ -144,11 +148,11 @@ export default function DashboardPage() {
       if (!r.receipt_date) return
       const m = parseInt(r.receipt_date.slice(5, 7))
       if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
-      map[m].total += parseFloat(r.amount || 0)
+      map[m].total += amt(r)
       map[m].count += 1
     })
     return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
-  }, [active])
+  }, [active, settings.showWithVat])
 
   const prevMonthlyData = useMemo(() => {
     if (!compareYear) return null
@@ -158,11 +162,11 @@ export default function DashboardPage() {
       if (!r.receipt_date) return
       const m = parseInt(r.receipt_date.slice(5, 7))
       if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
-      map[m].total += parseFloat(r.amount || 0)
+      map[m].total += amt(r)
       map[m].count += 1
     })
     return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
-  }, [compareYear, prevReceipts, year])
+  }, [compareYear, prevReceipts, year, settings.showWithVat])
 
   // ── Category aggregation (L1 only for donut) ─────────────────────────────────
   const l1Cats = useMemo(() => categories.filter(c => c.level === 1), [categories])
@@ -188,7 +192,7 @@ export default function DashboardPage() {
         }
       }
       if (!map[catName]) map[catName] = { name: catName, total: 0, count: 0 }
-      map[catName].total += parseFloat(r.amount || 0)
+      map[catName].total += amt(r)
       map[catName].count += 1
     })
     // Also add categories from DB that have no match in receipts
@@ -198,7 +202,7 @@ export default function DashboardPage() {
       const cat = l1Cats.find(c => c.name === d.name)
       return { ...d, id: cat?.id }
     })
-  }, [active, categories, l1Cats])
+  }, [active, categories, l1Cats, settings.showWithVat])
 
   // ── Vendor aggregation ────────────────────────────────────────────────────────
   const vendorData = useMemo(() => {
@@ -206,11 +210,11 @@ export default function DashboardPage() {
     active.forEach(r => {
       const name = (r.vendor_name || '').trim() || 'לא ידוע'
       if (!map[name]) map[name] = { name, total: 0, count: 0 }
-      map[name].total += parseFloat(r.amount || 0)
+      map[name].total += amt(r)
       map[name].count += 1
     })
     return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 10)
-  }, [active])
+  }, [active, settings.showWithVat])
 
   // ── Best month ────────────────────────────────────────────────────────────────
   const bestMonth = useMemo(() => {
@@ -234,10 +238,16 @@ export default function DashboardPage() {
               דשבורד
             </h1>
             <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: 'var(--text-mute)' }}>
-              {active.length} קבלות · {fmtILSFull(total)}
+              {active.length} קבלות · {fmtILSFull(total)} · {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* VAT display toggle */}
+            <button onClick={toggleVatDisplay}
+              style={{ height: 36, padding: '0 12px', borderRadius: 8, border: `1px solid ${settings.showWithVat ? 'var(--border)' : 'var(--accent)'}`, background: settings.showWithVat ? 'var(--panel)' : 'var(--accent-bg)', color: settings.showWithVat ? 'var(--text-dim)' : 'var(--accent)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}
+              title='החלף בין כולל / ללא מע"מ'>
+              <Receipt size={13} /> {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
+            </button>
             {/* Year picker */}
             <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
               <Calendar size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
@@ -382,7 +392,7 @@ export default function DashboardPage() {
         {/* ── Category tree ─────────────────────────────────────────────────────── */}
         {l1Data.some(c => c.id) && (
           <Section title="פירוט מלא לפי קטגוריות" sub="L1 → L2 → L3 — לחץ להרחבה">
-            <CategoryTree l1Data={l1Data.filter(c => c.id)} categories={categories} receipts={active} total={total} />
+            <CategoryTree l1Data={l1Data.filter(c => c.id)} categories={categories} receipts={active} total={total} amountOf={amt} />
           </Section>
         )}
 
