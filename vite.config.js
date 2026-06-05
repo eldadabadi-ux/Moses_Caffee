@@ -50,7 +50,7 @@ export default defineConfig({
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
   },
   server: {
-    port: 3457,
+    port: process.env.PORT ? parseInt(process.env.PORT) : 3457,
     host: true,
   },
 })

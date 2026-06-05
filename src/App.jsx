@@ -4,11 +4,12 @@ import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
-import { Receipt, Tag, Camera, RefreshCw, LogOut } from 'lucide-react'
+import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2 } from 'lucide-react'
 
-const LoginPage      = lazy(() => import('./pages/LoginPage'))
-const ReceiptsPage   = lazy(() => import('./pages/ReceiptsPage'))
-const CategoriesPage = lazy(() => import('./pages/CategoriesPage'))
+const LoginPage       = lazy(() => import('./pages/LoginPage'))
+const ReceiptsPage    = lazy(() => import('./pages/ReceiptsPage'))
+const CategoriesPage  = lazy(() => import('./pages/CategoriesPage'))
+const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
 
 // Reactive mobile detection
 function useIsMobile() {
@@ -78,6 +79,9 @@ function TopNav({ onSignOut }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
         <Link to="/" style={navBtn(isReceipts)}>
           <Receipt size={16} /> קבלות
+        </Link>
+        <Link to="/dashboard" style={navBtn(location.pathname === '/dashboard')}>
+          <BarChart2 size={16} /> דשבורד
         </Link>
         <Link to="/categories" style={navBtn(isCategories)}>
           <Tag size={16} /> קטגוריות
@@ -162,6 +166,12 @@ function BottomNav({ onSignOut }) {
         </button>
       </div>
 
+      {/* Dashboard */}
+      <Link to="/dashboard" style={tabStyle(location.pathname === '/dashboard')}>
+        <BarChart2 size={22} />
+        <span>דשבורד</span>
+      </Link>
+
       {/* Categories */}
       <Link to="/categories" style={tabStyle(isCategories)}>
         <Tag size={22} />
@@ -174,7 +184,8 @@ function BottomNav({ onSignOut }) {
 // ── App shell ─────────────────────────────────────────────────────────────────
 function AppShell() {
   const { user, signOut, loading } = useAuth()
-  const isMobile = useIsMobile()
+  const isMobile  = useIsMobile()
+  const location  = useLocation()
 
   if (loading) return <LoadingSpinner />
   if (!user)   return <Navigate to="/login" replace />
@@ -190,13 +201,14 @@ function AppShell() {
       {/* Page content */}
       <main style={{
         padding: isMobile ? '16px 14px' : '24px 20px',
-        maxWidth: '900px',
+        maxWidth: location.pathname === '/dashboard' ? '1100px' : '900px',
         margin: '0 auto',
         paddingBottom: isMobile ? bottomPad : '32px',
       }}>
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
             <Route path="/"           element={<ReceiptsPage />} />
+            <Route path="/dashboard"  element={<DashboardPage />} />
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Routes>
