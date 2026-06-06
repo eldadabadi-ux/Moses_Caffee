@@ -409,16 +409,18 @@ export default function DashboardPage() {
                     onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--panel)' }}
                     onMouseLeave={e => e.currentTarget.style.background = isSel ? 'var(--accent-bg)' : 'var(--panel-2)'}
                   >
-                    <div style={{ width: 9, height: 9, borderRadius: '50%', background: clr, flexShrink: 0 }} />
-                    <span style={{ flex: 1, fontSize: '13px', fontWeight: isSel ? 600 : 400, color: isSel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-mute)', whiteSpace: 'nowrap' }}>{cat.count} קבלות</span>
-                    <div style={{ width: 60, flexShrink: 0 }}>
-                      <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${pct}%`, background: clr, borderRadius: 3, transition: 'width 500ms ease' }} />
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: clr, flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: isSel ? 700 : 500, color: isSel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
+                    <span style={{ fontSize: '12.5px', color: 'var(--text-mute)', whiteSpace: 'nowrap', flexShrink: 0 }}>{cat.count}</span>
+                    {!isMobile && (
+                      <div style={{ width: 60, flexShrink: 0 }}>
+                        <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${pct}%`, background: clr, borderRadius: 3, transition: 'width 500ms ease' }} />
+                        </div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-mute)', textAlign: 'left', marginTop: 1 }}>{Math.round(pct)}%</div>
                       </div>
-                      <div style={{ fontSize: '10px', color: 'var(--text-mute)', textAlign: 'left', marginTop: 1 }}>{Math.round(pct)}%</div>
-                    </div>
-                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ok)', minWidth: 70, textAlign: 'left' }}>{fmtILS(cat.total)}</span>
+                    )}
+                    <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ok)', minWidth: 72, textAlign: 'left', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtILS(cat.total)}</span>
                   </div>
                 )
               })}
