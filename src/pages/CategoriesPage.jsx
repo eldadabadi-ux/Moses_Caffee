@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { recategorizeAll } from '../lib/recategorize'
 import toast from 'react-hot-toast'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Tag, X, Check } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Tag, X, Check, RefreshCw } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 
@@ -17,8 +18,36 @@ export default function CategoriesPage() {
   const [addingTo, setAddingTo]     = useState(null)
   const [newName, setNewName]       = useState('')
   const [saving, setSaving]         = useState(false)
+  const [recatBusy, setRecatBusy]   = useState(false)
+  const recatTimer = useRef(null)
 
   useEffect(() => { if (user) load() }, [user])  // eslint-disable-line
+  useEffect(() => () => clearTimeout(recatTimer.current), [])
+
+  // Run the AI re-classification of existing receipts against the updated tree.
+  async function runRecategorize(silent = false) {
+    if (recatBusy) return
+    setRecatBusy(true)
+    const tid = toast.loading('מסווג מחדש את הקבלות לפי הקטגוריות…')
+    try {
+      const { changed, total } = await recategorizeAll()
+      toast.dismiss(tid)
+      if (total === 0) { if (!silent) toast('אין קבלות לסיווג', { icon: 'ℹ️' }) }
+      else toast.success(`עודכנו ${changed} מתוך ${total} קבלות`)
+    } catch (err) {
+      toast.dismiss(tid)
+      toast.error('שגיאה בסיווג מחדש: ' + (err?.message || ''))
+    } finally {
+      setRecatBusy(false)
+    }
+  }
+
+  // Debounced trigger — after the user adds/edits categories, wait for them to
+  // finish, then re-classify existing receipts automatically.
+  function scheduleRecategorize() {
+    clearTimeout(recatTimer.current)
+    recatTimer.current = setTimeout(() => runRecategorize(true), 4000)
+  }
 
   async function load() {
     setLoading(true)
@@ -56,6 +85,7 @@ export default function CategoriesPage() {
       toast.success('קטגוריה נוספה')
       setNewName(''); setAddingTo(null)
       load()
+      scheduleRecategorize()   // re-sort existing receipts into the new category
     } catch (err) {
       toast.error('שגיאה: ' + err.message)
     } finally {
@@ -70,6 +100,7 @@ export default function CategoriesPage() {
       const { error } = await supabase.from('categories').update({ name: editName.trim() }).eq('id', id)
       if (error) throw error
       toast.success('קטגוריה עודכנה'); setEditId(null); setEditName(''); load()
+      scheduleRecategorize()
     } catch (err) { toast.error('שגיאה: ' + err.message) } finally { setSaving(false) }
   }
 
@@ -182,10 +213,16 @@ export default function CategoriesPage() {
           <h1 style={{ fontSize:'26px', fontWeight:700, color:'var(--text)', margin:0 }}>קטגוריות הוצאות</h1>
           <p style={{ fontSize:'15px', color:'var(--text-mute)', marginTop:'4px' }}>ניהול עץ הקטגוריות ההיררכי — עד 3 רמות</p>
         </div>
-        <button onClick={() => { setAddingTo({ parentId: null, level: 1 }); setNewName('') }}
-          style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--r-btn)', fontSize:'13.5px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}>
-          <Plus size={15} /> קטגוריה ראשית
-        </button>
+        <div style={{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
+          <button onClick={() => runRecategorize(false)} disabled={recatBusy} title="סווג מחדש את כל הקבלות לפי עץ הקטגוריות הנוכחי"
+            style={{ display:'flex', alignItems:'center', gap:'7px', padding:'9px 16px', background:'var(--panel)', color:'var(--text-dim)', border:'1px solid var(--border)', borderRadius:'var(--r-btn)', fontSize:'14px', fontWeight:600, cursor: recatBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)', opacity: recatBusy ? 0.6 : 1 }}>
+            <RefreshCw size={15} className={recatBusy ? 'animate-spin' : ''} /> {recatBusy ? 'מסווג…' : 'סווג קבלות מחדש'}
+          </button>
+          <button onClick={() => { setAddingTo({ parentId: null, level: 1 }); setNewName('') }}
+            style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--r-btn)', fontSize:'15px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}>
+            <Plus size={16} /> קטגוריה ראשית
+          </button>
+        </div>
       </div>
 
       <div style={{ display:'flex', gap:'16px', flexWrap:'wrap' }}>
