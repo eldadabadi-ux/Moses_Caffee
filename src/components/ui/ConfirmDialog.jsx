@@ -15,7 +15,7 @@ export default function ConfirmDialog({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm">
       <div style={{ paddingTop: '4px', paddingBottom: '4px' }}>
-        <p style={{ fontSize: '13.5px', color: 'var(--text-dim)', lineHeight: 1.6 }}>{message}</p>
+        <p style={{ fontSize: '16px', color: 'var(--text-dim)', lineHeight: 1.6 }}>{message}</p>
       </div>
       <div style={{
         display: 'flex', gap: '8px', justifyContent: 'flex-end',

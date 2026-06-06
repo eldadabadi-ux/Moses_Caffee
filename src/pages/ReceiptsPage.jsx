@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { downloadFile } from '../lib/downloadFile'
+import { compressImage, downscaleForUpload } from '../lib/imageUtils'
 import toast from 'react-hot-toast'
 import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
@@ -38,76 +39,6 @@ function useIsMobile() {
     return () => window.removeEventListener('resize', h)
   }, [])
   return v
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload  = () => resolve(reader.result)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-// Downscale a dataURL before uploading to the scan API.
-// Real phone photos are 3-4000px → multi-MB base64 → slow upload → timeouts.
-// 2000px at q0.9 keeps receipt text sharp while being fast to upload.
-async function downscaleForUpload(dataUrl, maxDim = 2000, quality = 0.9) {
-  return new Promise((resolve) => {
-    try {
-      const img = new window.Image()
-      img.onload = () => {
-        let { width, height } = img
-        if (width <= maxDim && height <= maxDim) { resolve(dataUrl); return }
-        const r = Math.min(maxDim / width, maxDim / height)
-        width = Math.round(width * r); height = Math.round(height * r)
-        const c = document.createElement('canvas')
-        c.width = width; c.height = height
-        c.getContext('2d').drawImage(img, 0, 0, width, height)
-        resolve(c.toDataURL('image/jpeg', quality))
-      }
-      img.onerror = () => resolve(dataUrl)
-      img.src = dataUrl
-    } catch { resolve(dataUrl) }
-  })
-}
-
-// Higher quality for AI scanning (2400px / 95% — keeps Hebrew text sharp)
-async function compressImage(file, maxDim = 2400, quality = 0.95) {
-  const fallback = () => fileToBase64(file).then(dataUrl => ({ dataUrl, mimeType: file.type || 'image/jpeg' }))
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      fileToBase64(file).then(dataUrl => resolve({ dataUrl, mimeType: file.type || 'image/jpeg' })).catch(reject)
-    }, 12000)
-    const done = r => { clearTimeout(timer); resolve(r) }
-    const fail = () => { clearTimeout(timer); fallback().then(resolve).catch(reject) }
-    try {
-      const url = URL.createObjectURL(file)
-      const img = new window.Image()
-      img.onload = () => {
-        URL.revokeObjectURL(url)
-        try {
-          let { width, height } = img
-          if (width > maxDim || height > maxDim) {
-            const r = Math.min(maxDim / width, maxDim / height)
-            width = Math.round(width * r); height = Math.round(height * r)
-          }
-          const canvas = document.createElement('canvas')
-          canvas.width = width; canvas.height = height
-          canvas.getContext('2d').drawImage(img, 0, 0, width, height)
-          canvas.toBlob(blob => {
-            if (!blob) { fail(); return }
-            const reader = new FileReader()
-            reader.onload  = () => done({ dataUrl: reader.result, mimeType: 'image/jpeg' })
-            reader.onerror = fail
-            reader.readAsDataURL(blob)
-          }, 'image/jpeg', quality)
-        } catch { fail() }
-      }
-      img.onerror = () => { URL.revokeObjectURL(url); fail() }
-      img.src = url
-    } catch { fail() }
-  })
 }
 
 async function buildStyledExcel(rows) {
@@ -841,8 +772,8 @@ export default function ReceiptsPage() {
   }
 
   // ── Styles ──────────────────────────────────────────────────────────────────
-  const FS = { display:'block', width:'100%', boxSizing:'border-box', borderRadius:'var(--r-btn)', border:'1px solid var(--border)', background:'var(--panel)', padding:'0 14px', height:'44px', fontSize:'15px', color:'var(--text)', outline:'none', fontFamily:'var(--font-main)' }
-  const LS = { display:'block', fontSize:'13px', fontWeight:600, color:'var(--text-dim)', marginBottom:'8px' }
+  const FS = { display:'block', width:'100%', boxSizing:'border-box', borderRadius:'var(--r-btn)', border:'1px solid var(--border)', background:'var(--panel)', padding:'0 14px', height:'48px', fontSize:'17px', color:'var(--text)', outline:'none', fontFamily:'var(--font-main)' }
+  const LS = { display:'block', fontSize:'16px', fontWeight:600, color:'var(--text-dim)', marginBottom:'8px' }
   const formGrid = { display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap:'14px' }
 
   if (loading) return <LoadingSpinner />
@@ -855,8 +786,8 @@ export default function ReceiptsPage() {
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
         <div>
-          <h1 style={{ fontSize: isMobile ? '18px' : '20px', fontWeight:700, color:'var(--text)', margin:0 }}>קבלות</h1>
-          <p style={{ fontSize:'12.5px', color:'var(--text-mute)', marginTop:'2px' }}>{receipts.length} קבלות</p>
+          <h1 style={{ fontSize: isMobile ? '23px' : '26px', fontWeight:700, color:'var(--text)', margin:0 }}>קבלות</h1>
+          <p style={{ fontSize:'15px', color:'var(--text-mute)', marginTop:'2px' }}>{receipts.length} קבלות</p>
         </div>
         {/* Desktop / tablet actions */}
         {!isMobile && (
@@ -983,20 +914,20 @@ export default function ReceiptsPage() {
               {/* Details */}
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ display:'flex', alignItems:'baseline', gap:'6px', flexWrap:'wrap' }}>
-                  <span style={{ fontWeight:600, fontSize: isMobile ? '13.5px' : '14px', color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth: isMobile ? '140px' : 'none' }}>{r.vendor_name || '—'}</span>
-                  {r.ai_extracted && <Badge variant="info" showDot={false} style={{ fontSize:'10px' }}>AI</Badge>}
+                  <span style={{ fontWeight:600, fontSize: isMobile ? '16px' : '17px', color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth: isMobile ? '150px' : 'none' }}>{r.vendor_name || '—'}</span>
+                  {r.ai_extracted && <Badge variant="info" showDot={false} style={{ fontSize:'12px' }}>AI</Badge>}
                 </div>
                 <div style={{ display:'flex', gap:'8px', marginTop:'3px', flexWrap:'wrap' }}>
-                  {r.receipt_date && <span style={{ fontSize:'11.5px', color:'var(--text-mute)', display:'flex', alignItems:'center', gap:'3px' }}><CalendarDays size={10} />{fmtDate(r.receipt_date)}</span>}
-                  {r.category_text && <span style={{ fontSize:'11.5px', color:'var(--text-mute)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth: isMobile ? '100px' : 'none' }}>{r.category_text}</span>}
+                  {r.receipt_date && <span style={{ fontSize:'14px', color:'var(--text-mute)', display:'flex', alignItems:'center', gap:'3px' }}><CalendarDays size={12} />{fmtDate(r.receipt_date)}</span>}
+                  {r.category_text && <span style={{ fontSize:'14px', color:'var(--text-mute)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth: isMobile ? '110px' : 'none' }}>{r.category_text}</span>}
                 </div>
               </div>
 
               {/* Amount (paid, with VAT) + breakdown + actions */}
               <div style={{ display:'flex', alignItems:'center', gap: isMobile ? '4px' : '8px', flexShrink:0 }}>
                 <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'1px' }}>
-                  <span style={{ fontSize: isMobile ? '15px' : '16px', fontWeight:700, color:'var(--ok)', whiteSpace:'nowrap' }}>{fmtILS(parseFloat(r.amount) || 0)}</span>
-                  <span style={{ fontSize:'10px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
+                  <span style={{ fontSize: isMobile ? '18px' : '19px', fontWeight:700, color:'var(--ok)', whiteSpace:'nowrap' }}>{fmtILS(parseFloat(r.amount) || 0)}</span>
+                  <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
                     לפני מע"מ {fmtILS(amtBefore(r))}
                   </span>
                 </div>

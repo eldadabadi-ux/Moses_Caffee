@@ -6,8 +6,8 @@ export default function Select({
 }) {
   const [focused, setFocused] = React.useState(false);
 
-  const height   = size === 'sm' ? '36px' : '40px';
-  const fontSize = size === 'sm' ? '12.5px' : '13px';
+  const height   = size === 'sm' ? '40px' : '46px';
+  const fontSize = size === 'sm' ? '16px' : '17px';
 
   const borderColor = error
     ? 'var(--danger)'
@@ -24,10 +24,10 @@ export default function Select({
       {label && (
         <label style={{
           display: 'block',
-          fontSize: '12.5px',
+          fontSize: '15px',
           fontWeight: 500,
           color: 'var(--text-dim)',
-          marginBottom: '6px',
+          marginBottom: '7px',
         }}>
           {label}
           {required && <span style={{ color: 'var(--danger)', marginRight: '3px' }}>*</span>}

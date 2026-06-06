@@ -24,15 +24,15 @@ function KpiCard({ label, value, sub, icon: Icon, color, trend }) {
       flex: '1 1 140px', minWidth: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-mute)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
-        {Icon && <div style={{ width: 30, height: 30, borderRadius: '8px', background: color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon size={15} color={color} />
+        <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-mute)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
+        {Icon && <div style={{ width: 34, height: 34, borderRadius: '8px', background: color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon size={17} color={color} />
         </div>}
       </div>
-      <div style={{ fontSize: isMobile ? '20px' : '24px', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.02em', lineHeight: 1 }}>{value}</div>
-      {sub && <div style={{ fontSize: '11.5px', color: 'var(--text-mute)' }}>{sub}</div>}
+      <div style={{ fontSize: isMobile ? '26px' : '30px', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.02em', lineHeight: 1 }}>{value}</div>
+      {sub && <div style={{ fontSize: '14px', color: 'var(--text-mute)' }}>{sub}</div>}
       {trend != null && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', fontWeight: 600, color: trend >= 0 ? 'var(--ok)' : 'var(--danger)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '15px', fontWeight: 600, color: trend >= 0 ? 'var(--ok)' : 'var(--danger)' }}>
           {trend >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
           {trend >= 0 ? '+' : ''}{Math.round(trend)}% מהשנה הקודמת
         </div>
@@ -47,8 +47,8 @@ function Section({ title, sub, children, action }) {
     <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: '14.5px', fontWeight: 700, color: 'var(--text)' }}>{title}</h3>
-          {sub && <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-mute)' }}>{sub}</p>}
+          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text)' }}>{title}</h3>
+          {sub && <p style={{ margin: '2px 0 0', fontSize: '14px', color: 'var(--text-mute)' }}>{sub}</p>}
         </div>
         {action}
       </div>
@@ -233,11 +233,11 @@ export default function DashboardPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
           <div>
-            <h1 style={{ margin: 0, fontSize: isMobile ? '18px' : '20px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <BarChart2 size={20} color="var(--accent)" />
+            <h1 style={{ margin: 0, fontSize: isMobile ? '23px' : '26px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <BarChart2 size={24} color="var(--accent)" />
               דשבורד
             </h1>
-            <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: 'var(--text-mute)' }}>
+            <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>
               {active.length} קבלות · {fmtILSFull(total)} · {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
             </p>
           </div>

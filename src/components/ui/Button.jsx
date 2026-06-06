@@ -38,9 +38,9 @@ const hoverVariants = {
 };
 
 const sizes = {
-  sm: { padding: '6px 10px',  fontSize: '12.5px', gap: '5px' },
-  md: { padding: '8px 14px',  fontSize: '13px',   gap: '6px' },
-  lg: { padding: '10px 18px', fontSize: '14px',   gap: '6px' },
+  sm: { padding: '7px 12px',  fontSize: '16px', gap: '5px' },
+  md: { padding: '10px 16px', fontSize: '17px', gap: '6px' },
+  lg: { padding: '12px 20px', fontSize: '18px', gap: '6px' },
 };
 
 export default function Button({

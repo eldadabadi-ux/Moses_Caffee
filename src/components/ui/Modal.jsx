@@ -64,7 +64,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
             padding: isMobile ? '12px 20px 14px' : '18px 24px',
             borderBottom: '1px solid var(--border)', flexShrink: 0,
           }}>
-            <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.015em', margin: 0 }}>
+            <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--text)', letterSpacing: '-0.015em', margin: 0 }}>
               {title}
             </h2>
             <button

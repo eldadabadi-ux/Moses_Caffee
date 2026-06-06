@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
-import { Settings, Save, Info, Percent } from 'lucide-react'
+import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2 } from 'lucide-react'
+import { fileToSquareLogo } from '../lib/imageUtils'
 import toast from 'react-hot-toast'
 
 export default function SettingsPage() {
@@ -9,6 +10,28 @@ export default function SettingsPage() {
   const { user } = useAuth()
   const [vatInput, setVatInput] = useState(String(settings.vatRate))
   const [changed, setChanged] = useState(false)
+  const [nameInput, setNameInput] = useState(settings.businessName || '')
+  const [nameChanged, setNameChanged] = useState(false)
+  const logoInputRef = useRef(null)
+
+  async function handleLogoFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      const dataUrl = await fileToSquareLogo(file, 400, 0.92)
+      await updateSettings({ logo: dataUrl })
+      toast.success('הלוגו נשמר ✓')
+    } catch {
+      toast.error('שגיאה בטעינת הלוגו')
+    }
+  }
+
+  async function saveName() {
+    await updateSettings({ businessName: nameInput.trim() || 'מנהל קבלות' })
+    setNameChanged(false)
+    toast.success('שם העסק נשמר ✓')
+  }
 
   function handleVatChange(v) {
     setVatInput(v)
@@ -29,17 +52,17 @@ export default function SettingsPage() {
   const FS = {
     display: 'block', width: '100%', boxSizing: 'border-box',
     borderRadius: 'var(--r-btn)', border: '1.5px solid var(--border)',
-    background: 'var(--panel)', padding: '0 14px', height: '44px',
-    fontSize: '15px', color: 'var(--text)', outline: 'none',
+    background: 'var(--panel)', padding: '0 14px', height: '46px',
+    fontSize: '17px', color: 'var(--text)', outline: 'none',
     fontFamily: 'var(--font-main)',
   }
 
   const toggleStyle = (active) => ({
-    flex: 1, padding: '10px 16px', borderRadius: '8px',
+    flex: 1, padding: '12px 16px', borderRadius: '8px',
     border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
     background: active ? 'var(--accent-bg)' : 'var(--panel-2)',
     color: active ? 'var(--accent)' : 'var(--text-mute)',
-    fontFamily: 'var(--font-main)', fontSize: '13.5px', fontWeight: active ? 600 : 400,
+    fontFamily: 'var(--font-main)', fontSize: '16px', fontWeight: active ? 600 : 400,
     cursor: 'pointer', transition: 'all 140ms', textAlign: 'center',
   })
 
@@ -48,12 +71,63 @@ export default function SettingsPage() {
 
       {/* Header */}
       <div>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Settings size={20} color="var(--accent)" /> הגדרות
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Settings size={24} color="var(--accent)" /> הגדרות
         </h1>
-        <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-mute)' }}>
+        <p style={{ margin: '4px 0 0', fontSize: 15, color: 'var(--text-mute)' }}>
           מחובר כ-{user?.email}
         </p>
+      </div>
+
+      {/* Logo + Business name Card */}
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Building2 size={17} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>לוגו ושם העסק</span>
+        </div>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {/* Logo row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+            {/* Round preview */}
+            {settings.logo ? (
+              <img src={settings.logo} alt="לוגו" style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--border)', flexShrink: 0 }} />
+            ) : (
+              <div style={{ width: 84, height: 84, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ color: 'white', fontSize: 38, fontWeight: 700 }}>₪</span>
+              </div>
+            )}
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: '0 0 10px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.5 }}>
+                העלה לוגו (PNG/JPG). הוא יוצג בעמוד הכניסה ובראש האפליקציה.
+              </p>
+              <input ref={logoInputRef} type="file" accept="image/png,image/jpeg" onChange={handleLogoFile} style={{ display: 'none' }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => logoInputRef.current?.click()}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 14.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  <ImageIcon size={15} /> {settings.logo ? 'החלף לוגו' : 'העלה לוגו'}
+                </button>
+                {settings.logo && (
+                  <button onClick={() => updateSettings({ logo: null })}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--danger)', fontSize: 14.5, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                    <Trash2 size={15} /> הסר
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+          {/* Business name */}
+          <div>
+            <label style={{ display: 'block', fontSize: 14.5, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 8 }}>שם העסק</label>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <input value={nameInput} onChange={e => { setNameInput(e.target.value); setNameChanged(true) }}
+                placeholder="שם בית העסק" dir="auto" style={{ ...FS, flex: 1 }} />
+              <button onClick={saveName} disabled={!nameChanged}
+                style={{ padding: '0 18px', borderRadius: 'var(--r-btn)', border: 'none', background: nameChanged ? 'var(--accent)' : 'var(--panel-2)', color: nameChanged ? 'white' : 'var(--text-mute)', fontSize: 14.5, fontWeight: 600, cursor: nameChanged ? 'pointer' : 'default', fontFamily: 'var(--font-main)' }}>
+                שמור
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* VAT Rate Card */}

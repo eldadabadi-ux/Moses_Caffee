@@ -24,13 +24,13 @@ export default function EmptyState({
       )}
       {title && (
         <h3 style={{
-          fontSize: '14px', fontWeight: 600, color: 'var(--text)',
+          fontSize: '18px', fontWeight: 600, color: 'var(--text)',
           marginBottom: '6px',
         }}>{title}</h3>
       )}
       {description && (
         <p style={{
-          fontSize: '13px', color: 'var(--text-mute)', maxWidth: '280px',
+          fontSize: '16px', color: 'var(--text-mute)', maxWidth: '320px',
           marginBottom: '20px', lineHeight: 1.6,
         }}>{description}</p>
       )}

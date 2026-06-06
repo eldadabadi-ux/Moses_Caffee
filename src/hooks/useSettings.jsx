@@ -13,14 +13,18 @@ const STORAGE_KEY = 'receipts_settings_v1'
 const DEFAULT_SETTINGS = {
   vatRate:     18,     // current Israeli VAT rate
   showWithVat: true,   // true = show prices WITH VAT, false = show prices WITHOUT VAT
+  logo:        null,   // base64 data URL of the business logo
+  businessName: 'מנהל קבלות', // shown next to the logo
 }
 
 function loadLocal() {
   try {
     const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
     return {
-      vatRate:     typeof s.vatRate     === 'number' ? s.vatRate     : DEFAULT_SETTINGS.vatRate,
-      showWithVat: typeof s.showWithVat === 'boolean' ? s.showWithVat : DEFAULT_SETTINGS.showWithVat,
+      vatRate:      typeof s.vatRate     === 'number'  ? s.vatRate     : DEFAULT_SETTINGS.vatRate,
+      showWithVat:  typeof s.showWithVat === 'boolean' ? s.showWithVat : DEFAULT_SETTINGS.showWithVat,
+      logo:         typeof s.logo        === 'string'  ? s.logo        : DEFAULT_SETTINGS.logo,
+      businessName: typeof s.businessName === 'string' && s.businessName ? s.businessName : DEFAULT_SETTINGS.businessName,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

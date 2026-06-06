@@ -2,7 +2,7 @@ import { Suspense, lazy, useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
-import { SettingsProvider } from './hooks/useSettings'
+import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings } from 'lucide-react'
@@ -48,9 +48,23 @@ function UpdateBanner() {
   )
 }
 
+// ── Brand logo (round) — business logo or ₪ placeholder ──────────────────────
+function BrandLogo({ size = 30 }) {
+  const { settings } = useSettings()
+  if (settings.logo) {
+    return <img src={settings.logo} alt="לוגו" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }} />
+  }
+  return (
+    <div style={{ width: size, height: size, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span style={{ color: 'white', fontSize: size * 0.5, fontWeight: 700 }}>₪</span>
+    </div>
+  )
+}
+
 // ── Top navigation (desktop ≥ 768px) ─────────────────────────────────────────
 function TopNav({ onSignOut }) {
   const location = useLocation()
+  const { settings } = useSettings()
   const isReceipts   = location.pathname === '/'
   const isCategories = location.pathname === '/categories'
 
@@ -59,44 +73,42 @@ function TopNav({ onSignOut }) {
     padding: '6px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer',
     background: active ? 'var(--accent-bg)' : 'transparent',
     color: active ? 'var(--accent)' : 'var(--text-mute)',
-    fontFamily: 'var(--font-main)', fontSize: '11px', fontWeight: active ? 600 : 400,
+    fontFamily: 'var(--font-main)', fontSize: '14px', fontWeight: active ? 600 : 400,
     textDecoration: 'none', transition: 'all 140ms',
   })
 
   return (
     <nav style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 20px', height: '56px',
+      padding: '0 20px', height: '64px',
       background: 'var(--panel)', borderBottom: '1px solid var(--border)',
       position: 'sticky', top: 0, zIndex: 100,
     }} dir="rtl">
-      {/* Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div style={{ width: 28, height: 28, borderRadius: '7px', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ color: 'white', fontSize: '14px', fontWeight: 700 }}>₪</span>
-        </div>
-        <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text)' }}>מנהל קבלות</span>
+      {/* Logo (top-right in RTL) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <BrandLogo size={34} />
+        <span style={{ fontWeight: 700, fontSize: '17px', color: 'var(--text)' }}>{settings.businessName || 'מנהל קבלות'}</span>
       </div>
       {/* Nav links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
         <Link to="/" style={navBtn(isReceipts)}>
-          <Receipt size={16} /> קבלות
+          <Receipt size={18} /> קבלות
         </Link>
         <Link to="/dashboard" style={navBtn(location.pathname === '/dashboard')}>
-          <BarChart2 size={16} /> דשבורד
+          <BarChart2 size={18} /> דשבורד
         </Link>
         <Link to="/categories" style={navBtn(isCategories)}>
-          <Tag size={16} /> קטגוריות
+          <Tag size={18} /> קטגוריות
         </Link>
         <Link to="/settings" style={navBtn(location.pathname === '/settings')}>
-          <Settings size={16} /> הגדרות
+          <Settings size={18} /> הגדרות
         </Link>
       </div>
       {/* Sign out */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--ok)', boxShadow: '0 0 0 3px rgba(22,163,74,0.15)' }} />
-        <button onClick={onSignOut} style={{ padding: '6px 12px', background: 'none', border: '1px solid var(--border)', borderRadius: '7px', color: 'var(--text-mute)', fontSize: '12px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <LogOut size={12} /> התנתק
+        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--ok)', boxShadow: '0 0 0 3px rgba(22,163,74,0.15)' }} />
+        <button onClick={onSignOut} style={{ padding: '7px 14px', background: 'none', border: '1px solid var(--border)', borderRadius: '7px', color: 'var(--text-mute)', fontSize: '15px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <LogOut size={14} /> התנתק
         </button>
       </div>
     </nav>
@@ -117,7 +129,7 @@ function BottomNav({ onSignOut }) {
     padding: '8px 0 4px', flex: 1, border: 'none', cursor: 'pointer',
     background: 'transparent', textDecoration: 'none',
     color: active ? 'var(--accent)' : 'var(--text-mute)',
-    fontFamily: 'var(--font-main)', fontSize: '10.5px', fontWeight: active ? 600 : 400,
+    fontFamily: 'var(--font-main)', fontSize: '13px', fontWeight: active ? 600 : 400,
   })
 
   function handleScanTap() {
@@ -192,6 +204,27 @@ function BottomNav({ onSignOut }) {
   )
 }
 
+// ── Mobile header — slim bar with logo top-right + business name ─────────────
+function MobileHeader({ onSignOut }) {
+  const { settings } = useSettings()
+  return (
+    <header style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0 14px', height: '52px',
+      background: 'var(--panel)', borderBottom: '1px solid var(--border)',
+      position: 'sticky', top: 0, zIndex: 90,
+    }} dir="rtl">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+        <BrandLogo size={32} />
+        <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text)' }}>{settings.businessName || 'מנהל קבלות'}</span>
+      </div>
+      <button onClick={onSignOut} aria-label="התנתק" style={{ padding: '6px', background: 'none', border: 'none', color: 'var(--text-mute)', cursor: 'pointer', display: 'flex' }}>
+        <LogOut size={18} />
+      </button>
+    </header>
+  )
+}
+
 // ── App shell ─────────────────────────────────────────────────────────────────
 function AppShell() {
   const { user, signOut, loading } = useAuth()
@@ -206,8 +239,9 @@ function AppShell() {
 
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
-      {/* Top nav — desktop / tablet only */}
+      {/* Top nav — desktop / tablet only; mobile gets a slim branded header */}
       {!isMobile && <TopNav onSignOut={signOut} />}
+      {isMobile && <MobileHeader onSignOut={signOut} />}
 
       {/* Page content */}
       <main style={{

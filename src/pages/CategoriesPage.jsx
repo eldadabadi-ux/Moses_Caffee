@@ -127,7 +127,7 @@ export default function CategoriesPage() {
             </>
           ) : (
             <>
-              <span style={{ flex:1, fontSize: depth === 0 ? '14px' : '13px', fontWeight: depth === 0 ? 600 : 500, color:'var(--text)' }}>{cat.name}</span>
+              <span style={{ flex:1, fontSize: depth === 0 ? '17px' : '16px', fontWeight: depth === 0 ? 600 : 500, color:'var(--text)' }}>{cat.name}</span>
               {children.length > 0 && <span style={{ fontSize:'11px', color:'var(--text-mute)', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:'999px', padding:'1px 8px' }}>{children.length} תתי-קטגוריות</span>}
             </>
           )}
@@ -179,8 +179,8 @@ export default function CategoriesPage() {
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap:'24px', maxWidth:'800px' }} dir="rtl">
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'12px' }}>
         <div>
-          <h1 style={{ fontSize:'20px', fontWeight:700, color:'var(--text)', margin:0 }}>קטגוריות הוצאות</h1>
-          <p style={{ fontSize:'13px', color:'var(--text-mute)', marginTop:'4px' }}>ניהול עץ הקטגוריות ההיררכי — עד 3 רמות</p>
+          <h1 style={{ fontSize:'26px', fontWeight:700, color:'var(--text)', margin:0 }}>קטגוריות הוצאות</h1>
+          <p style={{ fontSize:'15px', color:'var(--text-mute)', marginTop:'4px' }}>ניהול עץ הקטגוריות ההיררכי — עד 3 רמות</p>
         </div>
         <button onClick={() => { setAddingTo({ parentId: null, level: 1 }); setNewName('') }}
           style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--r-btn)', fontSize:'13.5px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}>

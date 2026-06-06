@@ -21,7 +21,7 @@ export default function LoadingSpinner({ text = 'טוען...' }) {
           <span style={{ color: 'white', fontWeight: 700, fontSize: '11px', userSelect: 'none' }}>₪</span>
         </div>
       </div>
-      {text && <p style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-mute)' }}>{text}</p>}
+      {text && <p style={{ fontSize: '16px', fontWeight: 500, color: 'var(--text-mute)' }}>{text}</p>}
     </div>
   )
 }
