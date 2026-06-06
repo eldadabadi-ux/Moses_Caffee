@@ -1,8 +1,9 @@
 import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
-import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2 } from 'lucide-react'
+import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen } from 'lucide-react'
 import { fileToSquareLogo } from '../lib/imageUtils'
+import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import toast from 'react-hot-toast'
 
 export default function SettingsPage() {
@@ -12,7 +13,23 @@ export default function SettingsPage() {
   const [changed, setChanged] = useState(false)
   const [nameInput, setNameInput] = useState(settings.businessName || '')
   const [nameChanged, setNameChanged] = useState(false)
+  const [folderName, setFolderName] = useState(savedDirName())
   const logoInputRef = useRef(null)
+
+  async function chooseFolder() {
+    try {
+      const name = await pickDir()
+      setFolderName(name)
+      toast.success('תיקיית השמירה נבחרה ✓')
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast.error('לא ניתן לבחור תיקייה')
+    }
+  }
+  async function removeFolder() {
+    await clearDir()
+    setFolderName(null)
+    toast('התיקייה הוסרה — הורדות יישמרו רגיל', { icon: 'ℹ️' })
+  }
 
   async function handleLogoFile(e) {
     const file = e.target.files?.[0]
@@ -201,8 +218,47 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Save folder Card */}
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <FolderOpen size={17} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>תיקיית שמירה</span>
+        </div>
+        <div style={{ padding: 20 }}>
+          {isFolderSupported() ? (
+            <>
+              <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+                בחר תיקייה במחשב — כל הקבצים שתוריד (Excel / PDF / ZIP) יישמרו אליה אוטומטית בלי לשאול כל פעם.
+              </p>
+              {folderName && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '10px 14px', background: 'var(--success-tint-1)', border: '1px solid var(--success-tint-border)', borderRadius: 10 }}>
+                  <FolderOpen size={16} color="var(--ok)" />
+                  <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{folderName}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={chooseFolder}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 14.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  <FolderOpen size={15} /> {folderName ? 'החלף תיקייה' : 'בחר תיקייה'}
+                </button>
+                {folderName && (
+                  <button onClick={removeFolder}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--danger)', fontSize: 14.5, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                    <Trash2 size={15} /> הסר
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <p style={{ margin: 0, fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+              בחירת תיקייה קבועה זמינה במחשב (Chrome/Edge) בלבד. במכשיר נייד הקבצים יורדו לתיקיית ההורדות הרגילה.
+            </p>
+          )}
+        </div>
+      </div>
+
       {/* Info box */}
-      <div style={{ display: 'flex', gap: 10, padding: '14px 16px', background: 'var(--accent-bg)', border: '1px solid var(--accent-tint-border)', borderRadius: 12, fontSize: 12.5, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+      <div style={{ display: 'flex', gap: 10, padding: '14px 16px', background: 'var(--accent-bg)', border: '1px solid var(--accent-tint-border)', borderRadius: 12, fontSize: 14, color: 'var(--text-dim)', lineHeight: 1.6 }}>
         <Info size={15} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: 1 }} />
         <div>
           <strong>כיצד מחושב המע"מ בסריקה?</strong><br/>

@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './hooks/useAuth'
 import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
+import MonthlyExportPrompt from './components/MonthlyExportPrompt'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings } from 'lucide-react'
 
 const LoginPage       = lazy(() => import('./pages/LoginPage'))
@@ -263,6 +264,9 @@ function AppShell() {
 
       {/* Bottom nav — mobile only */}
       {isMobile && <BottomNav onSignOut={signOut} />}
+
+      {/* End-of-month export reminder */}
+      <MonthlyExportPrompt />
 
       <UpdateBanner />
     </div>

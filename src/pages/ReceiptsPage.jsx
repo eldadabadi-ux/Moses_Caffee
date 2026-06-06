@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload } from '../lib/imageUtils'
+import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip } from '../lib/receiptExport'
 import toast from 'react-hot-toast'
 import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
@@ -283,7 +284,7 @@ function CropModal({ src, onConfirm, onCancel }) {
 }
 
 // ── ExportDialog ──────────────────────────────────────────────────────────────
-function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, onClose }) {
+function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 18, onClose }) {
   const [opts, setOpts] = useState({ excel: true, pdf: true, images: true })
   const [busy, setBusy] = useState(false)
   const nImages = receipts.filter(r => r.receipt_image).length
@@ -292,103 +293,25 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, onClose }) 
   const selectedCount = [opts.excel, opts.pdf, opts.images && nImages > 0].filter(Boolean).length
   const useZip = !isMobile && selectedCount > 1
 
-  function buildPDFHtml() {
-    function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') }
-    const fmt = d => d ? new Date(d).toLocaleDateString('he-IL', { day:'numeric', month:'long', year:'numeric' }) : ''
-    const period = (filterFrom || filterTo) ? `${fmt(filterFrom) || '...'} — ${fmt(filterTo) || '...'}` : 'כל הזמנים'
-    const sorted = [...receipts].sort((a,b) => (a.receipt_date||'').localeCompare(b.receipt_date||''))
-    const cBefore = r => { const t = parseFloat(r.amount)||0; if (r.amount_before_vat>0) return parseFloat(r.amount_before_vat); if (r.ai_summary?.before_vat>0) return parseFloat(r.ai_summary.before_vat); const rt = r.vat_rate||18; return Math.round(t/(1+rt/100)*100)/100 }
-    const cVat    = r => { const t = parseFloat(r.amount)||0; if (r.vat_amount>0) return parseFloat(r.vat_amount); if (r.ai_summary?.vat_amount>0) return parseFloat(r.ai_summary.vat_amount); return Math.round((t-cBefore(r))*100)/100 }
-    const il = n => `₪${parseFloat(n||0).toLocaleString('he-IL',{minimumFractionDigits:2})}`
-    const sumBefore = sorted.reduce((s,r)=>s+cBefore(r),0)
-    const sumVat    = sorted.reduce((s,r)=>s+cVat(r),0)
-    const sumTotal  = sorted.reduce((s,r)=>s+(parseFloat(r.amount)||0),0)
-    const rows = sorted.map(r => `<tr><td>${r.receipt_date ? new Date(r.receipt_date).toLocaleDateString('he-IL') : '—'}</td><td>${esc(r.vendor_name)||'—'}</td><td>${esc(r.category_text||'')}</td><td>${il(cBefore(r))}</td><td style="color:#92400e">${il(cVat(r))}</td><td style="font-weight:700;color:#059669">${il(r.amount)}</td></tr>`).join('')
-    return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח קבלות</title>
-<style>@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700&display=swap');
-*{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Heebo',Arial,sans-serif;direction:rtl;color:#1e293b;padding:32px;font-size:14px;}
-h1{font-size:22px;font-weight:700;margin-bottom:4px;}.subtitle{color:#64748b;font-size:14px;margin-bottom:24px;}
-.total-banner{background:#f0fdf4;border:1px solid #a7f3d0;border-radius:10px;padding:12px 20px;display:inline-block;margin-bottom:24px;}
-.total-banner span{font-size:18px;font-weight:700;color:#059669;}
-table{width:100%;border-collapse:collapse;font-size:13px;}thead tr{background:#f8fafc;border-bottom:2px solid #e2e8f0;}
-th{padding:10px 12px;text-align:right;font-weight:600;color:#475569;font-size:12px;}
-tbody tr{border-bottom:1px solid #f1f5f9;}tbody tr:nth-child(even){background:#f8fafc;}
-tfoot tr{background:#f1f5f9;border-top:2px solid #e2e8f0;}tfoot td{padding:12px;font-weight:700;}
-td{padding:10px 12px;color:#334155;}@media print{body{padding:0;}}</style></head><body>
-<h1>דוח קבלות</h1><div class="subtitle">${period}</div>
-<div class="total-banner">סה"כ כולל מע"מ: <span>${il(sumTotal)}</span> · מתוכו מע"מ: ${il(sumVat)} · לפני מע"מ: ${il(sumBefore)} (${receipts.length} קבלות)</div>
-<table><thead><tr><th>תאריך</th><th>ספק</th><th>קטגוריה</th><th>לפני מע"מ</th><th>מע"מ</th><th>סה"כ</th></tr></thead>
-<tbody>${rows}</tbody>
-<tfoot><tr><td colspan="3">סה"כ</td><td>${il(sumBefore)}</td><td style="color:#92400e">${il(sumVat)}</td><td style="color:#059669">${il(sumTotal)}</td></tr></tfoot></table>
-<div style="color:#94a3b8;font-size:12px;margin-top:32px;border-top:1px solid #e2e8f0;padding-top:12px;">הופק ב-${new Date().toLocaleDateString('he-IL',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
-<script>window.onload=()=>{window.print();}<\/script></body></html>`
-  }
-
   async function doExport() {
     if (busy) return
     setBusy(true)
     try {
       const dateStr = new Date().toISOString().slice(0, 10)
-      let excelBlob = null, pdfBlob = null, imagesBlob = null
-
-      if (opts.excel) {
-        // Full VAT breakdown for the accountant
-        const calcBefore = r => {
-          const t = parseFloat(r.amount) || 0
-          if (r.amount_before_vat != null && r.amount_before_vat > 0) return parseFloat(r.amount_before_vat)
-          if (r.ai_summary?.before_vat > 0) return parseFloat(r.ai_summary.before_vat)
-          const rate = r.vat_rate || 18
-          return Math.round(t / (1 + rate / 100) * 100) / 100
-        }
-        const calcVat = r => {
-          const t = parseFloat(r.amount) || 0
-          if (r.vat_amount != null && r.vat_amount > 0) return parseFloat(r.vat_amount)
-          if (r.ai_summary?.vat_amount > 0) return parseFloat(r.ai_summary.vat_amount)
-          return Math.round((t - calcBefore(r)) * 100) / 100
-        }
-        const sumBefore = receipts.reduce((s, r) => s + calcBefore(r), 0)
-        const sumVat    = receipts.reduce((s, r) => s + calcVat(r), 0)
-        const sumTotal  = receipts.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-        const rows = [
-          ['תאריך', 'ספק', 'קטגוריה', 'לפני מע"מ (₪)', 'מע"מ (₪)', 'סה"כ כולל מע"מ (₪)'],
-          ...receipts.map(r => [
-            fmtDate(r.receipt_date), r.vendor_name||'', r.category_text||'',
-            Math.round(calcBefore(r) * 100) / 100,
-            Math.round(calcVat(r) * 100) / 100,
-            parseFloat(r.amount||0),
-          ]),
-          ['', '', 'סה"כ', Math.round(sumBefore*100)/100, Math.round(sumVat*100)/100, Math.round(sumTotal*100)/100],
-        ]
-        const { XLSXs, wb } = await buildStyledExcel(rows)
-        const buf = XLSXs.write(wb, { bookType:'xlsx', type:'array', cellStyles: true })
-        excelBlob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-      }
-      if (opts.pdf) pdfBlob = new Blob([buildPDFHtml()], { type: 'text/html;charset=utf-8' })
-      if (opts.images && nImages > 0) {
-        const JSZip = (await import('jszip')).default
-        const imgZip = new JSZip()
-        receipts.filter(r => r.receipt_image).forEach((r, i) => {
-          const url = r.receipt_image || ''
-          if (!url.startsWith('data:')) return
-          const [header, b64] = url.split(','); if (!b64) return
-          const ext = header.includes('png') ? 'png' : 'jpg'
-          const vendor = (r.vendor_name || 'קבלה').replace(/[/\\?%*:|"<>]/g, '-').slice(0, 30)
-          imgZip.file(`${String(i+1).padStart(3,'0')}_${fmtDate(r.receipt_date)||'ללא_תאריך'}_${vendor}.${ext}`, b64, { base64: true })
-        })
-        imagesBlob = await imgZip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level:6 } })
-      }
+      const excelBlob  = opts.excel ? await buildExcelBlob(receipts, vatRate) : null
+      const pdfFile    = opts.pdf   ? buildPdfBlob(receipts, { filterFrom, filterTo, vatRate }) : null
+      const imagesBlob = (opts.images && nImages > 0) ? await buildImagesZip(receipts) : null
 
       if (useZip) {
-        const JSZip = (await import('jszip')).default
-        const zip = new JSZip()
-        if (excelBlob)  zip.file('קבלות.xlsx', excelBlob)
-        if (pdfBlob)    zip.file('דוח_קבלות.html', pdfBlob)
-        if (imagesBlob) zip.file('תמונות_קבלות.zip', imagesBlob)
-        const blob = await zip.generateAsync({ type:'blob', compression:'DEFLATE', compressionOptions:{ level:6 } })
+        const blob = await combineZip([
+          { name: 'קבלות.xlsx',         blob: excelBlob },
+          { name: 'דוח_קבלות.html',     blob: pdfFile },
+          { name: 'תמונות_קבלות.zip',   blob: imagesBlob },
+        ])
         await downloadFile({ blob, filename: `קבלות_לרו"ח_${dateStr}.zip` })
       } else {
         if (excelBlob)  await downloadFile({ blob: excelBlob,  filename: `קבלות_${dateStr}.xlsx` })
-        if (pdfBlob)    await downloadFile({ blob: pdfBlob,    filename: `דוח_קבלות_${dateStr}.html` })
+        if (pdfFile)    await downloadFile({ blob: pdfFile,    filename: `דוח_קבלות_${dateStr}.html` })
         if (imagesBlob) await downloadFile({ blob: imagesBlob, filename: `תמונות_קבלות_${dateStr}.zip` })
       }
       toast.success('הייצוא הושלם!')
@@ -545,6 +468,25 @@ export default function ReceiptsPage() {
     vat:    filtered.reduce((s, r) => s + amtVat(r), 0),
   }), [filtered, vatRate])
   const totalAmount = totals.paid
+
+  // Quick one-click exports (Excel only / PDF only) using the filtered list.
+  async function quickExport(kind) {
+    if (filtered.length === 0) { toast.error('אין קבלות לייצוא'); return }
+    const dateStr = new Date().toISOString().slice(0, 10)
+    try {
+      if (kind === 'excel') {
+        const blob = await buildExcelBlob(filtered, vatRate)
+        await downloadFile({ blob, filename: `קבלות_${dateStr}.xlsx` })
+        toast.success('Excel הורד')
+      } else if (kind === 'pdf') {
+        const blob = buildPdfBlob(filtered, { filterFrom, filterTo, vatRate })
+        await downloadFile({ blob, filename: `דוח_קבלות_${dateStr}.html` })
+        toast.success('דוח PDF הורד — פתח והדפס / שמור כ-PDF')
+      }
+    } catch (err) {
+      toast.error('שגיאה בייצוא: ' + (err?.message || ''))
+    }
+  }
 
   const formCategories = useMemo(() => {
     const l1 = categories.filter(c => c.level === 1)
@@ -877,14 +819,25 @@ export default function ReceiptsPage() {
           {/* VAT breakdown */}
           <div style={{ display:'flex', gap: isMobile ? '14px' : '20px', alignItems:'center', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 16px' : '12px 20px' }}>
             <div style={{ display:'flex', flexDirection:'column', gap:'2px' }}>
-              <span style={{ fontSize:'11px', color:'var(--text-mute)' }}>לפני מע"מ</span>
-              <span style={{ fontSize: isMobile ? '14px' : '15px', fontWeight:700, color:'var(--text)' }}>{fmtILS(totals.before)}</span>
+              <span style={{ fontSize:'12px', color:'var(--text-mute)' }}>לפני מע"מ</span>
+              <span style={{ fontSize: isMobile ? '16px' : '17px', fontWeight:700, color:'var(--text)' }}>{fmtILS(totals.before)}</span>
             </div>
             <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
             <div style={{ display:'flex', flexDirection:'column', gap:'2px' }}>
-              <span style={{ fontSize:'11px', color:'var(--text-mute)' }}>מע"מ {vatRate}%</span>
-              <span style={{ fontSize: isMobile ? '14px' : '15px', fontWeight:700, color:'#92400e' }}>{fmtILS(totals.vat)}</span>
+              <span style={{ fontSize:'12px', color:'var(--text-mute)' }}>מע"מ {vatRate}%</span>
+              <span style={{ fontSize: isMobile ? '16px' : '17px', fontWeight:700, color:'#92400e' }}>{fmtILS(totals.vat)}</span>
             </div>
+          </div>
+          {/* Quick export buttons */}
+          <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+            <button onClick={() => quickExport('excel')} title="הורד Excel בלבד"
+              style={{ display:'flex', alignItems:'center', gap:'6px', padding:'10px 14px', background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:'var(--r-btn)', fontSize:'14px', fontWeight:600, color:'#16a34a', cursor:'pointer', fontFamily:'var(--font-main)' }}>
+              <FileSpreadsheet size={16} /> Excel
+            </button>
+            <button onClick={() => quickExport('pdf')} title="הורד PDF בלבד"
+              style={{ display:'flex', alignItems:'center', gap:'6px', padding:'10px 14px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-btn)', fontSize:'14px', fontWeight:600, color:'var(--text-dim)', cursor:'pointer', fontFamily:'var(--font-main)' }}>
+              <Download size={16} /> PDF
+            </button>
           </div>
         </div>
       )}
@@ -1098,7 +1051,7 @@ export default function ReceiptsPage() {
 
       {/* ── Export dialog ─────────────────────────────────────────────────────────── */}
       {showExport && (
-        <ExportDialog receipts={filtered} totalAmount={totalAmount} filterFrom={filterFrom} filterTo={filterTo} onClose={() => setShowExport(false)} />
+        <ExportDialog receipts={filtered} totalAmount={totalAmount} filterFrom={filterFrom} filterTo={filterTo} vatRate={vatRate} onClose={() => setShowExport(false)} />
       )}
 
       {/* ── Confirm delete ───────────────────────────────────────────────────────── */}
