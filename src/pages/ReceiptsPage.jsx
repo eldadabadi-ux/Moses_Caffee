@@ -595,17 +595,51 @@ export default function ReceiptsPage() {
     } finally { setScanLoading(false) }
   }
 
+  // Ensure the L1→L2→L3 categories referenced by the scanned items exist in the
+  // categories table (creates missing ones). Returns the L1 id for `primaryL1`.
+  async function ensureHierarchy(items, primaryL1) {
+    // Load fresh so we don't duplicate
+    const { data: existing } = await supabase
+      .from('categories').select('id, name, parent_id, level').eq('user_id', user.id)
+    const cats = existing || []
+    const find = (name, level, parentId) => cats.find(c =>
+      c.level === level &&
+      c.name.trim().toLowerCase() === String(name).trim().toLowerCase() &&
+      (level === 1 || c.parent_id === parentId)
+    )
+    async function ensure(name, level, parentId) {
+      const nm = (name || '').trim()
+      if (!nm) return null
+      let cat = find(nm, level, parentId)
+      if (cat) return cat.id
+      const { data: created } = await supabase.from('categories')
+        .insert({ user_id: user.id, name: nm, level, parent_id: parentId || null,
+                  sort_order: cats.filter(c => c.level === level && c.parent_id === (parentId||null)).length })
+        .select().single()
+      if (created) { cats.push(created); return created.id }
+      return null
+    }
+    // Build the whole tree from items
+    for (const it of (items || [])) {
+      const l1id = await ensure(it.category_l1, 1, null)
+      if (l1id && it.category_l2) {
+        const l2id = await ensure(it.category_l2, 2, l1id)
+        if (l2id && it.category_l3) await ensure(it.category_l3, 3, l2id)
+      }
+    }
+    // Resolve the receipt's primary L1 id
+    return await ensure(primaryL1, 1, null)
+  }
+
   async function approveScan() {
     if (approving) return
     setApproving(true)
     try {
       let category_id = null
-      const l1 = categories.find(c => c.level === 1 && c.name.trim().toLowerCase() === reviewCategory.trim().toLowerCase())
-      if (l1) { category_id = l1.id }
-      else if (reviewCategory && reviewCategory !== 'שונות') {
-        const { data: newCat } = await supabase.from('categories').insert({ user_id: user.id, name: reviewCategory.trim(), level: 1 }).select().single()
-        if (newCat) { category_id = newCat.id; loadCategories() }
-      }
+      try {
+        category_id = await ensureHierarchy(reviewItems, reviewCategory)
+        loadCategories()
+      } catch (hErr) { console.warn('[approveScan] hierarchy:', hErr?.message) }
 
       let finalImage = reviewImage
       if (reviewImage?.startsWith('data:')) {
@@ -969,16 +1003,31 @@ export default function ReceiptsPage() {
             </div>
             {reviewItems.length > 0 && (
               <div>
-                <label style={LS}>פריטים ({reviewItems.length})</label>
-                <div style={{ background:'var(--panel-2)', borderRadius:'8px', padding:'10px', maxHeight:'140px', overflowY:'auto' }}>
-                  {reviewItems.map((item, i) => (
-                    <div key={item._id ?? i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'5px 0', borderBottom: i < reviewItems.length-1 ? '1px solid var(--border)' : 'none', fontSize:'12.5px', gap:'8px' }}>
-                      <span style={{ color:'var(--text)', flex:1 }}>{item.item_name}</span>
-                      {item.category_l1 && <span style={{ color:'var(--text-mute)', fontSize:'11.5px' }}>{item.category_l1}</span>}
-                      {item.price > 0 && <span style={{ color:'var(--ok)', fontWeight:600 }}>{fmtILS(item.price)}</span>}
-                    </div>
-                  ))}
+                <label style={LS}>פירוט הקבלה ({reviewItems.length} פריטים)</label>
+                <div style={{ background:'var(--panel-2)', borderRadius:'10px', padding:'4px 12px', maxHeight:'220px', overflowY:'auto', border:'1px solid var(--border)' }}>
+                  {reviewItems.map((item, i) => {
+                    const path = [item.category_l1, item.category_l2, item.category_l3].filter(Boolean).join(' › ')
+                    return (
+                      <div key={item._id ?? i} style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', padding:'9px 0', borderBottom: i < reviewItems.length-1 ? '1px solid var(--border)' : 'none', gap:'10px' }}>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ color:'var(--text)', fontSize:'15px', fontWeight:500 }}>{item.item_name}</div>
+                          {path && <div style={{ color:'var(--text-mute)', fontSize:'12.5px', marginTop:'2px' }}>{path}</div>}
+                        </div>
+                        {item.price > 0 && <span style={{ color:'var(--ok)', fontWeight:700, fontSize:'15px', whiteSpace:'nowrap' }}>{fmtILS(item.price)}</span>}
+                      </div>
+                    )
+                  })}
+                  {/* Items total */}
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 0', borderTop:'2px solid var(--border)', marginTop:'2px' }}>
+                    <span style={{ color:'var(--text)', fontSize:'15px', fontWeight:700 }}>סה"כ פריטים</span>
+                    <span style={{ color:'var(--ok)', fontSize:'16px', fontWeight:800 }}>
+                      {fmtILS(reviewItems.reduce((s, it) => s + (parseFloat(it.price) || 0), 0))}
+                    </span>
+                  </div>
                 </div>
+                <p style={{ margin:'6px 2px 0', fontSize:'12px', color:'var(--text-mute)' }}>
+                  כל פריט מסווג: קטגוריה › תת-קטגוריה › תת-תת. הסכום הכולל למעלה הוא הקובע לשמירה.
+                </p>
               </div>
             )}
             <div style={{ display:'flex', gap:'10px', paddingTop:'4px', paddingBottom: isMobile ? '8px' : '0' }}>

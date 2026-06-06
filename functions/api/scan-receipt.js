@@ -267,12 +267,18 @@ function buildPrompt(allowedCategories, categoriesTree) {
 - ודא ש: amount_before_vat + vat_amount = total_amount
 
 ### פריטים (items):
-- רשום כל שורת מוצר בנפרד
+- רשום כל שורת מוצר בנפרד **עם המחיר שלה**
 - אם יש כמות × מחיר ליחידה — חשב את הסכום (כמות × מחיר)
 - שמות מוצרים: **בעברית** גם אם מופיעים באנגלית בקבלה
   - "Humus" → "חומוס"
   - "Cucumber" → "מלפפון"
   - "Milk 3%" → "חלב 3%"
+- **סיווג היררכי תלת-שכבתי לכל פריט:**
+  - category_l1 = קטגוריה ראשית (מהרשימה)
+  - category_l2 = תת-קטגוריה (למשל "ירקות טריים" תחת "ירקות ופירות")
+  - category_l3 = שם המוצר הספציפי / תת-תת-קטגוריה (למשל "עגבנייה", "מלפפון", "חלב 3%") — חשוב למעקב לאורך זמן
+  - דוגמה: עגבניות שרי → l1="ירקות ופירות", l2="ירקות טריים", l3="עגבנייה"
+  - דוגמה: חלב 3% → l1="מוצרי מזון ומכולת", l2="מוצרי חלב", l3="חלב"
 
 ### קטגוריות זמינות:
 ${allowedCategories.join(' | ')}
@@ -304,8 +310,9 @@ ${allowedCategories.join(' | ')}
     {
       "item_name": "שם הפריט בעברית",
       "price": מחיר הפריט,
-      "category_l1": "קטגוריה מהרשימה",
-      "category_l2": "תת-קטגוריה אם ידוע",
+      "category_l1": "קטגוריה ראשית מהרשימה",
+      "category_l2": "תת-קטגוריה",
+      "category_l3": "שם המוצר הספציפי",
       "is_new_category": false
     }
   ]
@@ -357,6 +364,7 @@ async function callGemini(apiKey, model, imageBase64, mimeType, prompt) {
                 price:           { type: 'NUMBER' },
                 category_l1:     { type: 'STRING' },
                 category_l2:     { type: 'STRING' },
+                category_l3:     { type: 'STRING' },
                 is_new_category: { type: 'BOOLEAN' },
               },
               required: ['item_name', 'price', 'category_l1', 'is_new_category'],

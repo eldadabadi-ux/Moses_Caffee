@@ -8,6 +8,8 @@ import MonthlyBars   from '../components/charts/MonthlyBars'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
 import TopVendors    from '../components/charts/TopVendors'
 import CategoryTree  from '../components/charts/CategoryTree'
+import CategoryDrilldown from '../components/CategoryDrilldown'
+import { flattenItems } from '../lib/itemAggregation'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
@@ -75,6 +77,8 @@ export default function DashboardPage() {
   const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
   const [filterVendor,setFilterVendor]= useState(null)
   const [availYears,  setAvailYears]  = useState([thisYear])
+  const [vendorA,     setVendorA]     = useState('')    // vendor comparison
+  const [vendorB,     setVendorB]     = useState('')
 
   // ── Load data ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -82,10 +86,10 @@ export default function DashboardPage() {
     async function load() {
       setLoading(true)
       try {
-        // Current year
+        // Current year (include items for drill-down)
         const { data: recs } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, items')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year}-01-01`)
           .lte('receipt_date', `${year}-12-31`)
@@ -135,6 +139,9 @@ export default function DashboardPage() {
   const total     = useMemo(() => active.reduce((s, r) => s + amt(r), 0), [active, settings.showWithVat])
   const totalPrev = useMemo(() => prevReceipts.reduce((s, r) => s + amt(r), 0), [prevReceipts, settings.showWithVat])
   const yoy       = totalPrev > 0 ? ((total - totalPrev) / totalPrev) * 100 : null
+
+  // Flattened line-items for the drill-down (item-level L1→L2→L3 over time)
+  const flatItems = useMemo(() => flattenItems(active), [active])
 
   const avgMonthly = useMemo(() => {
     const months = new Set(active.map(r => r.receipt_date?.slice(0, 7)).filter(Boolean))
@@ -221,6 +228,30 @@ export default function DashboardPage() {
     const m = monthlyData.reduce((best, d) => d.total > best.total ? d : best, { month: 0, total: 0 })
     return m.total > 0 ? HEB_MONTHS_FULL[m.month - 1] : null
   }, [monthlyData])
+
+  // ── Vendor comparison ──────────────────────────────────────────────────────────
+  const allVendors = useMemo(() => {
+    const set = new Set(active.map(r => (r.vendor_name || '').trim()).filter(Boolean))
+    return [...set].sort((a, b) => a.localeCompare(b, 'he'))
+  }, [active])
+
+  function monthlyForVendor(name) {
+    const map = {}
+    active.filter(r => (r.vendor_name || '').trim() === name).forEach(r => {
+      if (!r.receipt_date) return
+      const m = parseInt(r.receipt_date.slice(5, 7))
+      if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
+      map[m].total += amt(r); map[m].count += 1
+    })
+    return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
+  }
+  function vendorStats(name) {
+    const rows = active.filter(r => (r.vendor_name || '').trim() === name)
+    const total = rows.reduce((s, r) => s + amt(r), 0)
+    return { total, count: rows.length, avg: rows.length ? total / rows.length : 0 }
+  }
+  const cmpA = useMemo(() => vendorA ? monthlyForVendor(vendorA) : null, [vendorA, active, settings.showWithVat])
+  const cmpB = useMemo(() => vendorB ? monthlyForVendor(vendorB) : null, [vendorB, active, settings.showWithVat])
 
   const hasFilters = filterCat || filterVendor
 
@@ -389,6 +420,11 @@ export default function DashboardPage() {
           </Section>
         </div>
 
+        {/* ── Interactive drill-down (category → sub → product, over time) ───────── */}
+        <Section title="ניתוח מעמיק לאורך זמן" sub="לחץ על קטגוריה → תת-קטגוריה → מוצר. בחר גרנולריות: יומי/שבועי/חודשי/רבעוני/שנתי">
+          <CategoryDrilldown items={flatItems} />
+        </Section>
+
         {/* ── Category tree ─────────────────────────────────────────────────────── */}
         {l1Data.some(c => c.id) && (
           <Section title="פירוט מלא לפי קטגוריות" sub="L1 → L2 → L3 — לחץ להרחבה">
@@ -402,6 +438,55 @@ export default function DashboardPage() {
           sub={`Top ${Math.min(10, vendorData.length)} ספקים${filterVendor ? ` · מסונן: ${filterVendor}` : ''}`}
         >
           <TopVendors data={vendorData} selected={filterVendor} onSelect={setFilterVendor} />
+        </Section>
+
+        {/* ── Vendor comparison ─────────────────────────────────────────────────── */}
+        <Section title="השוואת ספקים" sub="בחר שני ספקים להשוואת הוצאה חודשית זה מול זה">
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
+            <div style={{ flex: '1 1 200px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#2563eb', marginBottom: '6px' }}>ספק א'</label>
+              <select value={vendorA} onChange={e => setVendorA(e.target.value)}
+                style={{ width: '100%', height: 44, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
+                <option value="">בחר ספק…</option>
+                {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: '1 1 200px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#f59e0b', marginBottom: '6px' }}>ספק ב'</label>
+              <select value={vendorB} onChange={e => setVendorB(e.target.value)}
+                style={{ width: '100%', height: 44, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
+                <option value="">בחר ספק…</option>
+                {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {(vendorA || vendorB) ? (
+            <>
+              <MonthlyBars
+                data={cmpA || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
+                compareData={cmpB || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
+                year={vendorA || 'ספק א'} compareYear={vendorB || 'ספק ב'}
+              />
+              {/* Comparison stats table */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
+                {[{ n: vendorA, c: '#2563eb' }, { n: vendorB, c: '#f59e0b' }].map(({ n, c }, idx) => {
+                  if (!n) return <div key={idx} style={{ padding: '14px', borderRadius: 12, border: '1px dashed var(--border)', color: 'var(--text-mute)', fontSize: '14px', textAlign: 'center' }}>לא נבחר ספק</div>
+                  const s = vendorStats(n)
+                  return (
+                    <div key={idx} style={{ padding: '14px 16px', borderRadius: 12, border: `1px solid var(--border)`, borderTop: `3px solid ${c}`, background: 'var(--panel-2)' }}>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: 'var(--text-dim)', marginBottom: '4px' }}><span>סה"כ</span><strong style={{ color: 'var(--ok)' }}>{fmtILS(s.total)}</strong></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: 'var(--text-dim)', marginBottom: '4px' }}><span>קבלות</span><strong>{s.count}</strong></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: 'var(--text-dim)' }}><span>ממוצע לקבלה</span><strong>{fmtILS(s.avg)}</strong></div>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : (
+            <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '24px 0', fontSize: '15px' }}>בחר ספק אחד או שניים כדי להשוות</p>
+          )}
         </Section>
 
       </>)}
