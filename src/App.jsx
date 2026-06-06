@@ -6,7 +6,8 @@ import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import MonthlyExportPrompt from './components/MonthlyExportPrompt'
-import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings } from 'lucide-react'
+import Sidebar from './components/Sidebar'
+import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu } from 'lucide-react'
 
 const LoginPage       = lazy(() => import('./pages/LoginPage'))
 const ReceiptsPage    = lazy(() => import('./pages/ReceiptsPage'))
@@ -205,48 +206,56 @@ function BottomNav({ onSignOut }) {
   )
 }
 
-// ── Mobile header — slim bar with logo top-right + business name ─────────────
-function MobileHeader({ onSignOut }) {
+// ── Mobile header — slim bar with hamburger + logo + business name ───────────
+function MobileHeader({ onMenu }) {
   const { settings } = useSettings()
   return (
     <header style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 14px', height: '52px',
+      padding: '0 12px', height: '52px',
       background: 'var(--panel)', borderBottom: '1px solid var(--border)',
       position: 'sticky', top: 0, zIndex: 90,
     }} dir="rtl">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
-        <BrandLogo size={32} />
-        <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text)' }}>{settings.businessName || 'מנהל קבלות'}</span>
-      </div>
-      <button onClick={onSignOut} aria-label="התנתק" style={{ padding: '6px', background: 'none', border: 'none', color: 'var(--text-mute)', cursor: 'pointer', display: 'flex' }}>
-        <LogOut size={18} />
+      <button onClick={onMenu} aria-label="תפריט" style={{ padding: '8px', background: 'none', border: 'none', color: 'var(--text)', cursor: 'pointer', display: 'flex' }}>
+        <Menu size={24} />
       </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+        <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text)' }}>{settings.businessName || 'מנהל קבלות'}</span>
+        <BrandLogo size={32} />
+      </div>
     </header>
   )
 }
 
 // ── App shell ─────────────────────────────────────────────────────────────────
+const SIDEBAR_W = 250
+
 function AppShell() {
   const { user, signOut, loading } = useAuth()
   const isMobile  = useIsMobile()
   const location  = useLocation()
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   if (loading) return <LoadingSpinner />
   if (!user)   return <Navigate to="/login" replace />
 
-  // Bottom nav height + safe-area — content shouldn't be hidden behind it
   const bottomPad = isMobile ? 'calc(70px + env(safe-area-inset-bottom))' : 0
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
-      {/* Top nav — desktop / tablet only; mobile gets a slim branded header */}
-      {!isMobile && <TopNav onSignOut={signOut} />}
-      {isMobile && <MobileHeader onSignOut={signOut} />}
+    <div style={{ minHeight: '100dvh', background: 'var(--bg)', paddingInlineEnd: isMobile ? 0 : SIDEBAR_W }}>
+      {/* Desktop: fixed sidebar (right, RTL). Mobile: slim header + drawer. */}
+      {!isMobile && <Sidebar onSignOut={signOut} />}
+      {isMobile && <MobileHeader onMenu={() => setDrawerOpen(true)} />}
+      {isMobile && drawerOpen && (
+        <>
+          <div onClick={() => setDrawerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }} />
+          <Sidebar drawer onSignOut={signOut} onClose={() => setDrawerOpen(false)} onNavigate={() => setDrawerOpen(false)} />
+        </>
+      )}
 
       {/* Page content */}
       <main style={{
-        padding: isMobile ? '16px 14px' : '24px 20px',
+        padding: isMobile ? '16px 14px' : '24px 28px',
         maxWidth: location.pathname === '/dashboard' ? '1100px' : '900px',
         margin: '0 auto',
         paddingBottom: isMobile ? bottomPad : '32px',
@@ -262,7 +271,7 @@ function AppShell() {
         </Suspense>
       </main>
 
-      {/* Bottom nav — mobile only */}
+      {/* Bottom nav — mobile only (quick access; full nav is the drawer) */}
       {isMobile && <BottomNav onSignOut={signOut} />}
 
       {/* End-of-month export reminder */}

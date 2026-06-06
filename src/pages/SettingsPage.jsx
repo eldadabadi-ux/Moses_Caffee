@@ -97,7 +97,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Logo + Business name Card */}
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+      <div id="set-logo" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Building2 size={17} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>לוגו ושם העסק</span>
@@ -148,7 +148,7 @@ export default function SettingsPage() {
       </div>
 
       {/* VAT Rate Card */}
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+      <div id="set-vat" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Percent size={15} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>שיעור מע"מ</span>
@@ -195,7 +195,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Display Mode Card */}
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+      <div id="set-display" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 15 }}>₪</span>
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>הצגת מחירים</span>
@@ -219,7 +219,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Save folder Card */}
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+      <div id="set-folder" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <FolderOpen size={17} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>תיקיית שמירה</span>
@@ -258,7 +258,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Monthly reminder timing Card */}
-      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+      <div id="set-reminder" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Bell size={17} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>תזכורת ייצוא חודשית</span>

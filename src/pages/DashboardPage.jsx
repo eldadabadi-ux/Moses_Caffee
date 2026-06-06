@@ -45,9 +45,9 @@ function KpiCard({ label, value, sub, icon: Icon, color, trend }) {
 }
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
-function Section({ title, sub, children, action }) {
+function Section({ title, sub, children, action, id }) {
   return (
-    <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+    <div id={id} style={{ scrollMarginTop: '76px', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: '16px', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text)' }}>{title}</h3>
@@ -358,6 +358,7 @@ export default function DashboardPage() {
 
         {/* ── Monthly chart ─────────────────────────────────────────────────────── */}
         <Section
+          id="dash-monthly"
           title={`הוצאות חודשיות — ${year}${compareYear ? ` מול ${compareYear}` : ''}`}
           sub={compareYear ? undefined : `סה"כ: ${fmtILS(total)}`}
           action={
@@ -380,7 +381,7 @@ export default function DashboardPage() {
         </Section>
 
         {/* ── Category donut + ranking ──────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr', gap: isMobile ? '14px' : '20px' }}>
+        <div id="dash-categories" style={{ scrollMarginTop: '76px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr', gap: isMobile ? '14px' : '20px' }}>
           {/* Donut */}
           <Section title="התפלגות לפי קטגוריה" sub="לחץ על segment לסינון">
             {l1Data.length > 0
@@ -426,19 +427,20 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Interactive drill-down (category → sub → product, over time) ───────── */}
-        <Section title="ניתוח מעמיק לאורך זמן" sub="לחץ על קטגוריה → תת-קטגוריה → מוצר. בחר גרנולריות: יומי/שבועי/חודשי/רבעוני/שנתי">
+        <Section id="dash-drilldown" title="ניתוח מעמיק לאורך זמן" sub="לחץ על קטגוריה → תת-קטגוריה → מוצר. בחר גרנולריות: יומי/שבועי/חודשי/רבעוני/שנתי">
           <CategoryDrilldown items={flatItems} />
         </Section>
 
         {/* ── Category tree ─────────────────────────────────────────────────────── */}
         {l1Data.some(c => c.id) && (
-          <Section title="פירוט מלא לפי קטגוריות" sub="L1 → L2 → L3 — לחץ להרחבה">
+          <Section id="dash-tree" title="פירוט מלא לפי קטגוריות" sub="L1 → L2 → L3 — לחץ להרחבה">
             <CategoryTree l1Data={l1Data.filter(c => c.id)} categories={categories} receipts={active} total={total} amountOf={amt} />
           </Section>
         )}
 
         {/* ── Top vendors ───────────────────────────────────────────────────────── */}
         <Section
+          id="dash-vendors"
           title="ספקים מובילים"
           sub={`Top ${Math.min(10, vendorData.length)} ספקים${filterVendor ? ` · מסונן: ${filterVendor}` : ''}`}
         >
@@ -446,7 +448,7 @@ export default function DashboardPage() {
         </Section>
 
         {/* ── Vendor comparison ─────────────────────────────────────────────────── */}
-        <Section title="השוואת ספקים" sub="בחר שני ספקים להשוואת הוצאה חודשית זה מול זה"
+        <Section id="dash-compare" title="השוואת ספקים" sub="בחר שני ספקים להשוואת הוצאה חודשית זה מול זה"
           action={<ChartTypeToggle value={chartType} onChange={setChartType} />}>
 
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>

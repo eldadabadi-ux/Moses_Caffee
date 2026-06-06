@@ -407,11 +407,17 @@ export default function ReceiptsPage() {
 
   // ── Listen for bottom-nav scan trigger ──────────────────────────────────────
   useEffect(() => {
-    function onScanEvent() {
-      scanClickRef.current?.()
-    }
+    function onScanEvent() { scanClickRef.current?.() }
+    function onExportEvent() { setShowExport(true) }
+    function onAddEvent() { resetForm(); setShowModal(true) }
     window.addEventListener('receipts-scan', onScanEvent)
-    return () => window.removeEventListener('receipts-scan', onScanEvent)
+    window.addEventListener('receipts-export', onExportEvent)
+    window.addEventListener('receipts-add', onAddEvent)
+    return () => {
+      window.removeEventListener('receipts-scan', onScanEvent)
+      window.removeEventListener('receipts-export', onExportEvent)
+      window.removeEventListener('receipts-add', onAddEvent)
+    }
   }, [])
 
   useEffect(() => { loadData() }, [])

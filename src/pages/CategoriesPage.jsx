@@ -24,6 +24,18 @@ export default function CategoriesPage() {
   useEffect(() => { if (user) load() }, [user])  // eslint-disable-line
   useEffect(() => () => clearTimeout(recatTimer.current), [])
 
+  // Sidebar-triggered actions
+  useEffect(() => {
+    const onAdd = () => { setAddingTo({ parentId: null, level: 1 }); setNewName('') }
+    const onRecat = () => runRecategorize(false)
+    window.addEventListener('categories-add', onAdd)
+    window.addEventListener('categories-recat', onRecat)
+    return () => {
+      window.removeEventListener('categories-add', onAdd)
+      window.removeEventListener('categories-recat', onRecat)
+    }
+  }, [])  // eslint-disable-line
+
   // Run the AI re-classification of existing receipts against the updated tree.
   async function runRecategorize(silent = false) {
     if (recatBusy) return
