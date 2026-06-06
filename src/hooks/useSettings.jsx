@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS = {
   showWithVat: true,   // true = show prices WITH VAT, false = show prices WITHOUT VAT
   logo:        null,   // base64 data URL of the business logo
   businessName: 'מנהל קבלות', // shown next to the logo
+  reminderTiming: 'start',    // 'start' (1st) | 'mid' (15th) | 'end' (last day)
 }
 
 function loadLocal() {
@@ -25,6 +26,7 @@ function loadLocal() {
       showWithVat:  typeof s.showWithVat === 'boolean' ? s.showWithVat : DEFAULT_SETTINGS.showWithVat,
       logo:         typeof s.logo        === 'string'  ? s.logo        : DEFAULT_SETTINGS.logo,
       businessName: typeof s.businessName === 'string' && s.businessName ? s.businessName : DEFAULT_SETTINGS.businessName,
+      reminderTiming: ['start','mid','end'].includes(s.reminderTiming) ? s.reminderTiming : DEFAULT_SETTINGS.reminderTiming,
     }
   } catch {
     return { ...DEFAULT_SETTINGS }

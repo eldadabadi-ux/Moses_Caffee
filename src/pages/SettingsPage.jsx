@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
-import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen } from 'lucide-react'
+import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell } from 'lucide-react'
 import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import toast from 'react-hot-toast'
@@ -254,6 +254,36 @@ export default function SettingsPage() {
               בחירת תיקייה קבועה זמינה במחשב (Chrome/Edge) בלבד. במכשיר נייד הקבצים יורדו לתיקיית ההורדות הרגילה.
             </p>
           )}
+        </div>
+      </div>
+
+      {/* Monthly reminder timing Card */}
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Bell size={17} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>תזכורת ייצוא חודשית</span>
+        </div>
+        <div style={{ padding: 20 }}>
+          <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+            מתי שתופיע ההודעה "האם לייצא את הקבלות לרואה החשבון?" בכל חודש.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {[
+              { id: 'start', label: 'תחילת החודש', sub: '1 בחודש' },
+              { id: 'mid',   label: 'אמצע החודש',  sub: '15 בחודש' },
+              { id: 'end',   label: 'סוף החודש',   sub: 'יום אחרון' },
+            ].map(opt => {
+              const active = (settings.reminderTiming || 'start') === opt.id
+              return (
+                <button key={opt.id} onClick={() => updateSettings({ reminderTiming: opt.id })}
+                  style={{ flex: '1 1 110px', padding: '12px 10px', borderRadius: 10, cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'center',
+                    border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent-bg)' : 'var(--panel-2)', color: active ? 'var(--accent)' : 'var(--text-mute)' }}>
+                  <div style={{ fontSize: 15, fontWeight: active ? 700 : 600 }}>{opt.label}</div>
+                  <div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 2 }}>{opt.sub}</div>
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 

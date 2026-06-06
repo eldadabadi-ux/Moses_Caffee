@@ -30,15 +30,20 @@ export default function MonthlyExportPrompt() {
 
   useEffect(() => {
     if (!user) return
-    // Show once per calendar month, until answered.
+    // Reminder day for THIS month, based on the user's chosen timing.
+    const now = new Date()
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+    const triggerDay = settings?.reminderTiming === 'mid' ? 15
+      : settings?.reminderTiming === 'end' ? lastDay
+      : 1
+    // Show once per calendar month, only on/after the trigger day, until answered.
     let answered = null
     try { answered = localStorage.getItem(PROMPT_KEY) } catch {}
-    if (answered !== currentMonthKey()) {
-      // small delay so it doesn't fight the initial page render
+    if (answered !== currentMonthKey() && now.getDate() >= triggerDay) {
       const t = setTimeout(() => setShow(true), 1200)
       return () => clearTimeout(t)
     }
-  }, [user])
+  }, [user, settings?.reminderTiming])
 
   function dismiss() {
     try { localStorage.setItem(PROMPT_KEY, currentMonthKey()) } catch {}
