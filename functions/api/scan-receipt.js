@@ -16,7 +16,7 @@ const GEMINI_PRIMARY  = 'gemini-2.5-flash'
 const GEMINI_FALLBACK = 'gemini-flash-latest'
 
 function getSupabaseUrl(env) {
-  return env.VITE_SUPABASE_URL || env.SUPABASE_URL || ''
+  return env.VITE_SUPABASE_URL || env.SUPABASE_URL || 'https://dsoucojqjrodxozcbicf.supabase.co'
 }
 
 function corsHeaders(request, env) {

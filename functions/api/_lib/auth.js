@@ -3,7 +3,11 @@
  * Only requireUser() is needed — single-user app, no roles or tenants.
  */
 
-const SUPABASE_URL = import.meta?.env?.VITE_SUPABASE_URL || 'https://REPLACE_ME.supabase.co'
+// Public values (also present in the frontend bundle) — safe to hardcode as a
+// fallback so auth keeps working even if the Function's runtime env vars are
+// missing. Override via env.VITE_SUPABASE_URL / env.VITE_SUPABASE_ANON_KEY.
+const FALLBACK_SUPABASE_URL = 'https://dsoucojqjrodxozcbicf.supabase.co'
+const FALLBACK_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRzb3Vjb2pxanJvZHhvemNiaWNmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA2MTQ4MjQsImV4cCI6MjA5NjE5MDgyNH0.4jgRiQ7GM-3maBmbipNtp66dtVva84HGCrNUhviezcg'
 
 class AuthError extends Error {
   constructor(message, status, code) {
@@ -20,8 +24,8 @@ export async function verifyJWT(request, env) {
   if (!m) throw new AuthError('Malformed Authorization header', 401, 'bad_token')
 
   const accessToken = m[1]
-  const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || SUPABASE_URL
-  const apiKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseUrl = env.VITE_SUPABASE_URL || env.SUPABASE_URL || FALLBACK_SUPABASE_URL
+  const apiKey = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_SERVICE_ROLE_KEY || FALLBACK_ANON_KEY
   if (!apiKey) throw new AuthError('Auth verification unavailable on server', 500, 'server_config')
 
   const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
