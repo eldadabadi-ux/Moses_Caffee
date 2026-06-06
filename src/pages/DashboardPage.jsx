@@ -85,7 +85,7 @@ export default function DashboardPage() {
         // Current year
         const { data: recs } = await supabase
           .from('receipts')
-          .select('id, amount, amount_before_vat, vat_amount, vat_rate, receipt_date, category_id, category_text, vendor_name')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year}-01-01`)
           .lte('receipt_date', `${year}-12-31`)
@@ -94,7 +94,7 @@ export default function DashboardPage() {
         // Previous year (for YoY)
         const { data: prevRecs } = await supabase
           .from('receipts')
-          .select('id, amount, amount_before_vat, vat_amount, vat_rate, receipt_date, category_id, category_text, vendor_name')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year - 1}-01-01`)
           .lte('receipt_date', `${year - 1}-12-31`)

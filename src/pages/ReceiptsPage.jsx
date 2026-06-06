@@ -366,8 +366,8 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, onClose }) 
     const fmt = d => d ? new Date(d).toLocaleDateString('he-IL', { day:'numeric', month:'long', year:'numeric' }) : ''
     const period = (filterFrom || filterTo) ? `${fmt(filterFrom) || '...'} — ${fmt(filterTo) || '...'}` : 'כל הזמנים'
     const sorted = [...receipts].sort((a,b) => (a.receipt_date||'').localeCompare(b.receipt_date||''))
-    const cBefore = r => { const t = parseFloat(r.amount)||0; if (r.amount_before_vat>0) return parseFloat(r.amount_before_vat); const rt = r.vat_rate||18; return Math.round(t/(1+rt/100)*100)/100 }
-    const cVat    = r => { const t = parseFloat(r.amount)||0; if (r.vat_amount>0) return parseFloat(r.vat_amount); return Math.round((t-cBefore(r))*100)/100 }
+    const cBefore = r => { const t = parseFloat(r.amount)||0; if (r.amount_before_vat>0) return parseFloat(r.amount_before_vat); if (r.ai_summary?.before_vat>0) return parseFloat(r.ai_summary.before_vat); const rt = r.vat_rate||18; return Math.round(t/(1+rt/100)*100)/100 }
+    const cVat    = r => { const t = parseFloat(r.amount)||0; if (r.vat_amount>0) return parseFloat(r.vat_amount); if (r.ai_summary?.vat_amount>0) return parseFloat(r.ai_summary.vat_amount); return Math.round((t-cBefore(r))*100)/100 }
     const il = n => `₪${parseFloat(n||0).toLocaleString('he-IL',{minimumFractionDigits:2})}`
     const sumBefore = sorted.reduce((s,r)=>s+cBefore(r),0)
     const sumVat    = sorted.reduce((s,r)=>s+cVat(r),0)
@@ -405,12 +405,14 @@ td{padding:10px 12px;color:#334155;}@media print{body{padding:0;}}</style></head
         const calcBefore = r => {
           const t = parseFloat(r.amount) || 0
           if (r.amount_before_vat != null && r.amount_before_vat > 0) return parseFloat(r.amount_before_vat)
+          if (r.ai_summary?.before_vat > 0) return parseFloat(r.ai_summary.before_vat)
           const rate = r.vat_rate || 18
           return Math.round(t / (1 + rate / 100) * 100) / 100
         }
         const calcVat = r => {
           const t = parseFloat(r.amount) || 0
           if (r.vat_amount != null && r.vat_amount > 0) return parseFloat(r.vat_amount)
+          if (r.ai_summary?.vat_amount > 0) return parseFloat(r.ai_summary.vat_amount)
           return Math.round((t - calcBefore(r)) * 100) / 100
         }
         const sumBefore = receipts.reduce((s, r) => s + calcBefore(r), 0)
@@ -589,10 +591,29 @@ export default function ReceiptsPage() {
   }), [receipts, search, filterFrom, filterTo])
 
   // Total respects the with/without-VAT display preference
-  const totalAmount = useMemo(
-    () => filtered.reduce((s, r) => s + displayAmount(parseFloat(r.amount) || 0, r.amount_before_vat), 0),
-    [filtered, displayAmount]
-  )
+  // VAT-aware per-receipt helpers — prefer the exact values scanned from the
+  // receipt (dedicated column OR ai_summary fallback), else compute from the
+  // total + configured VAT rate.
+  const amtBefore = (r) => {
+    const t = parseFloat(r.amount) || 0
+    if (r.amount_before_vat != null && r.amount_before_vat > 0) return parseFloat(r.amount_before_vat)
+    if (r.ai_summary?.before_vat > 0) return parseFloat(r.ai_summary.before_vat)
+    return Math.round(t / (1 + vatRate / 100) * 100) / 100
+  }
+  const amtVat = (r) => {
+    const t = parseFloat(r.amount) || 0
+    if (r.vat_amount != null && r.vat_amount > 0) return parseFloat(r.vat_amount)
+    if (r.ai_summary?.vat_amount > 0) return parseFloat(r.ai_summary.vat_amount)
+    return Math.round((t - amtBefore(r)) * 100) / 100
+  }
+
+  // Three totals: paid (with VAT), before VAT, and the VAT itself.
+  const totals = useMemo(() => ({
+    paid:   filtered.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+    before: filtered.reduce((s, r) => s + amtBefore(r), 0),
+    vat:    filtered.reduce((s, r) => s + amtVat(r), 0),
+  }), [filtered, vatRate])
+  const totalAmount = totals.paid
 
   const formCategories = useMemo(() => {
     const l1 = categories.filter(c => c.level === 1)
@@ -733,13 +754,14 @@ export default function ReceiptsPage() {
         category_id, category_text: reviewCategory,
         items: reviewItems.length > 0 ? reviewItems : null,
         receipt_image: finalImage || null, ai_extracted: true,
-        ai_summary: { vendor: reviewVendor, total: totalAmt, model: 'gemini-2.5-pro' },
+        // Exact VAT breakdown is stored inside ai_summary too — this works even
+        // when the dedicated columns don't exist yet (no migration required).
+        ai_summary: { vendor: reviewVendor, total: totalAmt, before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate, model: 'gemini-2.5-flash' },
       }
       let { error } = await supabase.from('receipts').insert({ ...base, amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate })
-      // Graceful fallback if VAT migration hasn't run yet
+      // Graceful fallback if VAT migration hasn't run yet — ai_summary keeps the values
       if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
         ;({ error } = await supabase.from('receipts').insert(base))
-        if (!error) toast('הקבלה נשמרה ללא פירוט מע"מ — הרץ את ה-migration', { icon: 'ℹ️', duration: 6000 })
       }
       if (error) throw error
       toast.success('קבלה נשמרה!')
@@ -913,21 +935,26 @@ export default function ReceiptsPage() {
         )}
       </div>
 
-      {/* ── Summary + VAT toggle ────────────────────────────────────────────── */}
+      {/* ── Summary: paid / VAT / before-VAT ─────────────────────────────────── */}
       {filtered.length > 0 && (
-        <div style={{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
-          <div style={{ display:'inline-flex', alignItems:'center', gap:'10px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 14px' : '12px 18px', boxShadow:'var(--shadow-card)' }}>
-            <span style={{ fontSize:'12.5px', color:'var(--text-mute)' }}>{filtered.length} קבלות</span>
-            <div style={{ width:1, height:14, background:'var(--border)' }} />
-            <span style={{ fontSize: isMobile ? '16px' : '18px', fontWeight:700, color:'var(--ok)' }}>{fmtILS(totalAmount)}</span>
+        <div style={{ display:'flex', alignItems:'stretch', gap:'10px', flexWrap:'wrap' }}>
+          {/* Total paid (with VAT) — primary */}
+          <div style={{ display:'flex', flexDirection:'column', gap:'2px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 16px' : '12px 20px', boxShadow:'var(--shadow-card)' }}>
+            <span style={{ fontSize:'11px', color:'var(--text-mute)', fontWeight:600 }}>סה"כ לתשלום ({filtered.length} קבלות)</span>
+            <span style={{ fontSize: isMobile ? '20px' : '22px', fontWeight:800, color:'var(--ok)', lineHeight:1.1 }}>{fmtILS(totals.paid)}</span>
           </div>
-          {/* VAT display toggle */}
-          <button onClick={toggleVatDisplay}
-            style={{ display:'inline-flex', alignItems:'center', gap:'6px', height: isMobile ? 'auto' : 44, padding:'8px 14px', borderRadius:'var(--r-card)', border:`1px solid ${settings.showWithVat ? 'var(--border)' : 'var(--accent)'}`, background: settings.showWithVat ? 'var(--panel)' : 'var(--accent-bg)', color: settings.showWithVat ? 'var(--text-dim)' : 'var(--accent)', fontSize:'12.5px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}
-            title="החלף בין הצגת מחירים כולל / ללא מע&quot;מ">
-            <ReceiptIcon size={14} />
-            {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
-          </button>
+          {/* VAT breakdown */}
+          <div style={{ display:'flex', gap: isMobile ? '14px' : '20px', alignItems:'center', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 16px' : '12px 20px' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:'2px' }}>
+              <span style={{ fontSize:'11px', color:'var(--text-mute)' }}>לפני מע"מ</span>
+              <span style={{ fontSize: isMobile ? '14px' : '15px', fontWeight:700, color:'var(--text)' }}>{fmtILS(totals.before)}</span>
+            </div>
+            <div style={{ width:1, alignSelf:'stretch', background:'var(--border)' }} />
+            <div style={{ display:'flex', flexDirection:'column', gap:'2px' }}>
+              <span style={{ fontSize:'11px', color:'var(--text-mute)' }}>מע"מ {vatRate}%</span>
+              <span style={{ fontSize: isMobile ? '14px' : '15px', fontWeight:700, color:'#92400e' }}>{fmtILS(totals.vat)}</span>
+            </div>
+          </div>
         </div>
       )}
 
@@ -965,9 +992,14 @@ export default function ReceiptsPage() {
                 </div>
               </div>
 
-              {/* Amount + actions */}
+              {/* Amount (paid, with VAT) + breakdown + actions */}
               <div style={{ display:'flex', alignItems:'center', gap: isMobile ? '4px' : '8px', flexShrink:0 }}>
-                <span style={{ fontSize: isMobile ? '15px' : '16px', fontWeight:700, color:'var(--ok)' }}>{fmtILS(displayAmount(parseFloat(r.amount) || 0, r.amount_before_vat))}</span>
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'1px' }}>
+                  <span style={{ fontSize: isMobile ? '15px' : '16px', fontWeight:700, color:'var(--ok)', whiteSpace:'nowrap' }}>{fmtILS(parseFloat(r.amount) || 0)}</span>
+                  <span style={{ fontSize:'10px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
+                    לפני מע"מ {fmtILS(amtBefore(r))}
+                  </span>
+                </div>
                 {/* Action buttons — slightly larger on mobile for touch */}
                 <button onClick={() => openEdit(r)} style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Pencil size={14} /></button>
                 <button onClick={() => setDeleteId(r.id)} style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='#fef2f2';e.currentTarget.style.color='var(--danger)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><Trash2 size={14} /></button>
