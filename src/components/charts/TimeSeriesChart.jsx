@@ -4,9 +4,10 @@ import * as d3 from 'd3'
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 
 /**
- * TimeSeriesChart — bars over time buckets. `data` = [{ key, label, total, count }].
+ * TimeSeriesChart — bars OR line+points over time buckets.
+ * `data` = [{ key, label, total, count }]. `chartType` = 'bar' | 'line'.
  */
-export default function TimeSeriesChart({ data, color = '#2563eb' }) {
+export default function TimeSeriesChart({ data, color = '#2563eb', chartType = 'bar' }) {
   const svgRef  = useRef(null)
   const wrapRef = useRef(null)
   const tipRef  = useRef(null)
@@ -56,32 +57,54 @@ export default function TimeSeriesChart({ data, color = '#2563eb' }) {
       })
 
     const tip = d3.select(tipRef.current)
+    function showTip(event, d) {
+      tip.style('display', 'block').html(
+        `<div style="font-weight:700;margin-bottom:3px">${d.label}</div>` +
+        `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
+        `<div style="color:var(--text-mute);font-size:11.5px;margin-top:2px">${d.count} פריטים</div>`
+      )
+      const rect = svgRef.current.getBoundingClientRect()
+      tip.style('left', (event.clientX - rect.left - 70) + 'px').style('top', (y(d.total) + margin.top - 70) + 'px')
+    }
+    const hideTip = () => tip.style('display', 'none')
 
-    g.selectAll('rect.bar')
-      .data(data)
-      .join('rect')
-      .attr('class', 'bar')
-      .attr('x', d => x(d.key))
-      .attr('width', x.bandwidth())
-      .attr('y', innerH).attr('height', 0)
-      .attr('rx', 4)
-      .attr('fill', color)
-      .attr('opacity', 0.9)
-      .style('cursor', 'pointer')
-      .on('mouseenter', function (event, d) {
-        d3.select(this).attr('opacity', 1)
-        tip.style('display', 'block').html(
-          `<div style="font-weight:700;margin-bottom:3px">${d.label}</div>` +
-          `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
-          `<div style="color:var(--text-mute);font-size:11.5px;margin-top:2px">${d.count} פריטים</div>`
-        )
-        const rect = svgRef.current.getBoundingClientRect()
-        tip.style('left', (event.clientX - rect.left - 70) + 'px').style('top', (y(d.total) + margin.top - 70) + 'px')
-      })
-      .on('mouseleave', function () { d3.select(this).attr('opacity', 0.9); tip.style('display', 'none') })
-      .transition().duration(500).delay((_, i) => i * 25).ease(d3.easeCubicOut)
-      .attr('y', d => y(d.total)).attr('height', d => innerH - y(d.total))
-  }, [data, w, color])
+    if (chartType === 'line') {
+      const cx = d => x(d.key) + x.bandwidth() / 2
+      // Line path
+      const line = d3.line().x(cx).y(d => y(d.total)).curve(d3.curveMonotoneX)
+      const path = g.append('path').datum(data)
+        .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 2.5)
+        .attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round').attr('d', line)
+      const len = path.node().getTotalLength()
+      path.attr('stroke-dasharray', `${len} ${len}`).attr('stroke-dashoffset', len)
+        .transition().duration(700).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0)
+      // Points
+      g.selectAll('circle.pt').data(data).join('circle')
+        .attr('class', 'pt')
+        .attr('cx', cx).attr('cy', d => y(d.total)).attr('r', 0)
+        .attr('fill', 'var(--panel)').attr('stroke', color).attr('stroke-width', 2.5)
+        .style('cursor', 'pointer')
+        .on('mouseenter', function (event, d) { d3.select(this).attr('r', 7); showTip(event, d) })
+        .on('mouseleave', function () { d3.select(this).attr('r', 4.5); hideTip() })
+        .transition().duration(500).delay((_, i) => i * 25).attr('r', 4.5)
+    } else {
+      g.selectAll('rect.bar')
+        .data(data)
+        .join('rect')
+        .attr('class', 'bar')
+        .attr('x', d => x(d.key))
+        .attr('width', x.bandwidth())
+        .attr('y', innerH).attr('height', 0)
+        .attr('rx', 4)
+        .attr('fill', color)
+        .attr('opacity', 0.9)
+        .style('cursor', 'pointer')
+        .on('mouseenter', function (event, d) { d3.select(this).attr('opacity', 1); showTip(event, d) })
+        .on('mouseleave', function () { d3.select(this).attr('opacity', 0.9); hideTip() })
+        .transition().duration(500).delay((_, i) => i * 25).ease(d3.easeCubicOut)
+        .attr('y', d => y(d.total)).attr('height', d => innerH - y(d.total))
+    }
+  }, [data, w, color, chartType])
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>

@@ -5,7 +5,7 @@ const HEB_MONTHS = ['ינו','פבר','מרץ','אפר','מאי','יוני','י�
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 
-export default function MonthlyBars({ data, compareData, year, compareYear, color = '#2563eb', compareColor = '#f59e0b' }) {
+export default function MonthlyBars({ data, compareData, year, compareYear, color = '#2563eb', compareColor = '#f59e0b', chartType = 'bar' }) {
   const svgRef   = useRef(null)
   const wrapRef  = useRef(null)
   const tipRef   = useRef(null)
@@ -100,12 +100,44 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         .attr('height', d => d.total > 0 ? H - yScale(d.total) : 0)
     }
 
-    const bw = compareData ? xScale.bandwidth() / 2 - 2 : xScale.bandwidth()
-    drawBars(data, 0, color, 'A')
-    if (compareData) drawBars(compareData, bw + 4, compareColor, 'B')
+    function drawLine(dataset, strokeColor) {
+      const cx = d => xScale(d.month) + xScale.bandwidth() / 2
+      const line = d3.line().x(cx).y(d => yScale(d.total)).curve(d3.curveMonotoneX)
+      const path = g.append('path').datum(dataset)
+        .attr('fill', 'none').attr('stroke', strokeColor).attr('stroke-width', 2.5)
+        .attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round').attr('d', line)
+      const len = path.node().getTotalLength()
+      path.attr('stroke-dasharray', `${len} ${len}`).attr('stroke-dashoffset', len)
+        .transition().duration(700).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0)
+      g.selectAll(null).data(dataset).join('circle')
+        .attr('cx', cx).attr('cy', d => yScale(d.total)).attr('r', 0)
+        .attr('fill', 'var(--panel)').attr('stroke', strokeColor).attr('stroke-width', 2.5)
+        .style('cursor', 'pointer')
+        .on('mouseenter', function (e, d) {
+          d3.select(this).attr('r', 6.5)
+          const yr = strokeColor === color ? year : compareYear
+          tip.style('display', 'block').html(
+            `<div style="font-weight:700;margin-bottom:4px">${HEB_MONTHS_FULL[d.month-1]} ${yr}</div>` +
+            `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
+            `<div style="color:var(--text-mute);font-size:11px;margin-top:2px">${d.count} קבלות</div>`)
+          const r = svgRef.current.getBoundingClientRect()
+          tip.style('left', (e.clientX - r.left - 70) + 'px').style('top', (yScale(d.total) + margin.top - 80) + 'px')
+        })
+        .on('mouseleave', function () { d3.select(this).attr('r', 4); tip.style('display', 'none') })
+        .transition().duration(500).delay((_, i) => i * 30).attr('r', 4)
+    }
 
-    // Value labels on top of bars (desktop only, skip if too many)
-    if (dims.w > 480) {
+    const bw = compareData ? xScale.bandwidth() / 2 - 2 : xScale.bandwidth()
+    if (chartType === 'line') {
+      drawLine(data, color)
+      if (compareData) drawLine(compareData, compareColor)
+    } else {
+      drawBars(data, 0, color, 'A')
+      if (compareData) drawBars(compareData, bw + 4, compareColor, 'B')
+    }
+
+    // Value labels on top of bars (desktop only, bar mode, skip if too many)
+    if (chartType === 'bar' && dims.w > 480) {
       g.selectAll('.val-label')
         .data(data.filter(d => d.total > 0))
         .join('text')
@@ -121,7 +153,7 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         .transition().delay(800).duration(300)
         .attr('opacity', 1)
     }
-  }, [data, compareData, dims, year, compareYear, color, compareColor])
+  }, [data, compareData, dims, year, compareYear, color, compareColor, chartType])
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>

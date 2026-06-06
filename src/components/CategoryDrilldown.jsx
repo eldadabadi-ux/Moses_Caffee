@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { ChevronLeft, Home, Search, Users } from 'lucide-react'
 import { childrenBreakdown, timeSeries, filterByPath, vendorBreakdown, nextDim, DIM_LABEL } from '../lib/itemAggregation'
 import TimeSeriesChart from './charts/TimeSeriesChart'
+import ChartTypeToggle from './charts/ChartTypeToggle'
 
 const COLORS = ['#2563eb','#7c3aed','#16a34a','#d97706','#dc2626','#0891b2','#c2410c','#0d9488','#be185d','#6366f1']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
@@ -19,6 +20,7 @@ export default function CategoryDrilldown({ items }) {
   const [gran, setGran]   = useState('month')
   const [search, setSearch] = useState('')
   const [vendorFilter, setVendorFilter] = useState(null) // compare/isolate a vendor
+  const [chartType, setChartType] = useState('bar')
 
   const { dim: childDim, rows: childrenRaw } = useMemo(() => childrenBreakdown(items, path), [items, path])
   const children = useMemo(() => {
@@ -60,20 +62,23 @@ export default function CategoryDrilldown({ items }) {
         <div style={{ fontSize: '15px', color: 'var(--text-mute)' }}>
           {currentLabel}{vendorFilter ? ` · ${vendorFilter}` : ''} · <span style={{ color: 'var(--ok)', fontWeight: 700, fontSize: '17px' }}>{fmtILS(vendorFilter ? series.reduce((s,d)=>s+d.total,0) : scopedTotal)}</span>
         </div>
-        <div style={{ display: 'flex', gap: '4px', background: 'var(--panel-2)', borderRadius: '9px', padding: '3px', flexWrap: 'wrap' }}>
-          {GRANS.map(g => (
-            <button key={g.id} onClick={() => setGran(g.id)}
-              style={{ padding: '6px 12px', borderRadius: '7px', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)', fontSize: '13.5px', fontWeight: gran === g.id ? 700 : 500,
-                background: gran === g.id ? 'var(--accent)' : 'transparent', color: gran === g.id ? 'white' : 'var(--text-dim)' }}>
-              {g.label}
-            </button>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <ChartTypeToggle value={chartType} onChange={setChartType} />
+          <div style={{ display: 'flex', gap: '4px', background: 'var(--panel-2)', borderRadius: '9px', padding: '3px', flexWrap: 'wrap' }}>
+            {GRANS.map(g => (
+              <button key={g.id} onClick={() => setGran(g.id)}
+                style={{ padding: '6px 12px', borderRadius: '7px', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)', fontSize: '13.5px', fontWeight: gran === g.id ? 700 : 500,
+                  background: gran === g.id ? 'var(--accent)' : 'transparent', color: gran === g.id ? 'white' : 'var(--text-dim)' }}>
+                {g.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Time series */}
       {series.length > 0
-        ? <TimeSeriesChart data={series} color={vendorFilter ? '#7c3aed' : COLORS[path.length % COLORS.length]} />
+        ? <TimeSeriesChart data={series} color={vendorFilter ? '#7c3aed' : COLORS[path.length % COLORS.length]} chartType={chartType} />
         : <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '20px 0', fontSize: '15px' }}>אין נתונים לתקופה</p>}
 
       {/* Vendor breakdown / comparison — always available for the current scope */}

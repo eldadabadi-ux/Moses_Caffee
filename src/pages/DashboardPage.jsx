@@ -9,6 +9,7 @@ import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
 import TopVendors    from '../components/charts/TopVendors'
 import CategoryTree  from '../components/charts/CategoryTree'
 import CategoryDrilldown from '../components/CategoryDrilldown'
+import ChartTypeToggle from '../components/charts/ChartTypeToggle'
 import { flattenItems } from '../lib/itemAggregation'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
@@ -79,6 +80,7 @@ export default function DashboardPage() {
   const [availYears,  setAvailYears]  = useState([thisYear])
   const [vendorA,     setVendorA]     = useState('')    // vendor comparison
   const [vendorB,     setVendorB]     = useState('')
+  const [chartType,   setChartType]   = useState('bar') // 'bar' | 'line' for time charts
 
   // ── Load data ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -359,19 +361,22 @@ export default function DashboardPage() {
           title={`הוצאות חודשיות — ${year}${compareYear ? ` מול ${compareYear}` : ''}`}
           sub={compareYear ? undefined : `סה"כ: ${fmtILS(total)}`}
           action={
-            compareYear && !isMobile ? (
-              <div style={{ display: 'flex', gap: 12, fontSize: '12px' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />{year}
-                </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />{compareYear}
-                </span>
-              </div>
-            ) : null
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {compareYear && !isMobile && (
+                <div style={{ display: 'flex', gap: 12, fontSize: '12px' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />{year}
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />{compareYear}
+                  </span>
+                </div>
+              )}
+              <ChartTypeToggle value={chartType} onChange={setChartType} />
+            </div>
           }
         >
-          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} />
+          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} chartType={chartType} />
         </Section>
 
         {/* ── Category donut + ranking ──────────────────────────────────────────── */}
@@ -441,7 +446,9 @@ export default function DashboardPage() {
         </Section>
 
         {/* ── Vendor comparison ─────────────────────────────────────────────────── */}
-        <Section title="השוואת ספקים" sub="בחר שני ספקים להשוואת הוצאה חודשית זה מול זה">
+        <Section title="השוואת ספקים" sub="בחר שני ספקים להשוואת הוצאה חודשית זה מול זה"
+          action={<ChartTypeToggle value={chartType} onChange={setChartType} />}>
+
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
             <div style={{ flex: '1 1 200px' }}>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#2563eb', marginBottom: '6px' }}>ספק א'</label>
@@ -466,7 +473,7 @@ export default function DashboardPage() {
               <MonthlyBars
                 data={cmpA || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
                 compareData={cmpB || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
-                year={vendorA || 'ספק א'} compareYear={vendorB || 'ספק ב'}
+                year={vendorA || 'ספק א'} compareYear={vendorB || 'ספק ב'} chartType={chartType}
               />
               {/* Comparison stats table */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
