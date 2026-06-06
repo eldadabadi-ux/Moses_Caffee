@@ -22,7 +22,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
 
   return createPortal(
     <div style={{
-      position: 'fixed', inset: 0, zIndex: 50,
+      position: 'fixed', inset: 0, zIndex: 1000,  // above bottom nav (100) & sidebar (200)
       display: 'flex',
       alignItems: isMobile ? 'flex-end' : 'center',
       justifyContent: 'center',
@@ -48,7 +48,6 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
         animation: isMobile
           ? 'slideUp 280ms cubic-bezier(0.16,1,0.3,1) both'
           : 'slideInScale 200ms cubic-bezier(0.16,1,0.3,1) both',
-        paddingBottom: isMobile ? 'env(safe-area-inset-bottom)' : 0,
       }}>
         {/* Drag handle — mobile only */}
         {isMobile && (
@@ -85,8 +84,9 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
 
         {/* Content */}
         <div style={{
-          padding: isMobile ? '20px 16px 8px' : '24px',
-          overflowY: 'auto', flex: 1, WebkitOverflowScrolling: 'touch',
+          padding: isMobile ? '20px 16px' : '24px',
+          paddingBottom: isMobile ? 'calc(24px + env(safe-area-inset-bottom))' : '24px',
+          overflowY: 'auto', flex: 1, WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain',
         }}>
           {children}
         </div>
