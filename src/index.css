@@ -18,6 +18,7 @@ html {
   direction: rtl;
   font-family: var(--font-main);
   scroll-behavior: smooth;
+  overflow-x: hidden;          /* never allow horizontal page scroll */
 }
 
 body {
@@ -31,9 +32,15 @@ body {
   -webkit-text-size-adjust: 100%;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* clip prevents horizontal scroll WITHOUT breaking position:sticky */
+  overflow-x: clip;
+  max-width: 100vw;
 }
 
-#root { min-height: 100vh; min-height: 100dvh; }
+#root { min-height: 100vh; min-height: 100dvh; overflow-x: clip; max-width: 100vw; }
+
+/* Safety net: page sections never force horizontal overflow */
+main { overflow-x: clip; max-width: 100%; }
 
 @media (max-width: 767px) {
   body { font-size: 19px; }
