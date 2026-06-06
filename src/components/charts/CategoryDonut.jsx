@@ -87,7 +87,15 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
     centerLabel.append('text').attr('class', 'center-pct')
       .attr('y', 22).attr('text-anchor', 'middle')
       .attr('fill', 'var(--accent)').attr('font-size', '10px')
-      .attr('font-family', 'var(--font-main)').text('')
+      .attr('font-family', 'var(--font-main)').text(selected ? 'בטל סינון' : '')
+
+    // Transparent center hit-area — click clears the filter.
+    g.append('circle')
+      .attr('r', ri - 2).attr('fill', 'transparent')
+      .style('cursor', selected ? 'pointer' : 'default')
+      .on('click', () => { if (selected) onSelect?.(null) })
+      .on('mouseenter', () => { if (selected) centerLabel.select('.center-pct').attr('fill', 'var(--danger)') })
+      .on('mouseleave', () => centerLabel.select('.center-pct').attr('fill', 'var(--accent)'))
   }, [data, total, size, selected])
 
   return (

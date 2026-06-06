@@ -44,22 +44,29 @@ export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(loadLocal)
   const [saving, setSaving] = useState(false)
 
-  // Sync from Supabase on mount/login
+  // Sync from Supabase on mount/login — pulls all settings incl. logo so they
+  // appear on every device. Falls back to localStorage if the table is missing.
   useEffect(() => {
     if (!user) return
     supabase
       .from('user_settings')
-      .select('vat_rate, show_with_vat')
+      .select('vat_rate, show_with_vat, logo, business_name, reminder_timing')
       .eq('user_id', user.id)
       .maybeSingle()
       .then(({ data }) => {
         if (data) {
-          const s = { vatRate: data.vat_rate, showWithVat: data.show_with_vat }
+          const s = {
+            vatRate:        data.vat_rate ?? DEFAULT_SETTINGS.vatRate,
+            showWithVat:    typeof data.show_with_vat === 'boolean' ? data.show_with_vat : DEFAULT_SETTINGS.showWithVat,
+            logo:           data.logo ?? null,
+            businessName:   data.business_name || DEFAULT_SETTINGS.businessName,
+            reminderTiming: ['start','mid','end'].includes(data.reminder_timing) ? data.reminder_timing : DEFAULT_SETTINGS.reminderTiming,
+          }
           setSettings(s)
           saveLocal(s)
         }
       })
-      .catch(() => {}) // table might not exist before migration
+      .catch(() => {}) // table might not exist yet
   }, [user?.id])
 
   const updateSettings = useCallback(async (patch) => {
@@ -71,10 +78,13 @@ export function SettingsProvider({ children }) {
     setSaving(true)
     try {
       await supabase.from('user_settings').upsert({
-        user_id:       user.id,
-        vat_rate:      next.vatRate,
-        show_with_vat: next.showWithVat,
-        updated_at:    new Date().toISOString(),
+        user_id:         user.id,
+        vat_rate:        next.vatRate,
+        show_with_vat:   next.showWithVat,
+        logo:            next.logo,
+        business_name:   next.businessName,
+        reminder_timing: next.reminderTiming,
+        updated_at:      new Date().toISOString(),
       }, { onConflict: 'user_id' })
     } catch {} finally { setSaving(false) }
   }, [settings, user])

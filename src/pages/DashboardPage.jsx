@@ -391,7 +391,17 @@ export default function DashboardPage() {
         {/* ── Category donut + ranking ──────────────────────────────────────────── */}
         <div id="dash-categories" style={{ scrollMarginTop: '76px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr', gap: isMobile ? '14px' : '20px' }}>
           {/* Donut */}
-          <Section title="התפלגות לפי קטגוריה" sub="לחץ על segment לסינון">
+          <Section title="התפלגות לפי קטגוריה" sub="לחץ על פלח לסינון · לחיצה במרכז מבטלת">
+            {/* Selected category title — so it's clear which slice was clicked */}
+            {filterCat && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
+                <span style={{ width: 11, height: 11, borderRadius: '50%', background: catColor[filterCat] || 'var(--accent)', flexShrink: 0 }} />
+                <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{filterCat}</span>
+                <button onClick={() => setFilterCat(null)} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 13, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  <X size={13} /> בטל
+                </button>
+              </div>
+            )}
             {l1DataAll.length > 0
               ? <CategoryDonut data={l1DataAll} total={totalAll} selected={filterCat} onSelect={setFilterCat} />
               : <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '24px 0' }}>אין קטגוריות</p>
