@@ -177,41 +177,49 @@ export default function DashboardPage() {
     return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
   }, [compareYear, prevReceipts, year, settings.showWithVat])
 
-  // ── Category aggregation (L1 only for donut) ─────────────────────────────────
+  // ── Category aggregation (L1) ────────────────────────────────────────────────
   const l1Cats = useMemo(() => categories.filter(c => c.level === 1), [categories])
 
-  const l1Data = useMemo(() => {
-    const map = {}
-    active.forEach(r => {
-      // find which L1 this receipt belongs to
-      let catName = r.category_text || 'שונות'
-      // try to match by category_id → find L1 parent
-      if (r.category_id) {
-        const cat = categories.find(c => c.id === r.category_id)
-        if (cat) {
-          if (cat.level === 1) catName = cat.name
-          else if (cat.level === 2) {
-            const parent = categories.find(c => c.id === cat.parent_id)
-            if (parent) catName = parent.name
-          } else if (cat.level === 3) {
-            const p2 = categories.find(c => c.id === cat.parent_id)
-            const p1 = p2 ? categories.find(c => c.id === p2.parent_id) : null
-            if (p1) catName = p1.name
-          }
-        }
+  // Resolve a receipt's L1 category name (walk up the tree if it points to L2/L3).
+  function resolveL1(r) {
+    let catName = r.category_text || 'שונות'
+    if (r.category_id) {
+      const cat = categories.find(c => c.id === r.category_id)
+      if (cat) {
+        if (cat.level === 1) catName = cat.name
+        else if (cat.level === 2) { const p = categories.find(c => c.id === cat.parent_id); if (p) catName = p.name }
+        else if (cat.level === 3) { const p2 = categories.find(c => c.id === cat.parent_id); const p1 = p2 ? categories.find(c => c.id === p2.parent_id) : null; if (p1) catName = p1.name }
       }
-      if (!map[catName]) map[catName] = { name: catName, total: 0, count: 0 }
-      map[catName].total += amt(r)
-      map[catName].count += 1
+    }
+    return catName
+  }
+  function aggregateL1(list) {
+    const map = {}
+    list.forEach(r => {
+      const n = resolveL1(r)
+      if (!map[n]) map[n] = { name: n, total: 0, count: 0 }
+      map[n].total += amt(r); map[n].count += 1
     })
-    // Also add categories from DB that have no match in receipts
-    const sorted = Object.values(map).sort((a, b) => b.total - a.total)
-    // Enrich with id from l1Cats
-    return sorted.map(d => {
-      const cat = l1Cats.find(c => c.name === d.name)
-      return { ...d, id: cat?.id }
-    })
-  }, [active, categories, l1Cats, settings.showWithVat])
+    return Object.values(map).sort((a, b) => b.total - a.total)
+      .map(d => ({ ...d, id: l1Cats.find(c => c.name === d.name)?.id }))
+  }
+
+  // Filtered view (both category + vendor filters) — used by the tree.
+  const l1Data = useMemo(() => aggregateL1(active), [active, categories, l1Cats, settings.showWithVat])
+
+  // ALL categories (vendor filter only, ignores category filter) — used by the
+  // donut + ranking + dropdown, so selecting a category greys the others out
+  // instead of hiding them.
+  const catScope = useMemo(() => receipts.filter(r => !filterVendor || (r.vendor_name || '').trim() === filterVendor), [receipts, filterVendor])
+  const l1DataAll = useMemo(() => aggregateL1(catScope), [catScope, categories, l1Cats, settings.showWithVat])
+  const totalAll  = useMemo(() => l1DataAll.reduce((s, c) => s + c.total, 0), [l1DataAll])
+
+  // Stable colour per category — matches the donut's colour order.
+  const catColor = useMemo(() => {
+    const m = {}; l1DataAll.forEach((c, i) => { m[c.name] = COLORS[i % COLORS.length] }); return m
+  }, [l1DataAll])
+  // When a category is selected, the time charts adopt its colour.
+  const selColor = filterCat ? (catColor[filterCat] || '#2563eb') : '#2563eb'
 
   // ── Vendor aggregation ────────────────────────────────────────────────────────
   const vendorData = useMemo(() => {
@@ -305,7 +313,7 @@ export default function DashboardPage() {
               <select value={filterCat || ''} onChange={e => { setFilterCat(e.target.value || null); setFilterVendor(null) }}
                 style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: `1px solid ${filterCat ? 'var(--accent)' : 'var(--border)'}`, background: filterCat ? 'var(--accent-bg)' : 'var(--panel)', color: filterCat ? 'var(--accent)' : 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer' }}>
                 <option value="">כל הקטגוריות</option>
-                {l1Data.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                {l1DataAll.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </div>
             {/* Clear filters */}
@@ -342,7 +350,7 @@ export default function DashboardPage() {
         <KpiCard label="סה״כ הוצאות" value={fmtILS(total)} sub={`שנת ${year}`} icon={Receipt} color="var(--ok)" trend={yoy} />
         <KpiCard label="ממוצע חודשי" value={fmtILS(avgMonthly)} sub={bestMonth ? `חודש שיא: ${bestMonth}` : undefined} icon={Calendar} color="var(--accent)" />
         <KpiCard label="מספר קבלות" value={active.length} sub={`${active.filter(r => r.ai_extracted).length} נסרקו ב-AI`} icon={BarChart2} color="#7c3aed" />
-        {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1Data.length} sub={`${vendorData.length} ספקים`} icon={Tag} color="#d97706" />}
+        {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1DataAll.length} sub={`${vendorData.length} ספקים`} icon={Tag} color="#d97706" />}
       </div>
 
       {/* ── Empty state ───────────────────────────────────────────────────────── */}
@@ -377,45 +385,47 @@ export default function DashboardPage() {
             </div>
           }
         >
-          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} chartType={chartType} />
+          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} chartType={chartType} color={selColor} />
         </Section>
 
         {/* ── Category donut + ranking ──────────────────────────────────────────── */}
         <div id="dash-categories" style={{ scrollMarginTop: '76px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr', gap: isMobile ? '14px' : '20px' }}>
           {/* Donut */}
           <Section title="התפלגות לפי קטגוריה" sub="לחץ על segment לסינון">
-            {l1Data.length > 0
-              ? <CategoryDonut data={l1Data} total={total} selected={filterCat} onSelect={setFilterCat} />
+            {l1DataAll.length > 0
+              ? <CategoryDonut data={l1DataAll} total={totalAll} selected={filterCat} onSelect={setFilterCat} />
               : <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '24px 0' }}>אין קטגוריות</p>
             }
           </Section>
 
           {/* Category ranking */}
-          <Section title="דירוג קטגוריות" sub={`${l1Data.length} קטגוריות פעילות`}>
+          <Section title="דירוג קטגוריות" sub={`${l1DataAll.length} קטגוריות פעילות`}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {l1Data.map((cat, i) => {
-                const pct  = total > 0 ? (cat.total / total) * 100 : 0
+              {l1DataAll.map((cat, i) => {
+                const pct  = totalAll > 0 ? (cat.total / totalAll) * 100 : 0
                 const clr  = COLORS[i % COLORS.length]
                 const isSel = filterCat === cat.name
+                const dim  = filterCat && !isSel
                 return (
                   <div key={cat.name}
                     onClick={() => setFilterCat(cat.name === filterCat ? null : cat.name)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px',
-                      borderRadius: '9px', cursor: 'pointer', transition: 'background 120ms',
+                      borderRadius: '9px', cursor: 'pointer', transition: 'background 120ms, opacity 120ms',
                       background: isSel ? 'var(--accent-bg)' : 'var(--panel-2)',
                       border: `1px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
+                      opacity: dim ? 0.5 : 1,
                     }}
                     onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--panel)' }}
                     onMouseLeave={e => e.currentTarget.style.background = isSel ? 'var(--accent-bg)' : 'var(--panel-2)'}
                   >
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: clr, flexShrink: 0 }} />
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: dim ? 'var(--border-strong)' : clr, flexShrink: 0 }} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: isSel ? 700 : 500, color: isSel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
                     <span style={{ fontSize: '12.5px', color: 'var(--text-mute)', whiteSpace: 'nowrap', flexShrink: 0 }}>{cat.count}</span>
                     {!isMobile && (
                       <div style={{ width: 60, flexShrink: 0 }}>
                         <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${pct}%`, background: clr, borderRadius: 3, transition: 'width 500ms ease' }} />
+                          <div style={{ height: '100%', width: `${pct}%`, background: dim ? 'var(--border-strong)' : clr, borderRadius: 3, transition: 'width 500ms ease' }} />
                         </div>
                         <div style={{ fontSize: '10px', color: 'var(--text-mute)', textAlign: 'left', marginTop: 1 }}>{Math.round(pct)}%</div>
                       </div>

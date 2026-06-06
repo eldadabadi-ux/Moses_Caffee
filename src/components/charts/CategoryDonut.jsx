@@ -41,14 +41,17 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
     const filter = defs.append('filter').attr('id', 'drop-shadow')
     filter.append('feDropShadow').attr('dx', 0).attr('dy', 2).attr('stdDeviation', 4).attr('flood-color', 'rgba(0,0,0,0.18)')
 
+    // Non-selected slices turn grey (kept visible, not hidden).
+    const GREY = '#cbd5e1'
+    const fillFor = d => (selected && selected !== d.data.name) ? GREY : colorScale(d.data.name)
+
     const paths = g.selectAll('path')
       .data(pie(data))
       .join('path')
       .attr('d', arc)
-      .attr('fill', d => colorScale(d.data.name))
+      .attr('fill', fillFor)
       .attr('stroke', 'var(--panel)')
       .attr('stroke-width', 2)
-      .attr('opacity', d => selected && selected !== d.data.name ? 0.35 : 0.92)
       .style('cursor', 'pointer')
       .attr('transform', 'scale(0)').attr('opacity', 0)
       .on('mouseenter', function(_, d) {
@@ -68,7 +71,7 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
     // Animate entrance
     paths.transition().duration(700).delay((_, i) => i * 60).ease(d3.easeBackOut)
       .attr('transform', 'scale(1)')
-      .attr('opacity', d => selected && selected !== d.data.name ? 0.35 : 0.92)
+      .attr('opacity', 0.95)
 
     // Center label
     const centerLabel = g.append('g')
