@@ -40,7 +40,7 @@ export default function CategoryDrilldown({ items }) {
   function goTo(idx) { setPath(path.slice(0, idx)); setSearch(''); setVendorFilter(null) }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }} dir="rtl">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }} dir="rtl">
 
       {/* Breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', fontSize: '14px' }}>
@@ -95,22 +95,26 @@ export default function CategoryDrilldown({ items }) {
               </button>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            {vendors.map((v, i) => {
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {vendors.map((v) => {
               const pct = (v.total / maxVendor) * 100
               const sel = vendorFilter === v.name
               return (
                 <button key={v.name} onClick={() => setVendorFilter(sel ? null : v.name)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '9px', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right',
+                  style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', minWidth: 0, padding: '9px 12px', borderRadius: '9px', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right',
                     border: `1px solid ${sel ? 'var(--accent)' : 'var(--border)'}`, background: sel ? 'var(--accent-bg)' : 'var(--panel)' }}>
-                  <span style={{ flex: 1, fontSize: '14px', fontWeight: sel ? 700 : 500, color: sel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
-                  <span style={{ fontSize: '12.5px', color: 'var(--text-mute)' }}>{v.count} רכישות</span>
-                  <div style={{ width: 70, flexShrink: 0 }}>
-                    <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                  {/* name + amount */}
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: sel ? 700 : 600, color: sel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
+                    <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ok)', flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtILS(v.total)}</span>
+                  </div>
+                  {/* bar + count */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${pct}%`, background: sel ? 'var(--accent)' : '#60a5fa', borderRadius: 3 }} />
                     </div>
+                    <span style={{ fontSize: '12.5px', color: 'var(--text-mute)', flexShrink: 0, whiteSpace: 'nowrap' }}>{v.count} רכישות</span>
                   </div>
-                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ok)', minWidth: 72, textAlign: 'left' }}>{fmtILS(v.total)}</span>
                 </button>
               )
             })}
@@ -134,25 +138,29 @@ export default function CategoryDrilldown({ items }) {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: 360, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: 380, overflowY: 'auto', overflowX: 'hidden' }}>
             {children.map((c, i) => {
               const pct = (c.total / maxChild) * 100
               const color = COLORS[i % COLORS.length]
               return (
                 <button key={c.name} onClick={() => drillInto(c.name)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--panel-2)', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right', transition: 'background 120ms' }}
+                  style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', minWidth: 0, padding: '10px 14px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--panel-2)', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right', transition: 'background 120ms' }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--panel)'}
                   onMouseLeave={e => e.currentTarget.style.background = 'var(--panel-2)'}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: '15px', fontWeight: 500, color: 'var(--text)' }}>{c.name}</span>
-                  <span style={{ fontSize: '13px', color: 'var(--text-mute)' }}>{c.count}</span>
-                  <div style={{ width: 80, flexShrink: 0 }}>
-                    <div style={{ height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                  {/* dot + name + amount + chevron */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '9px', minWidth: 0 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ok)', flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtILS(c.total)}</span>
+                    <ChevronLeft size={16} style={{ color: 'var(--text-mute)', flexShrink: 0 }} />
+                  </div>
+                  {/* bar + count */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3 }} />
                     </div>
+                    <span style={{ fontSize: '12.5px', color: 'var(--text-mute)', flexShrink: 0, whiteSpace: 'nowrap' }}>{c.count} פריטים</span>
                   </div>
-                  <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ok)', minWidth: 76, textAlign: 'left' }}>{fmtILS(c.total)}</span>
-                  <ChevronLeft size={16} style={{ color: 'var(--text-mute)', flexShrink: 0 }} />
                 </button>
               )
             })}
