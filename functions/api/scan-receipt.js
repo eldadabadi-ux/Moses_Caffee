@@ -151,10 +151,11 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   let lastError = null
 
   // Each model is tried with internal retry (handles transient 503/429/500).
+  let usedModel = null
   for (const model of [GEMINI_PRIMARY, GEMINI_FALLBACK]) {
     try {
       result = await callGemini(GEMINI_API_KEY, model, imageBase64, mimeType, prompt)
-      if (result && (result.total_amount > 0 || result.vendor_name)) break
+      if (result && (result.total_amount > 0 || result.vendor_name)) { usedModel = model; break }
     } catch (err) {
       lastError = err
       console.warn(`[scan-receipt] ${model} failed:`, err?.message)
@@ -189,6 +190,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   // amount_before_vat and vat_amount if the receipt showed them explicitly.
   // We reconcile all three so they are always consistent.
   result = reconcileVat(result, vatRate)
+  result._model = usedModel   // diagnostic: which model produced this
 
   return Response.json(result, { headers: CORS })
 })

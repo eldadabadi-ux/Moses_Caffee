@@ -49,6 +49,29 @@ function fileToBase64(file) {
   })
 }
 
+// Downscale a dataURL before uploading to the scan API.
+// Real phone photos are 3-4000px → multi-MB base64 → slow upload → timeouts.
+// 2000px at q0.9 keeps receipt text sharp while being fast to upload.
+async function downscaleForUpload(dataUrl, maxDim = 2000, quality = 0.9) {
+  return new Promise((resolve) => {
+    try {
+      const img = new window.Image()
+      img.onload = () => {
+        let { width, height } = img
+        if (width <= maxDim && height <= maxDim) { resolve(dataUrl); return }
+        const r = Math.min(maxDim / width, maxDim / height)
+        width = Math.round(width * r); height = Math.round(height * r)
+        const c = document.createElement('canvas')
+        c.width = width; c.height = height
+        c.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(c.toDataURL('image/jpeg', quality))
+      }
+      img.onerror = () => resolve(dataUrl)
+      img.src = dataUrl
+    } catch { resolve(dataUrl) }
+  })
+}
+
 // Higher quality for AI scanning (2400px / 95% — keeps Hebrew text sharp)
 async function compressImage(file, maxDim = 2400, quality = 0.95) {
   const fallback = () => fileToBase64(file).then(dataUrl => ({ dataUrl, mimeType: file.type || 'image/jpeg' }))
@@ -511,6 +534,7 @@ export default function ReceiptsPage() {
   const [reviewBeforeVat, setReviewBeforeVat] = useState('')  // amount before vat
   const [reviewVatAmount, setReviewVatAmount] = useState('')  // vat amount
   const [reviewItems, setReviewItems]   = useState([])
+  const [scanSource, setScanSource]     = useState('')        // diagnostic: which engine produced the data
   const [reviewCategory, setReviewCategory] = useState('שונות')
   const [reviewImage, setReviewImage]   = useState(null)
   const [approving, setApproving]       = useState(false)
@@ -622,16 +646,27 @@ export default function ReceiptsPage() {
 
       toast('שולח ל-AI...', { icon: '✨', duration: 30000 })
       let result = null
+      let source = 'unknown'
       try {
         const controller = new AbortController()
         const fetchTimer = setTimeout(() => controller.abort(), 60000)
+        // Downscale before upload so large phone photos don't time out
+        const uploadUrl = await downscaleForUpload(dataUrl)
         const res = await fetch('/api/scan-receipt', {
           method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-          body: JSON.stringify({ imageBase64: dataUrl.split(',')[1], mimeType, vatRate }),
+          body: JSON.stringify({ imageBase64: uploadUrl.split(',')[1], mimeType: 'image/jpeg', vatRate }),
         }).finally(() => clearTimeout(fetchTimer))
-        if (res.ok) { result = await res.json() }
+        if (res.ok) {
+          result = await res.json()
+          source = result._model ? `AI: ${result._model}` : 'AI'
+        } else {
+          const errBody = await res.json().catch(() => ({}))
+          source = `שגיאת שרת ${res.status}: ${errBody.detail || errBody.error || ''}`
+          console.warn('[scan] API error:', res.status, errBody)
+        }
       } catch (aiErr) {
+        source = `שגיאת רשת: ${aiErr?.message || ''}`
         console.warn('[scan] AI failed, falling back to OCR:', aiErr?.message)
       }
 
@@ -642,7 +677,9 @@ export default function ReceiptsPage() {
         const t = parseFloat(ocrData.amount) || 0
         const before = t > 0 ? Math.round(t / (1 + vatRate / 100) * 100) / 100 : 0
         result = { vendor_name: ocrData.vendor_name, receipt_date: ocrData.receipt_date, total_amount: t, amount_before_vat: before, vat_amount: Math.round((t - before) * 100) / 100, items: [] }
+        source = 'OCR (גיבוי) — ' + source
       }
+      setScanSource(source)
 
       const items = (result.items || []).map((item, idx) => ({ ...item, _id: idx }))
       const t      = Number(result.total_amount) || 0
@@ -956,6 +993,11 @@ export default function ReceiptsPage() {
           <div style={{ display:'flex', flexDirection:'column', gap:'16px' }} dir="rtl">
             {reviewImage && (
               <img src={reviewImage} alt="קבלה" style={{ width:'100%', maxHeight: isMobile ? '160px' : '200px', objectFit:'contain', borderRadius:'10px', background:'var(--panel-2)' }} />
+            )}
+            {scanSource && (
+              <div style={{ fontSize:'11px', color: scanSource.includes('שגיאה') || scanSource.includes('OCR') ? 'var(--danger)' : 'var(--text-mute)', background:'var(--panel-2)', borderRadius:'6px', padding:'5px 10px', direction:'ltr', textAlign:'right' }}>
+                {scanSource}
+              </div>
             )}
             <div style={formGrid}>
               <div>
