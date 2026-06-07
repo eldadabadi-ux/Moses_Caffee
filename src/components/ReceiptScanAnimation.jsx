@@ -135,63 +135,66 @@ export default function ReceiptScanAnimation({ phase, receiptUri, onDone }) {
           }} />
         ))}
 
-        {/* Receipt + reticle */}
+        {/* Receipt + reticle. The laser is confined INSIDE the receipt image. */}
         <div style={{ position: 'absolute', top: '46%', left: '50%', transform: 'translate(-50%,-50%) perspective(1100px) rotateX(7deg)', width: '58%', maxWidth: 230 }}>
-          <div style={{ position: 'relative', borderRadius: 10, overflow: 'visible', boxShadow: '0 10px 40px rgba(37,99,235,0.28)', border: '1px solid rgba(37,99,235,0.25)' }}>
-            {receiptUri ? (
-              <img src={receiptUri} alt="" style={{ display: 'block', width: '100%', maxHeight: 300, objectFit: 'cover', borderRadius: 10, background: '#fff' }} />
-            ) : (
-              <div style={{ width: '100%', height: 230, borderRadius: 10, background: '#fff', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ height: 14, width: '60%', borderRadius: 4, background: 'var(--panel-2)' }} />
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <div style={{ height: 8, width: `${50 + (i * 7) % 30}%`, borderRadius: 3, background: 'var(--panel-2)' }} />
-                    <div style={{ height: 8, width: 30, borderRadius: 3, background: 'var(--panel-2)' }} />
-                  </div>
-                ))}
-              </div>
-            )}
+          <div style={{ position: 'relative', borderRadius: 10, boxShadow: '0 10px 40px rgba(37,99,235,0.28)', border: '1px solid rgba(37,99,235,0.25)' }}>
+            {/* Clipped wrapper — image + laser stay within the receipt bounds */}
+            <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden' }}>
+              {receiptUri ? (
+                <img src={receiptUri} alt="" style={{ display: 'block', width: '100%', maxHeight: 300, objectFit: 'cover', background: '#fff' }} />
+              ) : (
+                <div style={{ width: '100%', height: 230, background: '#fff', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ height: 14, width: '60%', borderRadius: 4, background: 'var(--panel-2)' }} />
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <div style={{ height: 8, width: `${50 + (i * 7) % 30}%`, borderRadius: 3, background: 'var(--panel-2)' }} />
+                      <div style={{ height: 8, width: 30, borderRadius: 3, background: 'var(--panel-2)' }} />
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            {/* Reticle corners */}
+              {/* Volumetric laser — sweeps only within the scanned image */}
+              {!reduced.current && (
+                <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', animation: 'laserSweep 5.85s ease-in-out infinite' }}>
+                  {/* volumetric band */}
+                  <div style={{
+                    position: 'absolute', top: 0, left: '4%', right: '4%', height: 70,
+                    background: 'linear-gradient(rgba(37,99,235,0.20), transparent)',
+                    maskImage: 'repeating-linear-gradient(rgba(0,0,0,0.9) 0 1px, transparent 1px 6px)',
+                    WebkitMaskImage: 'repeating-linear-gradient(rgba(0,0,0,0.9) 0 1px, transparent 1px 6px)',
+                  }} />
+                  {/* core line */}
+                  <div style={{
+                    position: 'absolute', top: 0, left: '4%', right: '4%', height: 2, borderRadius: 2,
+                    background: 'linear-gradient(90deg, transparent, #bfdbfe, #ffffff, #bfdbfe, transparent)',
+                    boxShadow: '0 0 16px var(--accent), 0 0 6px var(--accent)',
+                  }}>
+                    <span style={{ position: 'absolute', top: '50%', left: '2%', width: 6, height: 6, marginTop: -3, borderRadius: '50%', background: '#fff', boxShadow: '0 0 8px var(--accent)' }} />
+                    <span style={{ position: 'absolute', top: '50%', right: '2%', width: 6, height: 6, marginTop: -3, borderRadius: '50%', background: '#fff', boxShadow: '0 0 8px var(--accent)' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Edge-detection squares (on the receipt) */}
+              {!reduced.current && edgeSquares.map((p, i) => (
+                <div key={i} style={{
+                  position: 'absolute', ...p, width: 9, height: 9, borderRadius: 2,
+                  border: `1.5px solid ${GOLD}`, filter: 'drop-shadow(0 0 4px rgba(217,119,6,0.6))',
+                  animation: `edgeBlink 2.4s ease-in-out ${(i * 0.5).toFixed(2)}s infinite`,
+                }} />
+              ))}
+            </div>
+
+            {/* Reticle corners — outside the clip so their glow isn't cut */}
             {corners.map((c, i) => (
               <div key={i} style={{
                 ...cornerBase, ...c,
                 animation: anim(`reticleLock 700ms var(--ease) both, reticleBreath 2.8s ease-in-out 700ms infinite`),
               }} />
             ))}
-
-            {/* Edge-detection squares */}
-            {!reduced.current && edgeSquares.map((p, i) => (
-              <div key={i} style={{
-                position: 'absolute', ...p, width: 9, height: 9, borderRadius: 2,
-                border: `1.5px solid ${GOLD}`, filter: 'drop-shadow(0 0 4px rgba(217,119,6,0.6))',
-                animation: `edgeBlink 2.4s ease-in-out ${(i * 0.5).toFixed(2)}s infinite`,
-              }} />
-            ))}
           </div>
         </div>
-
-        {/* Volumetric laser (full-cell layer sweeping vertically) */}
-        {!reduced.current && (
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', animation: 'laserSweep 3.9s ease-in-out infinite' }}>
-            {/* volumetric band */}
-            <div style={{
-              position: 'absolute', top: 0, left: '7%', right: '7%', height: 96,
-              background: 'linear-gradient(rgba(37,99,235,0.20), transparent)',
-              maskImage: 'repeating-linear-gradient(rgba(0,0,0,0.9) 0 1px, transparent 1px 6px)',
-              WebkitMaskImage: 'repeating-linear-gradient(rgba(0,0,0,0.9) 0 1px, transparent 1px 6px)',
-            }} />
-            {/* core line */}
-            <div style={{
-              position: 'absolute', top: 0, left: '7%', right: '7%', height: 2, borderRadius: 2,
-              background: 'linear-gradient(90deg, transparent, #bfdbfe, #ffffff, #bfdbfe, transparent)',
-              boxShadow: '0 0 16px var(--accent), 0 0 6px var(--accent)',
-            }}>
-              <span style={{ position: 'absolute', top: '50%', left: '4%', width: 6, height: 6, marginTop: -3, borderRadius: '50%', background: '#fff', boxShadow: '0 0 8px var(--accent)' }} />
-              <span style={{ position: 'absolute', top: '50%', right: '4%', width: 6, height: 6, marginTop: -3, borderRadius: '50%', background: '#fff', boxShadow: '0 0 8px var(--accent)' }} />
-            </div>
-          </div>
-        )}
 
         {/* Data dots rising */}
         {!reduced.current && dataDots.map((d, i) => (
