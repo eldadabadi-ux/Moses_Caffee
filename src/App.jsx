@@ -6,6 +6,7 @@ import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import MonthlyExportPrompt from './components/MonthlyExportPrompt'
+import InstallBanner from './components/InstallBanner'
 import Sidebar from './components/Sidebar'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu } from 'lucide-react'
 
@@ -260,6 +261,7 @@ function AppShell() {
         margin: '0 auto',
         paddingBottom: isMobile ? bottomPad : '32px',
       }}>
+        <InstallBanner />
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
             <Route path="/"           element={<ReceiptsPage />} />

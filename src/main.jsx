@@ -3,6 +3,18 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
+// ── PWA install prompt capture (must be set up early — the event fires fast) ──
+window.__deferredInstallPrompt = null
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault()
+  window.__deferredInstallPrompt = e
+  window.dispatchEvent(new Event('pwa-installable'))
+})
+window.addEventListener('appinstalled', () => {
+  window.__deferredInstallPrompt = null
+  window.dispatchEvent(new Event('pwa-installed'))
+})
+
 function cacheBustingReload() {
   const url = new URL(window.location.href)
   url.searchParams.set('_r', Date.now().toString())

@@ -1,14 +1,16 @@
 import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
-import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell } from 'lucide-react'
+import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check } from 'lucide-react'
 import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
+import { useInstall } from '../hooks/useInstall'
 import toast from 'react-hot-toast'
 
 export default function SettingsPage() {
   const { settings, updateSettings, saving } = useSettings()
   const { user } = useAuth()
+  const { canInstall, promptInstall, isIOS, isStandalone } = useInstall()
   const [vatInput, setVatInput] = useState(String(settings.vatRate))
   const [changed, setChanged] = useState(false)
   const [nameInput, setNameInput] = useState(settings.businessName || '')
@@ -95,6 +97,59 @@ export default function SettingsPage() {
           מחובר כ-{user?.email}
         </p>
       </div>
+
+      {/* Install app Card */}
+      {!isStandalone && (
+        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+          <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Smartphone size={17} color="var(--accent)" />
+            <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>התקנת האפליקציה בטלפון</span>
+          </div>
+          <div style={{ padding: 20 }}>
+            {canInstall ? (
+              <>
+                <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+                  התקן את האפליקציה למסך הבית — תיפתח כמו אפליקציה רגילה, במסך מלא וללא שורת כתובת.
+                </p>
+                <button onClick={async () => { const ok = await promptInstall(); if (ok) toast.success('האפליקציה מותקנת!') }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 20px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 15.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  <Download size={17} /> התקן עכשיו
+                </button>
+              </>
+            ) : isIOS ? (
+              <>
+                <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+                  ב-iPhone/iPad (Safari) — הוסף למסך הבית בשני צעדים:
+                </p>
+                <ol style={{ margin: 0, paddingInlineStart: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-bg)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, flexShrink: 0 }}>1</span>
+                    <span style={{ fontSize: 15, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      לחץ על כפתור <strong>השיתוף</strong> <Share size={18} style={{ color: 'var(--accent)' }} /> בתחתית הדפדפן
+                    </span>
+                  </li>
+                  <li style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--accent-bg)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, flexShrink: 0 }}>2</span>
+                    <span style={{ fontSize: 15, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      בחר <strong>"הוסף למסך הבית"</strong> <Plus size={17} style={{ color: 'var(--accent)' }} />
+                    </span>
+                  </li>
+                </ol>
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+                ב-Android (Chrome) — פתח את תפריט הדפדפן (⋮) ובחר <strong>"התקן אפליקציה"</strong> / "הוסף למסך הבית".
+                במחשב — לחץ על אייקון ההתקנה בשורת הכתובת.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+      {isStandalone && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 16px', background: 'var(--success-tint-1)', border: '1px solid var(--success-tint-border)', borderRadius: 12, fontSize: 14.5, color: 'var(--text)' }}>
+          <Check size={17} color="var(--ok)" /> האפליקציה מותקנת ופועלת במצב אפליקציה ✓
+        </div>
+      )}
 
       {/* Logo + Business name Card */}
       <div id="set-logo" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
