@@ -75,6 +75,18 @@ main { overflow-x: clip; max-width: 100%; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ── Receipt scan animation ──────────────────────────────────────── */
+@keyframes gridDrift   { from { background-position: 0 0; } to { background-position: 0 -28px; } }
+@keyframes ringPulse   { 0% { transform: translate(-50%,-50%) scale(0.55); opacity: 0.7; } 100% { transform: translate(-50%,-50%) scale(1.15); opacity: 0; } }
+@keyframes reticleLock { 0% { opacity: 0; transform: scale(1.35); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes reticleBreath { 0%,100% { opacity: 0.9; } 50% { opacity: 0.45; } }
+@keyframes edgeBlink   { 0%,100% { opacity: 0; } 45%,65% { opacity: 1; } }
+@keyframes laserSweep  { 0% { transform: translateY(-8%); } 50% { transform: translateY(100%); } 100% { transform: translateY(-8%); } }
+@keyframes dataRise    { 0% { transform: translateY(0); opacity: 0; } 18% { opacity: 1; } 80% { opacity: 0.9; } 100% { transform: translateY(-200px); opacity: 0; } }
+@keyframes hudBlink    { 0%,49% { opacity: 1; } 50%,100% { opacity: 0.25; } }
+@keyframes successPop  { 0% { opacity: 0; transform: scale(0.5); } 60% { opacity: 1; transform: scale(1.08); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes scanCellIn  { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
 .animate-fade-in  { animation: fadeIn 200ms var(--ease) both; }
 .animate-slide-in { animation: slideIn 200ms var(--ease) both; }
 .animate-spin     { animation: spin 1s linear infinite; }

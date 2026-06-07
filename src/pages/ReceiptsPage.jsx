@@ -6,6 +6,7 @@ import { useSettings } from '../hooks/useSettings'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload } from '../lib/imageUtils'
 import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip } from '../lib/receiptExport'
+import ReceiptScanAnimation from '../components/ReceiptScanAnimation'
 import toast from 'react-hot-toast'
 import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
@@ -439,6 +440,8 @@ export default function ReceiptsPage() {
   const [cameraMulti, setCameraMulti]   = useState(false)     // multi-page capture mode
   const [showExport, setShowExport]     = useState(false)
   const [scanLoading, setScanLoading]   = useState(false)
+  const [scanPhase, setScanPhase]       = useState('idle')   // 'idle'|'scanning'|'done'|'error' — drives the scan animation
+  const [scanningImage, setScanningImage] = useState(null)   // first captured page, shown inside the animation
   const [showReview, setShowReview]     = useState(false)
   const [reviewVendor, setReviewVendor] = useState('')
   const [reviewDate, setReviewDate]     = useState('')
@@ -640,11 +643,11 @@ export default function ReceiptsPage() {
     if (!pages?.length) return
     const multi = pages.length > 1
     setScanLoading(true)
+    setScanningImage(pages[0]); setScanPhase('scanning')   // launch the scan animation
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) { toast.error('נדרשת כניסה מחדש'); return }
+      if (!session?.access_token) { toast.error('נדרשת כניסה מחדש'); setScanPhase('error'); return }
 
-      toast(multi ? `שולח ${pages.length} עמודים ל-AI...` : 'שולח ל-AI...', { icon: '✨', duration: 45000 })
       let result = null
       let source = 'unknown'
       try {
@@ -697,10 +700,12 @@ export default function ReceiptsPage() {
       setReviewPages(pages)
       setReviewImage(pages[0])
       setShowReview(true)
+      setScanPhase('done')   // animation plays success → fades → reveals the review
       toast.dismiss()
     } catch (err) {
       toast.dismiss()
       toast.error('שגיאה בסריקה: ' + (err?.message || ''), { duration: 6000 })
+      setScanPhase('error')
     } finally { setScanLoading(false) }
   }
 
@@ -1058,6 +1063,12 @@ export default function ReceiptsPage() {
       {showCamera && <CameraModal multi={cameraMulti}
         onCapture={files => { setShowCamera(false); if (cameraMulti && files.length > 1) processScannedPages(files); else processScannedFile(files[0]) }}
         onClose={() => setShowCamera(false)} />}
+
+      {/* Hi-tech scan animation while the AI processes the receipt */}
+      {scanPhase !== 'idle' && (
+        <ReceiptScanAnimation phase={scanPhase} receiptUri={scanningImage}
+          onDone={() => { setScanPhase('idle'); setScanningImage(null) }} />
+      )}
       {cropSrc && (
         <CropModal
           src={cropSrc.dataUrl}
