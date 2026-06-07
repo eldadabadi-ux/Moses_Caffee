@@ -146,7 +146,9 @@ function CameraModal({ onCapture, onClose, multi = false }) {
           {multi && (
             <div dir="rtl" style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: 'calc(10px + env(safe-area-inset-top)) 12px 10px', background: 'linear-gradient(rgba(0,0,0,0.55), transparent)' }}>
               <div style={{ color: '#fff', fontSize: 13.5, fontWeight: 600, marginBottom: pages.length ? 8 : 0, textAlign: 'center' }}>
-                מצב מספר עמודים · צולמו {pages.length} עמודים
+                {pages.length === 0
+                  ? 'צלם את הקבלה — אפשר להוסיף כמה עמודים'
+                  : `צולמו ${pages.length} עמודים · "המשך סריקה" לעמוד נוסף, "המשך" לסיום`}
               </div>
               {pages.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
@@ -162,17 +164,25 @@ function CameraModal({ onCapture, onClose, multi = false }) {
             </div>
           )}
 
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '24px 24px calc(40px + env(safe-area-inset-bottom))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'linear-gradient(transparent, rgba(0,0,0,0.5))' }}>
-            <button onClick={() => { stopStream(); onClose() }} style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation' }}>✕</button>
-            <button onClick={capture} disabled={!ready}
-              style={{ width: 76, height: 76, borderRadius: '50%', background: ready ? '#fff' : '#666', border: '4px solid rgba(255,255,255,0.5)', cursor: ready ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation' }}>
-              <div style={{ width: 58, height: 58, borderRadius: '50%', background: ready ? '#fff' : '#888', border: '3px solid #000' }} />
-            </button>
-            {/* Done button (multi only) */}
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '24px 20px calc(36px + env(safe-area-inset-bottom))', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', background: 'linear-gradient(transparent, rgba(0,0,0,0.5))' }}>
+            <button onClick={() => { stopStream(); onClose() }} style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', flexShrink: 0 }}>✕</button>
+            {/* Shutter + caption */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              <button onClick={capture} disabled={!ready}
+                style={{ width: 76, height: 76, borderRadius: '50%', background: ready ? '#fff' : '#666', border: '4px solid rgba(255,255,255,0.5)', cursor: ready ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation' }}>
+                <div style={{ width: 58, height: 58, borderRadius: '50%', background: ready ? '#fff' : '#888', border: '3px solid #000' }} />
+              </button>
+              {multi && (
+                <span style={{ color: '#fff', fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--font-main)', textShadow: '0 1px 4px rgba(0,0,0,0.7)', whiteSpace: 'nowrap' }}>
+                  {pages.length ? 'המשך סריקה' : 'צלם קבלה'}
+                </span>
+              )}
+            </div>
+            {/* Continue/finish button (multi only) */}
             {multi ? (
               <button onClick={finish} disabled={!pages.length}
-                style={{ minWidth: 52, height: 52, padding: '0 14px', borderRadius: 26, background: pages.length ? '#16a34a' : 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 14, fontWeight: 700, cursor: pages.length ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', fontFamily: 'var(--font-main)' }}>
-                סיים{pages.length ? ` (${pages.length})` : ''}
+                style={{ minWidth: 64, height: 52, padding: '0 16px', borderRadius: 26, background: pages.length ? '#16a34a' : 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: pages.length ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', fontFamily: 'var(--font-main)', flexShrink: 0 }}>
+                המשך{pages.length ? ` (${pages.length})` : ''}
               </button>
             ) : <div style={{ width: 52 }} />}
           </div>
@@ -611,8 +621,9 @@ export default function ReceiptsPage() {
   }
 
   // Keep the ref current so the bottom-nav event always calls the latest version.
-  // `multi` = true → multi-page receipt capture flow.
-  const handleScanClick = useCallback(function(multi = false) {
+  // Scanning is multi-page-capable by default (camera shows a "continue scanning"
+  // button; desktop file picker allows selecting several pages at once).
+  const handleScanClick = useCallback(function(multi = true) {
     if (scanLoading) return
     const isMobileUA = /iPhone|iPad|Android/i.test(navigator.userAgent) || window.innerWidth < 768
     if (isMobileUA) {
@@ -901,13 +912,8 @@ export default function ReceiptsPage() {
                 <Sparkles size={14} /> סורק...
               </div>
             ) : (
-              <button onClick={() => handleScanClick(false)} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 16px', background:'linear-gradient(135deg,#2563eb,#1d4ed8)', border:'none', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'white', cursor:'pointer', fontFamily:'var(--font-main)' }}>
+              <button onClick={() => handleScanClick(true)} title="סריקת קבלה — אפשר כמה עמודים" style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 16px', background:'linear-gradient(135deg,#2563eb,#1d4ed8)', border:'none', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'white', cursor:'pointer', fontFamily:'var(--font-main)' }}>
                 <Camera size={14} /> סרוק קבלה
-              </button>
-            )}
-            {!scanLoading && (
-              <button onClick={() => handleScanClick(true)} title="קבלה עם כמה עמודים" style={{ display:'flex', alignItems:'center', gap:'7px', padding:'8px 14px', background:'var(--panel)', border:'1px solid var(--accent)', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'var(--accent)', cursor:'pointer', fontFamily:'var(--font-main)' }}>
-                <Files size={14} /> כמה עמודים
               </button>
             )}
             <button onClick={() => { resetForm(); setShowModal(true) }} style={{ display:'flex', alignItems:'center', gap:'6px', padding:'8px 14px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-btn)', fontSize:'13px', color:'var(--text-dim)', cursor:'pointer', fontFamily:'var(--font-main)' }}>
@@ -923,9 +929,6 @@ export default function ReceiptsPage() {
                 <Sparkles size={13} /> סורק...
               </div>
             )}
-            <button onClick={() => handleScanClick(true)} title="קבלה עם כמה עמודים" style={{ display:'flex', alignItems:'center', gap:'6px', height:40, padding:'0 12px', background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'10px', cursor:'pointer', color:'var(--accent)', fontSize:'12.5px', fontWeight:600, fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
-              <Files size={16} /> כמה עמודים
-            </button>
             <button onClick={() => setShowExport(true)} title="ייצוא" style={{ width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:'10px', cursor:'pointer', color:'#16a34a', flexShrink:0 }}>
               <FileSpreadsheet size={18} />
             </button>

@@ -162,6 +162,9 @@ export default function SettingsPage() {
         <p style={{ margin: '4px 0 0', fontSize: 15, color: 'var(--text-mute)' }}>
           מחובר כ-{user?.email}
         </p>
+        <p style={{ margin: '2px 0 0', fontSize: 13.5, color: 'var(--text-mute)' }}>
+          גרסת אפליקציה: <strong style={{ color: 'var(--text-dim)', fontWeight: 600 }}>{import.meta.env.VITE_APP_VERSION || '—'}</strong>
+        </p>
       </div>
 
       {/* Install app Card */}
