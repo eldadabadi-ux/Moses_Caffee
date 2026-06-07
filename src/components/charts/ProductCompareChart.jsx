@@ -1,27 +1,131 @@
+import { useEffect, useRef, useState } from 'react'
+import * as d3 from 'd3'
+
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
+const trunc = (s, n = 10) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s)
 
 /**
- * ProductCompareChart — horizontal grouped bars comparing two vendors across
- * a set of products. `products` = [{ name, a, b }]. Pure CSS (no overflow).
+ * ProductCompareChart — VERTICAL grouped bars (or line+points) comparing two
+ * vendors across a set of products. `products` = [{ name, a, b }].
+ * `chartType` = 'bar' | 'line'.  RTL: first product sits on the right.
  */
-export default function ProductCompareChart({ products = [], labelA, labelB, colorA = '#2563eb', colorB = '#f59e0b' }) {
-  const max = Math.max(...products.flatMap(p => [p.a, p.b]), 1)
+export default function ProductCompareChart({ products = [], labelA, labelB, colorA = '#2563eb', colorB = '#f59e0b', chartType = 'bar' }) {
+  const svgRef  = useRef(null)
+  const wrapRef = useRef(null)
+  const tipRef  = useRef(null)
+  const [w, setW] = useState(600)
+  const H = 280
 
-  const Bar = ({ tag, value, color }) => {
-    const pct = (value / max) * 100
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <span style={{ flexShrink: 0, width: 54, fontSize: 11.5, fontWeight: 700, color, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tag}</span>
-        <div style={{ flex: 1, minWidth: 0, height: 16, borderRadius: 4, background: 'var(--panel-2)', overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${pct}%`, minWidth: value > 0 ? 3 : 0, background: color, borderRadius: 4, transition: 'width 500ms ease' }} />
-        </div>
-        <span style={{ flexShrink: 0, width: 70, textAlign: 'left', fontSize: 13, fontWeight: 700, color: value > 0 ? 'var(--text)' : 'var(--text-mute)', whiteSpace: 'nowrap' }}>{fmtILS(value)}</span>
-      </div>
-    )
-  }
+  useEffect(() => {
+    if (!wrapRef.current) return
+    const obs = new ResizeObserver(([e]) => setW(Math.floor(e.contentRect.width)))
+    obs.observe(wrapRef.current)
+    return () => obs.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const svg = d3.select(svgRef.current)
+    svg.selectAll('*').remove()
+    if (!products.length) return
+
+    // RTL: reverse so the first (largest) product is on the right
+    const items = [...products].reverse()
+    const margin = { top: 18, right: 12, bottom: 64, left: 54 }
+    const innerW = w - margin.left - margin.right
+    const innerH = H - margin.top - margin.bottom
+    svg.attr('width', w).attr('height', H)
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
+
+    const maxVal = Math.max(d3.max(items, d => Math.max(d.a, d.b)) || 0, 1)
+    const x0 = d3.scaleBand().domain(items.map(d => d.name)).range([0, innerW]).paddingInner(0.28).paddingOuter(0.12)
+    // 'b' first then 'a' → in RTL, vendor A ends up on the right of each pair
+    const x1 = d3.scaleBand().domain(['b', 'a']).range([0, x0.bandwidth()]).padding(0.12)
+    const y  = d3.scaleLinear().domain([0, maxVal * 1.12]).range([innerH, 0])
+
+    // Y grid
+    g.append('g').call(d3.axisLeft(y).ticks(4).tickSize(-innerW).tickFormat(v => v >= 1000 ? `₪${Math.round(v/1000)}k` : `₪${v}`))
+      .call(gg => {
+        gg.select('.domain').remove()
+        gg.selectAll('.tick line').attr('stroke', 'var(--border)').attr('stroke-dasharray', '3,3')
+        gg.selectAll('.tick text').attr('fill', 'var(--text-mute)').attr('font-size', '10px').attr('font-family', 'var(--font-main)').attr('dx', '-4')
+      })
+
+    // X labels (product names, truncated + angled if crowded)
+    const angle = items.length > 4 || w < 520
+    g.append('g').attr('transform', `translate(0,${innerH})`)
+      .call(d3.axisBottom(x0).tickFormat(n => trunc(n, angle ? 9 : 12)))
+      .call(gg => {
+        gg.select('.domain').remove()
+        gg.selectAll('.tick line').remove()
+        gg.selectAll('.tick text')
+          .attr('fill', 'var(--text)').attr('font-size', '11px').attr('font-family', 'var(--font-main)')
+          .attr('transform', angle ? 'rotate(-28)' : null)
+          .attr('text-anchor', angle ? 'end' : 'middle')
+          .attr('dy', angle ? '0.6em' : '1.3em').attr('dx', angle ? '-2px' : null)
+      })
+
+    const tip = d3.select(tipRef.current)
+    function showTip(event, name, vendorLabel, value, col) {
+      tip.style('display', 'block').html(
+        `<div style="font-weight:700;margin-bottom:3px">${name}</div>` +
+        `<div style="display:flex;align-items:center;gap:5px;justify-content:center"><span style="width:9px;height:9px;border-radius:2px;background:${col};display:inline-block"></span><span style="font-size:12.5px">${vendorLabel}</span></div>` +
+        `<div style="color:var(--ok);font-size:15px;font-weight:700;margin-top:2px">${fmtILS(value)}</div>`
+      )
+      const rect = svgRef.current.getBoundingClientRect()
+      tip.style('left', (event.clientX - rect.left - 75) + 'px').style('top', (event.clientY - rect.top - 78) + 'px')
+    }
+    const hideTip = () => tip.style('display', 'none')
+
+    if (chartType === 'line') {
+      // Two point-series across products, connected by a line
+      const cx = d => x0(d.name) + x0.bandwidth() / 2
+      for (const [key, col, lbl] of [['a', colorA, labelA], ['b', colorB, labelB]]) {
+        const line = d3.line().x(cx).y(d => y(d[key])).curve(d3.curveMonotoneX)
+        const path = g.append('path').datum(items)
+          .attr('fill', 'none').attr('stroke', col).attr('stroke-width', 2.5)
+          .attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round').attr('d', line)
+        const len = path.node().getTotalLength()
+        path.attr('stroke-dasharray', `${len} ${len}`).attr('stroke-dashoffset', len)
+          .transition().duration(700).ease(d3.easeCubicOut).attr('stroke-dashoffset', 0)
+        g.selectAll(null).data(items).join('circle')
+          .attr('cx', cx).attr('cy', d => y(d[key])).attr('r', 0)
+          .attr('fill', 'var(--panel)').attr('stroke', col).attr('stroke-width', 2.5)
+          .style('cursor', 'pointer')
+          .on('mouseenter', function (e, d) { d3.select(this).attr('r', 6.5); showTip(e, d.name, lbl, d[key], col) })
+          .on('mouseleave', function () { d3.select(this).attr('r', 4.5); hideTip() })
+          .transition().duration(500).delay((_, i) => i * 25).attr('r', 4.5)
+      }
+    } else {
+      // Vertical grouped bars
+      const groups = g.selectAll('.grp').data(items).join('g')
+        .attr('class', 'grp').attr('transform', d => `translate(${x0(d.name)},0)`)
+      for (const [key, col, lbl] of [['a', colorA, labelA], ['b', colorB, labelB]]) {
+        groups.append('rect')
+          .attr('x', x1(key)).attr('width', x1.bandwidth())
+          .attr('y', innerH).attr('height', 0).attr('rx', 4)
+          .attr('fill', d => d[key] > 0 ? col : 'var(--border)')
+          .attr('opacity', d => d[key] > 0 ? 0.92 : 0.4)
+          .style('cursor', 'pointer')
+          .on('mouseenter', function (e, d) { if (d[key] > 0) { d3.select(this).attr('opacity', 1); showTip(e, d.name, lbl, d[key], col) } })
+          .on('mouseleave', function (e, d) { d3.select(this).attr('opacity', d[key] > 0 ? 0.92 : 0.4); hideTip() })
+          .transition().duration(600).delay((_, i) => i * 40).ease(d3.easeBackOut.overshoot(0.4))
+          .attr('y', d => d[key] > 0 ? y(d[key]) : innerH).attr('height', d => d[key] > 0 ? innerH - y(d[key]) : 0)
+      }
+      // Value labels on top (desktop, few products)
+      if (w > 480 && items.length <= 6) {
+        for (const key of ['a', 'b']) {
+          groups.append('text')
+            .attr('x', x1(key) + x1.bandwidth() / 2).attr('y', d => (d[key] > 0 ? y(d[key]) : innerH) - 4)
+            .attr('text-anchor', 'middle').attr('fill', 'var(--text-mute)').attr('font-size', '9px').attr('font-family', 'var(--font-main)')
+            .attr('opacity', 0).text(d => d[key] > 0 ? (d[key] >= 1000 ? `${Math.round(d[key]/1000)}k` : Math.round(d[key])) : '')
+            .transition().delay(750).duration(300).attr('opacity', 1)
+        }
+      }
+    }
+  }, [products, w, chartType, labelA, labelB, colorA, colorB])
 
   return (
-    <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+    <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       {/* Legend */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
@@ -34,25 +138,15 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
         </span>
       </div>
 
-      {products.map((p) => {
-        const both = p.a > 0 && p.b > 0
-        const cheaper = both ? (p.a < p.b ? labelA : labelB) : null
-        const diff = both ? Math.abs(p.a - p.b) : 0
-        return (
-          <div key={p.name} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, padding: '10px 12px', borderRadius: 11, border: '1px solid var(--border)', background: 'var(--panel)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <span style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-              {both && (
-                <span style={{ flexShrink: 0, fontSize: 11.5, color: 'var(--ok)', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                  פער {fmtILS(diff)} · זול יותר: {cheaper}
-                </span>
-              )}
-            </div>
-            <Bar tag={labelA} value={p.a} color={colorA} />
-            <Bar tag={labelB} value={p.b} color={colorB} />
-          </div>
-        )
-      })}
+      <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
+        <svg ref={svgRef} style={{ display: 'block', width: '100%' }} />
+        <div ref={tipRef} style={{
+          display: 'none', position: 'absolute', pointerEvents: 'none',
+          background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: '10px',
+          padding: '8px 12px', fontFamily: 'var(--font-main)', color: 'var(--text)',
+          boxShadow: 'var(--shadow-modal)', zIndex: 10, minWidth: '120px', textAlign: 'center', direction: 'rtl',
+        }} />
+      </div>
 
       {products.length === 0 && (
         <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '18px 0', fontSize: 14 }}>אין מוצרים משותפים להשוואה</p>

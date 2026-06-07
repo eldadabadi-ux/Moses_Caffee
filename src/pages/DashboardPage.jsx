@@ -483,7 +483,7 @@ export default function DashboardPage() {
         {/* ── Vendor comparison ─────────────────────────────────────────────────── */}
         <Section id="dash-compare" title="השוואת ספקים"
           sub="בחר שני ספקים. תחת כל אחד בחר מוצרים להשוואה ממוקדת — או השאר ריק להשוואת הוצאה כללית."
-          action={compareProducts.length === 0 ? <ChartTypeToggle value={chartType} onChange={setChartType} /> : undefined}>
+          action={<ChartTypeToggle value={chartType} onChange={setChartType} />}>
 
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
             {/* Vendor A */}
@@ -516,7 +516,7 @@ export default function DashboardPage() {
             <>
               {compareProducts.length > 0 ? (
                 /* Focused product comparison */
-                <ProductCompareChart products={compareProducts} labelA={vendorA || "ספק א'"} labelB={vendorB || "ספק ב'"} colorA="#2563eb" colorB="#f59e0b" />
+                <ProductCompareChart products={compareProducts} labelA={vendorA || "ספק א'"} labelB={vendorB || "ספק ב'"} colorA="#2563eb" colorB="#f59e0b" chartType={chartType} />
               ) : (
                 /* Overall monthly comparison */
                 <MonthlyBars
