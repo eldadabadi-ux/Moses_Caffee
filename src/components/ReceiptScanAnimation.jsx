@@ -27,15 +27,16 @@ export default function ReceiptScanAnimation({ phase, receiptUri, onDone }) {
   const reduced = useRef(reducedMotion())
   const doneCalled = useRef(false)
 
-  // Percentage ticker — slow, continuous creep toward ~97% while scanning.
-  // It never hard-sticks (keeps inching), and the real result snaps it to 100 fast.
+  // Percentage ticker — UNIFORM (constant-rate) slow climb toward ~98% while
+  // scanning. Steady & calm; the real result snaps it to 100 fast on completion.
   useEffect(() => {
     if (phase !== 'scanning') return
-    const CEIL = 97
+    const CEIL = 98
+    const STEP = 0.22   // constant per-tick increment (~3.1%/s) — slow & uniform
     const id = setInterval(() => {
       const p = pctRef.current
       if (p >= CEIL) return
-      const next = Math.min(CEIL, p + Math.max(0.07, (CEIL - p) * 0.006))
+      const next = Math.min(CEIL, p + STEP)
       pctRef.current = next; setPct(next)
     }, 70)
     return () => clearInterval(id)
@@ -172,7 +173,7 @@ export default function ReceiptScanAnimation({ phase, receiptUri, onDone }) {
 
         {/* Volumetric laser (full-cell layer sweeping vertically) */}
         {!reduced.current && (
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', animation: 'laserSweep 2.86s ease-in-out infinite' }}>
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', animation: 'laserSweep 3.9s ease-in-out infinite' }}>
             {/* volumetric band */}
             <div style={{
               position: 'absolute', top: 0, left: '7%', right: '7%', height: 96,
