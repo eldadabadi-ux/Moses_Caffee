@@ -20,17 +20,23 @@ const OK = 'var(--ok)'
  */
 export default function ReceiptScanAnimation({ phase, receiptUri, onDone }) {
   const [pct, setPct] = useState(0)
+  const pctRef = useRef(0)
   const [fading, setFading] = useState(false)
   const [success, setSuccess] = useState(false)
   const mountTime = useRef(Date.now())
   const reduced = useRef(reducedMotion())
   const doneCalled = useRef(false)
 
-  // Percentage ticker — asymptotic creep toward 92% while scanning.
+  // Percentage ticker — slow, continuous creep toward ~97% while scanning.
+  // It never hard-sticks (keeps inching), and the real result snaps it to 100 fast.
   useEffect(() => {
     if (phase !== 'scanning') return
+    const CEIL = 97
     const id = setInterval(() => {
-      setPct(p => (p >= 92 ? 92 : Math.min(92, p + Math.max(0.3, (92 - p) * 0.05))))
+      const p = pctRef.current
+      if (p >= CEIL) return
+      const next = Math.min(CEIL, p + Math.max(0.07, (CEIL - p) * 0.006))
+      pctRef.current = next; setPct(next)
     }, 70)
     return () => clearInterval(id)
   }, [phase])
@@ -40,12 +46,21 @@ export default function ReceiptScanAnimation({ phase, receiptUri, onDone }) {
     const finish = () => { if (!doneCalled.current) { doneCalled.current = true; onDone?.() } }
     if (phase === 'done') {
       const wait = Math.max(0, 1500 - (Date.now() - mountTime.current)) // min on-screen time
-      let t2, t3
+      let fastId, t2, t3
       const t1 = setTimeout(() => {
-        setPct(100); setSuccess(true)
-        t2 = setTimeout(() => { setFading(true); t3 = setTimeout(finish, 380) }, 900)
+        // Scan finished → climb FAST to 100, then success → fade → reveal review.
+        fastId = setInterval(() => {
+          const p = pctRef.current
+          const next = Math.min(100, p + Math.max(2.5, (100 - p) * 0.28))
+          pctRef.current = next; setPct(next)
+          if (next >= 100) {
+            clearInterval(fastId)
+            setSuccess(true)
+            t2 = setTimeout(() => { setFading(true); t3 = setTimeout(finish, 380) }, 900)
+          }
+        }, 28)
       }, wait)
-      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
+      return () => { clearTimeout(t1); clearInterval(fastId); clearTimeout(t2); clearTimeout(t3) }
     }
     if (phase === 'error') {
       setFading(true)
@@ -157,7 +172,7 @@ export default function ReceiptScanAnimation({ phase, receiptUri, onDone }) {
 
         {/* Volumetric laser (full-cell layer sweeping vertically) */}
         {!reduced.current && (
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', animation: 'laserSweep 2.6s ease-in-out infinite' }}>
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', animation: 'laserSweep 2.86s ease-in-out infinite' }}>
             {/* volumetric band */}
             <div style={{
               position: 'absolute', top: 0, left: '7%', right: '7%', height: 96,
