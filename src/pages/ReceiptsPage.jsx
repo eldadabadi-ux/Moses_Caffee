@@ -420,6 +420,19 @@ export default function ReceiptsPage() {
     }
   }, [])
 
+  // ── Auto-start scan when arriving via ?scan=1 (bottom-nav FAB / PWA shortcut) ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('scan') === '1') {
+      // strip the param so a refresh doesn't re-trigger
+      const u = new URL(window.location.href)
+      u.searchParams.delete('scan')
+      window.history.replaceState({}, '', u.toString())
+      const t = setTimeout(() => scanClickRef.current?.(), 120)
+      return () => clearTimeout(t)
+    }
+  }, [])
+
   useEffect(() => { loadData() }, [])
   useEffect(() => { loadCategories() }, [])
 

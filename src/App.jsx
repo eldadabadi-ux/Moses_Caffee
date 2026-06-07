@@ -68,7 +68,6 @@ function BrandLogo({ size = 30 }) {
 function TopNav({ onSignOut }) {
   const location = useLocation()
   const { settings } = useSettings()
-  const isReceipts   = location.pathname === '/'
   const isCategories = location.pathname === '/categories'
 
   const navBtn = (active) => ({
@@ -94,11 +93,11 @@ function TopNav({ onSignOut }) {
       </div>
       {/* Nav links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-        <Link to="/" style={navBtn(isReceipts)}>
-          <Receipt size={18} /> קבלות
-        </Link>
-        <Link to="/dashboard" style={navBtn(location.pathname === '/dashboard')}>
+        <Link to="/" style={navBtn(location.pathname === '/')}>
           <BarChart2 size={18} /> דשבורד
+        </Link>
+        <Link to="/receipts" style={navBtn(location.pathname === '/receipts')}>
+          <Receipt size={18} /> קבלות
         </Link>
         <Link to="/categories" style={navBtn(isCategories)}>
           <Tag size={18} /> קטגוריות
@@ -124,7 +123,6 @@ function TopNav({ onSignOut }) {
 function BottomNav({ onSignOut }) {
   const location = useLocation()
   const navigate  = useNavigate()
-  const isReceipts   = location.pathname === '/'
   const isCategories = location.pathname === '/categories'
 
   const tabStyle = (active) => ({
@@ -136,15 +134,10 @@ function BottomNav({ onSignOut }) {
   })
 
   function handleScanTap() {
-    // Navigate to receipts page and set ?scan=1 — ReceiptsPage handles it
-    navigate('/')
-    // Use a tiny delay so ReceiptsPage is mounted before we push the param
-    setTimeout(() => {
-      const url = new URL(window.location.href)
-      url.searchParams.set('scan', '1')
-      window.history.replaceState({}, '', url.toString())
-      window.dispatchEvent(new Event('receipts-scan'))
-    }, 50)
+    // Receipts now lives at /receipts. Navigate there with ?scan=1 (read on
+    // mount) and also fire the event in case the page is already mounted.
+    navigate('/receipts?scan=1')
+    setTimeout(() => window.dispatchEvent(new Event('receipts-scan')), 60)
   }
 
   return (
@@ -157,16 +150,16 @@ function BottomNav({ onSignOut }) {
       paddingBottom: 'env(safe-area-inset-bottom)',
       minHeight: '56px',
     }} dir="rtl">
-      {/* Receipts */}
-      <Link to="/" style={tabStyle(isReceipts)}>
-        <Receipt size={21} />
-        <span>קבלות</span>
-      </Link>
-
-      {/* Dashboard */}
-      <Link to="/dashboard" style={tabStyle(location.pathname === '/dashboard')}>
+      {/* Dashboard — rightmost (home) */}
+      <Link to="/" style={tabStyle(location.pathname === '/')}>
         <BarChart2 size={21} />
         <span>דשבורד</span>
+      </Link>
+
+      {/* Receipts */}
+      <Link to="/receipts" style={tabStyle(location.pathname === '/receipts')}>
+        <Receipt size={21} />
+        <span>קבלות</span>
       </Link>
 
       {/* Scan FAB — elevated center button */}
@@ -257,15 +250,16 @@ function AppShell() {
       {/* Page content */}
       <main style={{
         padding: isMobile ? '16px 14px' : '24px 28px',
-        maxWidth: location.pathname === '/dashboard' ? '1100px' : '900px',
+        maxWidth: location.pathname === '/' ? '1100px' : '900px',
         margin: '0 auto',
         paddingBottom: isMobile ? bottomPad : '32px',
       }}>
         <InstallBanner />
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
-            <Route path="/"           element={<ReceiptsPage />} />
-            <Route path="/dashboard"  element={<DashboardPage />} />
+            <Route path="/"           element={<DashboardPage />} />
+            <Route path="/receipts"   element={<ReceiptsPage />} />
+            <Route path="/dashboard"  element={<Navigate to="/" replace />} />
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/settings"   element={<SettingsPage />} />
             <Route path="*"           element={<Navigate to="/" replace />} />

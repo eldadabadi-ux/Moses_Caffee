@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
-import { ChevronLeft, Home, Search, Users } from 'lucide-react'
-import { childrenBreakdown, timeSeries, filterByPath, vendorBreakdown, nextDim, DIM_LABEL } from '../lib/itemAggregation'
+import { ChevronLeft, Home, Search, Store } from 'lucide-react'
+import { childrenBreakdown, timeSeries, filterByPath, vendorBreakdown, DIM_LABEL } from '../lib/itemAggregation'
 import TimeSeriesChart from './charts/TimeSeriesChart'
 import ChartTypeToggle from './charts/ChartTypeToggle'
 
@@ -16,10 +16,9 @@ const GRANS = [
 ]
 
 export default function CategoryDrilldown({ items }) {
-  const [path, setPath]   = useState([])   // [{ dim, value }]
+  const [path, setPath]   = useState([])   // [{ dim, value }] — dim can be l1/l2/l3/name OR 'vendor'
   const [gran, setGran]   = useState('month')
   const [search, setSearch] = useState('')
-  const [vendorFilter, setVendorFilter] = useState(null) // compare/isolate a vendor
   const [chartType, setChartType] = useState('bar')
 
   const { dim: childDim, rows: childrenRaw } = useMemo(() => childrenBreakdown(items, path), [items, path])
@@ -28,16 +27,25 @@ export default function CategoryDrilldown({ items }) {
     return q ? childrenRaw.filter(c => c.name.toLowerCase().includes(q)) : childrenRaw
   }, [childrenRaw, search])
   const vendors  = useMemo(() => vendorBreakdown(items, path), [items, path])
-  const series   = useMemo(() => timeSeries(items, path, gran, vendorFilter), [items, path, gran, vendorFilter])
+  const series   = useMemo(() => timeSeries(items, path, gran), [items, path, gran])
   const scopedTotal = useMemo(() => filterByPath(items, path).reduce((s, it) => s + it.price, 0), [items, path])
 
+  const hasVendor = path.some(p => p.dim === 'vendor')
   const atLeaf = !childDim
   const maxChild = Math.max(...children.map(c => c.total), 1)
   const maxVendor = Math.max(...vendors.map(v => v.total), 1)
   const currentLabel = path.length ? path[path.length - 1].value : 'הכל'
 
-  function drillInto(name) { if (childDim) { setPath([...path, { dim: childDim, value: name }]); setSearch(''); setVendorFilter(null) } }
-  function goTo(idx) { setPath(path.slice(0, idx)); setSearch(''); setVendorFilter(null) }
+  function drillInto(name) { if (childDim) { setPath([...path, { dim: childDim, value: name }]); setSearch('') } }
+  function drillVendor(name) { setPath([...path, { dim: 'vendor', value: name }]); setSearch('') }
+  function goTo(idx) { setPath(path.slice(0, idx)); setSearch('') }
+
+  // Show the vendor panel only while no vendor is chosen yet. At a product leaf
+  // it becomes a price-comparison across the suppliers of that product.
+  const showVendors = vendors.length > 0 && !hasVendor && (atLeaf ? vendors.length >= 1 : true)
+  const vendorTitle = atLeaf
+    ? (vendors.length >= 2 ? `מחיר אצל כל ספק (${vendors.length}) — לחץ לפירוט` : 'ספק')
+    : (path.length === 0 ? 'כניסה לפי ספק — לחץ כדי לראות מה נרכש אצלו' : `ספקים בקטגוריה (${vendors.length}) — לחץ לכניסה`)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }} dir="rtl">
@@ -50,7 +58,8 @@ export default function CategoryDrilldown({ items }) {
         {path.map((p, i) => (
           <span key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <ChevronLeft size={14} style={{ color: 'var(--text-mute)' }} />
-            <button onClick={() => goTo(i + 1)} style={{ background: i === path.length - 1 ? 'var(--accent-bg)' : 'transparent', color: i === path.length - 1 ? 'var(--accent)' : 'var(--text-dim)', border: 'none', borderRadius: '7px', padding: '5px 10px', cursor: 'pointer', fontFamily: 'var(--font-main)', fontWeight: 600, fontSize: '14px' }}>
+            <button onClick={() => goTo(i + 1)} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: i === path.length - 1 ? 'var(--accent-bg)' : 'transparent', color: i === path.length - 1 ? 'var(--accent)' : 'var(--text-dim)', border: 'none', borderRadius: '7px', padding: '5px 10px', cursor: 'pointer', fontFamily: 'var(--font-main)', fontWeight: 600, fontSize: '14px' }}>
+              {p.dim === 'vendor' && <Store size={13} />}
               {p.value}
             </button>
           </span>
@@ -60,7 +69,7 @@ export default function CategoryDrilldown({ items }) {
       {/* Scoped total + granularity */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
         <div style={{ fontSize: '15px', color: 'var(--text-mute)' }}>
-          {currentLabel}{vendorFilter ? ` · ${vendorFilter}` : ''} · <span style={{ color: 'var(--ok)', fontWeight: 700, fontSize: '17px' }}>{fmtILS(vendorFilter ? series.reduce((s,d)=>s+d.total,0) : scopedTotal)}</span>
+          {currentLabel} · <span style={{ color: 'var(--ok)', fontWeight: 700, fontSize: '17px' }}>{fmtILS(scopedTotal)}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <ChartTypeToggle value={chartType} onChange={setChartType} />
@@ -78,40 +87,37 @@ export default function CategoryDrilldown({ items }) {
 
       {/* Time series */}
       {series.length > 0
-        ? <TimeSeriesChart data={series} color={vendorFilter ? '#7c3aed' : COLORS[path.length % COLORS.length]} chartType={chartType} />
+        ? <TimeSeriesChart data={series} color={hasVendor ? '#7c3aed' : COLORS[path.length % COLORS.length]} chartType={chartType} />
         : <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '20px 0', fontSize: '15px' }}>אין נתונים לתקופה</p>}
 
-      {/* Vendor breakdown / comparison — always available for the current scope */}
-      {vendors.length > 0 && (
+      {/* Vendor breakdown — click a vendor to ENTER it and see what was bought there.
+          At a product leaf this is a price comparison across that product's suppliers. */}
+      {showVendors && (
         <div style={{ background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '12px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
-            <Users size={15} style={{ color: 'var(--accent)' }} />
-            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)' }}>
-              {vendors.length >= 2 ? `השוואת ספקים (${vendors.length})` : 'ספק'}
-            </span>
-            {vendorFilter && (
-              <button onClick={() => setVendorFilter(null)} style={{ marginInlineStart: 'auto', fontSize: '12.5px', color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
-                הצג הכל
-              </button>
-            )}
+            <Store size={15} style={{ color: 'var(--accent)' }} />
+            <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text)' }}>{vendorTitle}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {vendors.map((v) => {
               const pct = (v.total / maxVendor) * 100
-              const sel = vendorFilter === v.name
               return (
-                <button key={v.name} onClick={() => setVendorFilter(sel ? null : v.name)}
+                <button key={v.name} onClick={() => drillVendor(v.name)}
                   style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', minWidth: 0, padding: '9px 12px', borderRadius: '9px', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right',
-                    border: `1px solid ${sel ? 'var(--accent)' : 'var(--border)'}`, background: sel ? 'var(--accent-bg)' : 'var(--panel)' }}>
+                    border: '1px solid var(--border)', background: 'var(--panel)', transition: 'background 120ms' }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--accent-bg)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'var(--panel)'}>
                   {/* name + amount */}
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', minWidth: 0 }}>
-                    <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: sel ? 700 : 600, color: sel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <Store size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
                     <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ok)', flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtILS(v.total)}</span>
+                    <ChevronLeft size={16} style={{ color: 'var(--text-mute)', flexShrink: 0 }} />
                   </div>
                   {/* bar + count */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
                     <div style={{ flex: 1, minWidth: 0, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: sel ? 'var(--accent)' : '#60a5fa', borderRadius: 3 }} />
+                      <div style={{ height: '100%', width: `${pct}%`, background: '#60a5fa', borderRadius: 3 }} />
                     </div>
                     <span style={{ fontSize: '12.5px', color: 'var(--text-mute)', flexShrink: 0, whiteSpace: 'nowrap' }}>{v.count} רכישות</span>
                   </div>
@@ -119,7 +125,9 @@ export default function CategoryDrilldown({ items }) {
               )
             })}
           </div>
-          {vendors.length >= 2 && <p style={{ margin: '8px 2px 0', fontSize: '12px', color: 'var(--text-mute)' }}>לחץ על ספק כדי לראות את הגרף שלו בלבד — להשוואה.</p>}
+          <p style={{ margin: '8px 2px 0', fontSize: '12px', color: 'var(--text-mute)' }}>
+            {atLeaf ? 'לחץ על ספק כדי לראות את הרכישות של המוצר ממנו בלבד.' : 'לחץ על ספק כדי להיכנס ולראות אילו מוצרים נרכשו אצלו.'}
+          </p>
         </div>
       )}
 
@@ -128,7 +136,8 @@ export default function CategoryDrilldown({ items }) {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
             <p style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: 'var(--text-mute)' }}>
-              {DIM_LABEL[childDim]} · לחץ כדי להעמיק
+              {hasVendor && <Store size={13} style={{ verticalAlign: '-2px', marginInlineEnd: 4, color: 'var(--accent)' }} />}
+              {DIM_LABEL[childDim]}{hasVendor ? ` של ${path.find(p => p.dim === 'vendor').value}` : ''} · לחץ כדי להעמיק
             </p>
             {childrenRaw.length > 6 && (
               <div style={{ position: 'relative', flex: '0 1 220px' }}>

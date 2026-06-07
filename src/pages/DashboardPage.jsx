@@ -7,7 +7,6 @@ import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
 import TopVendors    from '../components/charts/TopVendors'
-import CategoryTree  from '../components/charts/CategoryTree'
 import CategoryDrilldown from '../components/CategoryDrilldown'
 import ChartTypeToggle from '../components/charts/ChartTypeToggle'
 import { flattenItems } from '../lib/itemAggregation'
@@ -449,16 +448,9 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Interactive drill-down (category → sub → product, over time) ───────── */}
-        <Section id="dash-drilldown" title="ניתוח מעמיק לאורך זמן" sub="לחץ על קטגוריה → תת-קטגוריה → מוצר. בחר גרנולריות: יומי/שבועי/חודשי/רבעוני/שנתי">
+        <Section id="dash-drilldown" title="ניתוח מעמיק לאורך זמן" sub="לחץ על קטגוריה → מוצר, או על ספק כדי לראות מה נרכש אצלו. מוצר שנקנה אצל כמה ספקים — מציג השוואת מחיר. בחר גרנולריות: יומי/שבועי/חודשי/רבעוני/שנתי">
           <CategoryDrilldown items={flatItems} />
         </Section>
-
-        {/* ── Category tree ─────────────────────────────────────────────────────── */}
-        {l1Data.some(c => c.id) && (
-          <Section id="dash-tree" title="פירוט מלא לפי קטגוריות" sub="L1 → L2 → L3 — לחץ להרחבה">
-            <CategoryTree l1Data={l1Data.filter(c => c.id)} categories={categories} receipts={active} total={total} amountOf={amt} />
-          </Section>
-        )}
 
         {/* ── Top vendors ───────────────────────────────────────────────────────── */}
         <Section

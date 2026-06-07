@@ -10,22 +10,21 @@ import {
 // Navigation tree — every section + its options.
 const NAV = [
   {
-    id: 'receipts', label: 'קבלות', icon: Receipt, to: '/',
-    children: [
-      { label: 'סריקת קבלה',  icon: Camera,          action: 'receipts-scan' },
-      { label: 'הוספה ידנית', icon: Plus,            action: 'receipts-add' },
-      { label: 'ייצוא לרו"ח', icon: FileSpreadsheet, action: 'receipts-export' },
-    ],
-  },
-  {
-    id: 'dashboard', label: 'דשבורד', icon: BarChart2, to: '/dashboard',
+    id: 'dashboard', label: 'דשבורד', icon: BarChart2, to: '/',
     children: [
       { label: 'הוצאות חודשיות',          icon: BarChart2,        anchor: 'dash-monthly' },
       { label: 'התפלגות קטגוריות',        icon: PieChart,         anchor: 'dash-categories' },
       { label: 'ניתוח מעמיק (תתי-קטגוריות)', icon: TrendingUp,    anchor: 'dash-drilldown' },
-      { label: 'פירוט מלא לפי קטגוריות',  icon: Layers,           anchor: 'dash-tree' },
       { label: 'ספקים מובילים',           icon: Users,            anchor: 'dash-vendors' },
       { label: 'השוואת ספקים',            icon: ArrowLeftRight,   anchor: 'dash-compare' },
+    ],
+  },
+  {
+    id: 'receipts', label: 'קבלות', icon: Receipt, to: '/receipts',
+    children: [
+      { label: 'סריקת קבלה',  icon: Camera,          action: 'receipts-scan' },
+      { label: 'הוספה ידנית', icon: Plus,            action: 'receipts-add' },
+      { label: 'ייצוא לרו"ח', icon: FileSpreadsheet, action: 'receipts-export' },
     ],
   },
   {

@@ -21,12 +21,13 @@
   ],
   "categories": ["business", "productivity"],
   "shortcuts": [
-    { "name": "קבלות", "short_name": "קבלות", "url": "/", "description": "רשימת קבלות" },
-    { "name": "סרוק קבלה", "short_name": "סריקה", "url": "/?scan=1", "description": "סריקת קבלה חדשה" },
+    { "name": "דשבורד", "short_name": "דשבורד", "url": "/", "description": "מסך ניתוח הוצאות" },
+    { "name": "סרוק קבלה", "short_name": "סריקה", "url": "/receipts?scan=1", "description": "סריקת קבלה חדשה" },
+    { "name": "קבלות", "short_name": "קבלות", "url": "/receipts", "description": "רשימת קבלות" },
     { "name": "קטגוריות", "short_name": "קטגוריות", "url": "/categories", "description": "ניהול קטגוריות" }
   ],
   "share_target": {
-    "action": "/",
+    "action": "/receipts?scan=1",
     "method": "POST",
     "enctype": "multipart/form-data",
     "params": {

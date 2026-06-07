@@ -49,20 +49,31 @@ export function filterByPath(items, path) {
 
 /**
  * The next dimension to group by, given the current path. Skips dimensions that
- * are already in the path or that have no non-empty values in the current scope.
- * Returns null when there's nothing deeper (we're at a leaf product).
+ * are already in the path, that have no non-empty values, OR that collapse to a
+ * single value (no information gained) — so drilling jumps straight to the level
+ * that actually splits (e.g. a vendor → its products, skipping a trivial L1/L2).
+ * `vendor` is never auto-chosen here; it's a manual drill axis (click a vendor).
+ * Returns null when there's nothing meaningful deeper (we're at a leaf product).
  */
 export function nextDim(items, path) {
   const used = new Set(path.map(p => p.dim))
   const scoped = filterByPath(items, path)
+  const distinct = (dim) => new Set(scoped.map(it => (it[dim] || '').trim()).filter(Boolean))
+  // 1) first unused dim that actually splits the scope (≥ 2 distinct values)
   for (const dim of DIMS) {
     if (used.has(dim)) continue
-    // need at least one non-empty value, and more than just a single repeated value
-    const vals = new Set(scoped.map(it => (it[dim] || '').trim()).filter(Boolean))
-    if (vals.size >= 1 && (dim === 'name' || vals.size >= 1)) {
-      // skip a dim where every scoped item is empty
-      if ([...vals].some(Boolean)) return dim
-    }
+    if (distinct(dim).size >= 2) return dim
+  }
+  // 2) nothing splits — fall to the deepest unused dim that still has a value,
+  //    so the user can always reach the individual product. Only descend BELOW
+  //    the deepest level already chosen (a shallower single-value level adds
+  //    nothing once a deeper one is picked → treat as a leaf instead).
+  const usedDepths = DIMS.map((d, i) => (used.has(d) ? i : -1)).filter(i => i >= 0)
+  const deepestUsed = usedDepths.length ? Math.max(...usedDepths) : -1
+  for (let i = DIMS.length - 1; i > deepestUsed; i--) {
+    const dim = DIMS[i]
+    if (used.has(dim)) continue
+    if (distinct(dim).size >= 1) return dim
   }
   return null
 }
