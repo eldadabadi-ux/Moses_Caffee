@@ -76,6 +76,8 @@ export default function DashboardPage() {
   const [year,        setYear]        = useState(thisYear)
   const [compareYear, setCompareYear] = useState(null)
   const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
+  const [distMode,    setDistMode]    = useState('cat') // distribution donut: 'cat' | 'vendor'
+  const [selVendor,   setSelVendor]   = useState(null)  // highlighted vendor slice (local)
   const [availYears,  setAvailYears]  = useState([thisYear])
   const [vendorA,     setVendorA]     = useState('')    // vendor comparison
   const [vendorB,     setVendorB]     = useState('')
@@ -220,8 +222,8 @@ export default function DashboardPage() {
   // When a category is selected, the time charts adopt its colour.
   const selColor = filterCat ? (catColor[filterCat] || '#2563eb') : '#2563eb'
 
-  // ── Vendor aggregation ────────────────────────────────────────────────────────
-  const vendorData = useMemo(() => {
+  // ── Vendor aggregation (full) — powers the optional "by vendor" distribution ──
+  const vendorDist = useMemo(() => {
     const map = {}
     active.forEach(r => {
       const name = (r.vendor_name || '').trim() || 'לא ידוע'
@@ -229,8 +231,16 @@ export default function DashboardPage() {
       map[name].total += amt(r)
       map[name].count += 1
     })
-    return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 10)
+    return Object.values(map).sort((a, b) => b.total - a.total)
   }, [active, settings.showWithVat])
+  const vendorTotal = useMemo(() => vendorDist.reduce((s, v) => s + v.total, 0), [vendorDist])
+  // Cap to top 8 + "אחר" so the donut stays readable
+  const vendorDonutData = useMemo(() => {
+    if (vendorDist.length <= 9) return vendorDist
+    const top = vendorDist.slice(0, 8)
+    const rest = vendorDist.slice(8)
+    return [...top, { name: 'אחר', total: rest.reduce((s, v) => s + v.total, 0), count: rest.reduce((s, v) => s + v.count, 0) }]
+  }, [vendorDist])
 
   // ── Best month ────────────────────────────────────────────────────────────────
   const bestMonth = useMemo(() => {
@@ -278,6 +288,15 @@ export default function DashboardPage() {
   }, [selProdsA, selProdsB, compA, compB])
 
   const hasFilters = filterCat
+
+  // ── Distribution donut/ranking: switchable between category and vendor ────────
+  const isVendorDist = distMode === 'vendor'
+  const distDonut = isVendorDist ? vendorDonutData : l1DataAll   // capped for donut
+  const distRank  = isVendorDist ? vendorDist : l1DataAll        // full list for ranking
+  const distTotal = isVendorDist ? vendorTotal : totalAll
+  const distSel   = isVendorDist ? selVendor : filterCat
+  const distSetSel = isVendorDist ? setSelVendor : setFilterCat
+  const distColorOf = (name) => { const i = distRank.findIndex(d => d.name === name); return i >= 0 ? COLORS[i % COLORS.length] : 'var(--accent)' }
 
   if (loading) return <LoadingSpinner />
 
@@ -356,7 +375,7 @@ export default function DashboardPage() {
         <KpiCard label="סה״כ הוצאות" value={fmtILS(total)} sub={`שנת ${year}`} icon={Receipt} color="var(--ok)" trend={yoy} />
         <KpiCard label="ממוצע חודשי" value={fmtILS(avgMonthly)} sub={bestMonth ? `חודש שיא: ${bestMonth}` : undefined} icon={Calendar} color="var(--accent)" />
         <KpiCard label="מספר קבלות" value={active.length} sub={`${active.filter(r => r.ai_extracted).length} נסרקו ב-AI`} icon={BarChart2} color="#7c3aed" />
-        {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1DataAll.length} sub={`${vendorData.length} ספקים`} icon={Tag} color="#d97706" />}
+        {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1DataAll.length} sub={`${vendorDist.length} ספקים`} icon={Tag} color="#d97706" />}
       </div>
 
       {/* ── Empty state ───────────────────────────────────────────────────────── */}
@@ -394,64 +413,80 @@ export default function DashboardPage() {
           <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} chartType={chartType} color={selColor} />
         </Section>
 
-        {/* ── Category donut + ranking ──────────────────────────────────────────── */}
-        <div id="dash-categories" style={{ scrollMarginTop: '76px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr', gap: isMobile ? '14px' : '20px' }}>
-          {/* Donut */}
-          <Section title="התפלגות לפי קטגוריה" sub="לחץ על פלח לסינון · לחיצה במרכז מבטלת">
-            {/* Selected category title — so it's clear which slice was clicked */}
-            {filterCat && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
-                <span style={{ width: 11, height: 11, borderRadius: '50%', background: catColor[filterCat] || 'var(--accent)', flexShrink: 0 }} />
-                <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{filterCat}</span>
-                <button onClick={() => setFilterCat(null)} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 13, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
-                  <X size={13} /> בטל
+        {/* ── Distribution donut + ranking (by category OR by vendor) ───────────── */}
+        <div id="dash-categories" style={{ scrollMarginTop: '76px', display: 'flex', flexDirection: 'column', gap: isMobile ? '12px' : '14px' }}>
+          {/* Mode toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--text-mute)' }}>התפלגות לפי:</span>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--panel-2)', borderRadius: 9, padding: 3 }}>
+              {[{ id: 'cat', label: 'קטגוריה' }, { id: 'vendor', label: 'ספק' }].map(o => (
+                <button key={o.id} onClick={() => { setDistMode(o.id); setSelVendor(null) }}
+                  style={{ padding: '6px 16px', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)', fontSize: '13.5px', fontWeight: distMode === o.id ? 700 : 500,
+                    background: distMode === o.id ? 'var(--accent)' : 'transparent', color: distMode === o.id ? '#fff' : 'var(--text-dim)' }}>
+                  {o.label}
                 </button>
-              </div>
-            )}
-            {l1DataAll.length > 0
-              ? <CategoryDonut data={l1DataAll} total={totalAll} selected={filterCat} onSelect={setFilterCat} />
-              : <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '24px 0' }}>אין קטגוריות</p>
-            }
-          </Section>
-
-          {/* Category ranking */}
-          <Section title="דירוג קטגוריות" sub={`${l1DataAll.length} קטגוריות פעילות`}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {l1DataAll.map((cat, i) => {
-                const pct  = totalAll > 0 ? (cat.total / totalAll) * 100 : 0
-                const clr  = COLORS[i % COLORS.length]
-                const isSel = filterCat === cat.name
-                const dim  = filterCat && !isSel
-                return (
-                  <div key={cat.name}
-                    onClick={() => setFilterCat(cat.name === filterCat ? null : cat.name)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px',
-                      borderRadius: '9px', cursor: 'pointer', transition: 'background 120ms, opacity 120ms',
-                      background: isSel ? 'var(--accent-bg)' : 'var(--panel-2)',
-                      border: `1px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
-                      opacity: dim ? 0.5 : 1,
-                    }}
-                    onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--panel)' }}
-                    onMouseLeave={e => e.currentTarget.style.background = isSel ? 'var(--accent-bg)' : 'var(--panel-2)'}
-                  >
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: dim ? 'var(--border-strong)' : clr, flexShrink: 0 }} />
-                    <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: isSel ? 700 : 500, color: isSel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
-                    <span style={{ fontSize: '12.5px', color: 'var(--text-mute)', whiteSpace: 'nowrap', flexShrink: 0 }}>{cat.count}</span>
-                    {!isMobile && (
-                      <div style={{ width: 60, flexShrink: 0 }}>
-                        <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${pct}%`, background: dim ? 'var(--border-strong)' : clr, borderRadius: 3, transition: 'width 500ms ease' }} />
-                        </div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-mute)', textAlign: 'left', marginTop: 1 }}>{Math.round(pct)}%</div>
-                      </div>
-                    )}
-                    <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ok)', minWidth: 72, textAlign: 'left', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtILS(cat.total)}</span>
-                  </div>
-                )
-              })}
+              ))}
             </div>
-          </Section>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr', gap: isMobile ? '14px' : '20px' }}>
+            {/* Donut */}
+            <Section title={`התפלגות לפי ${isVendorDist ? 'ספק' : 'קטגוריה'}`} sub={isVendorDist ? 'לחץ על פלח להדגשה · לחיצה במרכז מבטלת' : 'לחץ על פלח לסינון · לחיצה במרכז מבטלת'}>
+              {/* Selected slice title — so it's clear which slice was clicked */}
+              {distSel && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ width: 11, height: 11, borderRadius: '50%', background: distColorOf(distSel), flexShrink: 0 }} />
+                  <span style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)' }}>{distSel}</span>
+                  <button onClick={() => distSetSel(null)} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 13, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                    <X size={13} /> בטל
+                  </button>
+                </div>
+              )}
+              {distDonut.length > 0
+                ? <CategoryDonut data={distDonut} total={distTotal} selected={distSel} onSelect={distSetSel} />
+                : <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '24px 0' }}>{isVendorDist ? 'אין ספקים' : 'אין קטגוריות'}</p>
+              }
+            </Section>
+
+            {/* Ranking */}
+            <Section title={`דירוג ${isVendorDist ? 'ספקים' : 'קטגוריות'}`} sub={`${distRank.length} ${isVendorDist ? 'ספקים' : 'קטגוריות פעילות'}`}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: 420, overflowY: 'auto', overflowX: 'hidden' }}>
+                {distRank.map((row, i) => {
+                  const pct  = distTotal > 0 ? (row.total / distTotal) * 100 : 0
+                  const clr  = COLORS[i % COLORS.length]
+                  const isSel = distSel === row.name
+                  const dim  = distSel && !isSel
+                  return (
+                    <div key={row.name}
+                      onClick={() => distSetSel(row.name === distSel ? null : row.name)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px',
+                        borderRadius: '9px', cursor: 'pointer', transition: 'background 120ms, opacity 120ms',
+                        background: isSel ? 'var(--accent-bg)' : 'var(--panel-2)',
+                        border: `1px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`,
+                        opacity: dim ? 0.5 : 1,
+                      }}
+                      onMouseEnter={e => { if (!isSel) e.currentTarget.style.background = 'var(--panel)' }}
+                      onMouseLeave={e => e.currentTarget.style.background = isSel ? 'var(--accent-bg)' : 'var(--panel-2)'}
+                    >
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: dim ? 'var(--border-strong)' : clr, flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: isSel ? 700 : 500, color: isSel ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</span>
+                      <span style={{ fontSize: '12.5px', color: 'var(--text-mute)', whiteSpace: 'nowrap', flexShrink: 0 }}>{row.count}</span>
+                      {!isMobile && (
+                        <div style={{ width: 60, flexShrink: 0 }}>
+                          <div style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${pct}%`, background: dim ? 'var(--border-strong)' : clr, borderRadius: 3, transition: 'width 500ms ease' }} />
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-mute)', textAlign: 'left', marginTop: 1 }}>{Math.round(pct)}%</div>
+                        </div>
+                      )}
+                      <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ok)', minWidth: 72, textAlign: 'left', whiteSpace: 'nowrap', flexShrink: 0 }}>{fmtILS(row.total)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </Section>
+          </div>
         </div>
 
         {/* ── Interactive drill-down (category → sub → product, over time) ───────── */}
