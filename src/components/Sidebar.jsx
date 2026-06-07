@@ -4,7 +4,7 @@ import { useSettings } from '../hooks/useSettings'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Percent, FolderOpen, Bell, Building2,
+  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database,
 } from 'lucide-react'
 
 // Navigation tree — every section + its options.
@@ -41,6 +41,8 @@ const NAV = [
       { label: 'הצגת מחירים',    icon: Receipt,    anchor: 'set-display' },
       { label: 'תיקיית שמירה',   icon: FolderOpen, anchor: 'set-folder' },
       { label: 'תזכורת חודשית',  icon: Bell,       anchor: 'set-reminder' },
+      { label: 'דיוק סריקה',     icon: ScanLine,   anchor: 'set-rescan' },
+      { label: 'גיבוי ושחזור',   icon: Database,   anchor: 'set-backup' },
     ],
   },
 ]

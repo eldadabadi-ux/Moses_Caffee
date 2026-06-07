@@ -1,11 +1,17 @@
 import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
-import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check } from 'lucide-react'
+import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check, RefreshCw, Database, Upload, ScanLine } from 'lucide-react'
 import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import { useInstall } from '../hooks/useInstall'
+import { rescanAllReceipts } from '../lib/rescanReceipts'
+import { downloadBackup, restoreFromObject, readBackupFile } from '../lib/backup'
+import ShekelSign from '../components/icons/ShekelSign'
 import toast from 'react-hot-toast'
+
+const LAST_BACKUP_KEY = 'moses_last_backup'
+const AUTO_BACKUP_KEY = 'moses_auto_backup'
 
 export default function SettingsPage() {
   const { settings, updateSettings, saving } = useSettings()
@@ -17,6 +23,66 @@ export default function SettingsPage() {
   const [nameChanged, setNameChanged] = useState(false)
   const [folderName, setFolderName] = useState(savedDirName())
   const logoInputRef = useRef(null)
+
+  // Re-scan all receipts (price accuracy)
+  const [rescanBusy, setRescanBusy] = useState(false)
+  const [rescanProg, setRescanProg] = useState(null)   // { done, total, fixed, failed }
+  const [rescanResult, setRescanResult] = useState(null)
+
+  // Backup / restore
+  const restoreInputRef = useRef(null)
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const [lastBackup, setLastBackup] = useState(() => { try { return localStorage.getItem(LAST_BACKUP_KEY) } catch { return null } })
+  const [autoBackup, setAutoBackup] = useState(() => { try { return (localStorage.getItem(AUTO_BACKUP_KEY) ?? '1') === '1' } catch { return true } })
+
+  async function doRescan() {
+    if (rescanBusy) return
+    if (!window.confirm('סריקה חוזרת תריץ את ה-AI מחדש על כל הקבלות שיש להן תמונה ותתקן מחירים לא מדויקים. זה עשוי לקחת כמה דקות — אנא אל תסגור את הדף. להמשיך?')) return
+    setRescanBusy(true); setRescanResult(null); setRescanProg({ done: 0, total: 0, fixed: 0, failed: 0 })
+    try {
+      const res = await rescanAllReceipts(user, settings.vatRate ?? 18, { onProgress: setRescanProg })
+      setRescanResult(res)
+      toast.success(`הסריקה הסתיימה — ${res.fixed} מחירים תוקנו מתוך ${res.total}`)
+    } catch (err) {
+      toast.error('שגיאה בסריקה חוזרת: ' + (err?.message || ''))
+    } finally { setRescanBusy(false) }
+  }
+
+  async function doBackup() {
+    if (backupBusy) return
+    setBackupBusy(true)
+    try {
+      const counts = await downloadBackup(user)
+      const today = new Date().toISOString().slice(0, 10)
+      try { localStorage.setItem(LAST_BACKUP_KEY, today) } catch {}
+      setLastBackup(today)
+      toast.success(`גיבוי נשמר — ${counts.receipts} קבלות, ${counts.categories} קטגוריות`)
+    } catch (err) {
+      toast.error('שגיאה בגיבוי: ' + (err?.message || ''))
+    } finally { setBackupBusy(false) }
+  }
+
+  async function handleRestoreFile(e) {
+    const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
+    setRestoreBusy(true)
+    try {
+      const obj = await readBackupFile(file)
+      const c = obj?.counts || { receipts: obj?.receipts?.length || 0, categories: obj?.categories?.length || 0 }
+      if (!window.confirm(`לשחזר מהקובץ ${obj.exported_at ? '(' + new Date(obj.exported_at).toLocaleDateString('he-IL') + ')' : ''}?\n${c.receipts} קבלות ו-${c.categories} קטגוריות. נתונים עם אותו מזהה ייכתבו מחדש.`)) { setRestoreBusy(false); return }
+      const restored = await restoreFromObject(obj, user)
+      toast.success(`שוחזרו ${restored.receipts} קבלות ו-${restored.categories} קטגוריות`)
+      setTimeout(() => window.location.reload(), 1400)
+    } catch (err) {
+      toast.error('שגיאה בשחזור: ' + (err?.message || 'קובץ לא תקין'))
+    } finally { setRestoreBusy(false) }
+  }
+
+  function toggleAuto() {
+    const next = !autoBackup
+    setAutoBackup(next)
+    try { localStorage.setItem(AUTO_BACKUP_KEY, next ? '1' : '0') } catch {}
+  }
 
   async function chooseFolder() {
     try {
@@ -252,7 +318,7 @@ export default function SettingsPage() {
       {/* Display Mode Card */}
       <div id="set-display" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 15 }}>₪</span>
+          <ShekelSign size={16} color="var(--accent)" />
           <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>הצגת מחירים</span>
         </div>
         <div style={{ padding: 20 }}>
@@ -338,6 +404,77 @@ export default function SettingsPage() {
                 </button>
               )
             })}
+          </div>
+        </div>
+      </div>
+
+      {/* Re-scan all receipts (price accuracy) Card */}
+      <div id="set-rescan" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <ScanLine size={17} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>דיוק סריקה — סריקה חוזרת</span>
+        </div>
+        <div style={{ padding: 20 }}>
+          <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+            סורק מחדש בעזרת AI את כל הקבלות שיש להן תמונה ומתקן מחירים שעוגלו — לדיוק ברמת האגורה.
+            הספק, התאריך והקטגוריות שהגדרת נשמרים. הפעולה עשויה לקחת כמה דקות.
+          </p>
+          {rescanBusy && rescanProg && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-dim)', marginBottom: 6 }}>
+                <span>סורק… {rescanProg.done}/{rescanProg.total}</span>
+                <span>תוקנו: {rescanProg.fixed}{rescanProg.failed ? ` · נכשלו: ${rescanProg.failed}` : ''}</span>
+              </div>
+              <div style={{ height: 8, borderRadius: 4, background: 'var(--panel-2)', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${rescanProg.total ? (rescanProg.done / rescanProg.total) * 100 : 0}%`, background: 'var(--accent)', borderRadius: 4, transition: 'width 300ms ease' }} />
+              </div>
+            </div>
+          )}
+          {rescanResult && !rescanBusy && (
+            <div style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--success-tint-1)', border: '1px solid var(--success-tint-border)', borderRadius: 10, fontSize: 14, color: 'var(--text)' }}>
+              הסתיים: נבדקו {rescanResult.total} קבלות · <strong>{rescanResult.fixed}</strong> מחירים תוקנו{rescanResult.failed ? ` · ${rescanResult.failed} נכשלו (נסה שוב)` : ''}.
+            </div>
+          )}
+          <button onClick={doRescan} disabled={rescanBusy}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 20px', borderRadius: 10, border: 'none', background: rescanBusy ? 'var(--panel-2)' : 'var(--accent)', color: rescanBusy ? 'var(--text-mute)' : 'white', fontSize: 15, fontWeight: 700, cursor: rescanBusy ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
+            <RefreshCw size={16} style={{ animation: rescanBusy ? 'spin 1s linear infinite' : 'none' }} /> {rescanBusy ? 'סורק…' : 'סרוק מחדש את כל הקבלות'}
+          </button>
+        </div>
+      </div>
+
+      {/* Backup & restore Card */}
+      <div id="set-backup" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Database size={17} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>גיבוי ושחזור</span>
+        </div>
+        <div style={{ padding: 20 }}>
+          <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+            שמירת כל הנתונים (קבלות, קטגוריות והגדרות) כקובץ JSON אחד שניתן לשחזר ממנו.
+          </p>
+          {/* Daily auto toggle */}
+          <button onClick={toggleAuto}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: 10, padding: '12px 14px', marginBottom: 12, borderRadius: 10, cursor: 'pointer', fontFamily: 'var(--font-main)',
+              border: `1.5px solid ${autoBackup ? 'var(--accent)' : 'var(--border)'}`, background: autoBackup ? 'var(--accent-bg)' : 'var(--panel-2)' }}>
+            <span style={{ fontSize: 14.5, fontWeight: 600, color: autoBackup ? 'var(--accent)' : 'var(--text-dim)' }}>גיבוי יומי אוטומטי</span>
+            <span style={{ width: 42, height: 24, borderRadius: 999, background: autoBackup ? 'var(--accent)' : 'var(--border-strong)', position: 'relative', flexShrink: 0, transition: 'background 160ms' }}>
+              <span style={{ position: 'absolute', top: 2, [autoBackup ? 'left' : 'right']: 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'all 160ms' }} />
+            </span>
+          </button>
+          <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--text-mute)', lineHeight: 1.5 }}>
+            פעם ביום, אם הוגדרה תיקיית שמירה — הגיבוי נשמר אליה אוטומטית. אחרת תופיע בקשה קצרה להורדה.
+            {lastBackup && <> גיבוי אחרון: <strong>{new Date(lastBackup).toLocaleDateString('he-IL')}</strong>.</>}
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button onClick={doBackup} disabled={backupBusy}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: 'white', fontSize: 14.5, fontWeight: 600, cursor: backupBusy ? 'default' : 'pointer', opacity: backupBusy ? 0.7 : 1, fontFamily: 'var(--font-main)' }}>
+              <Download size={15} /> {backupBusy ? 'מגבה…' : 'גבה עכשיו'}
+            </button>
+            <input ref={restoreInputRef} type="file" accept="application/json,.json" onChange={handleRestoreFile} style={{ display: 'none' }} />
+            <button onClick={() => restoreInputRef.current?.click()} disabled={restoreBusy}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-dim)', fontSize: 14.5, cursor: restoreBusy ? 'default' : 'pointer', opacity: restoreBusy ? 0.7 : 1, fontFamily: 'var(--font-main)' }}>
+              <Upload size={15} /> {restoreBusy ? 'משחזר…' : 'שחזר מקובץ'}
+            </button>
           </div>
         </div>
       </div>

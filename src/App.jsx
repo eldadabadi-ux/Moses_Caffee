@@ -7,6 +7,7 @@ import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import MonthlyExportPrompt from './components/MonthlyExportPrompt'
 import InstallBanner from './components/InstallBanner'
+import DailyBackup from './components/DailyBackup'
 import Sidebar from './components/Sidebar'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu } from 'lucide-react'
 
@@ -272,6 +273,9 @@ function AppShell() {
 
       {/* End-of-month export reminder */}
       <MonthlyExportPrompt />
+
+      {/* Daily JSON backup */}
+      <DailyBackup />
 
       <UpdateBanner />
     </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
-import { BarChart2, TrendingUp, TrendingDown, Receipt, Calendar, Tag, X, ChevronDown } from 'lucide-react'
+import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
@@ -10,6 +10,7 @@ import CategoryDrilldown from '../components/CategoryDrilldown'
 import ChartTypeToggle from '../components/charts/ChartTypeToggle'
 import MultiSelect from '../components/MultiSelect'
 import ProductCompareChart from '../components/charts/ProductCompareChart'
+import ShekelSign from '../components/icons/ShekelSign'
 import { flattenItems, vendorComposition } from '../lib/itemAggregation'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
@@ -320,7 +321,7 @@ export default function DashboardPage() {
             <button onClick={toggleVatDisplay}
               style={{ height: 36, padding: '0 12px', borderRadius: 8, border: `1px solid ${settings.showWithVat ? 'var(--border)' : 'var(--accent)'}`, background: settings.showWithVat ? 'var(--panel)' : 'var(--accent-bg)', color: settings.showWithVat ? 'var(--text-dim)' : 'var(--accent)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}
               title='החלף בין כולל / ללא מע"מ'>
-              <Receipt size={13} /> {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
+              <ShekelSign size={14} /> {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
             </button>
             {/* Year picker */}
             <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
@@ -372,7 +373,7 @@ export default function DashboardPage() {
 
       {/* ── KPI Cards ─────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: isMobile ? '10px' : '14px', flexWrap: 'wrap' }}>
-        <KpiCard label="סה״כ הוצאות" value={fmtILS(total)} sub={`שנת ${year}`} icon={Receipt} color="var(--ok)" trend={yoy} />
+        <KpiCard label="סה״כ הוצאות" value={fmtILS(total)} sub={`שנת ${year}`} icon={ShekelSign} color="var(--ok)" trend={yoy} />
         <KpiCard label="ממוצע חודשי" value={fmtILS(avgMonthly)} sub={bestMonth ? `חודש שיא: ${bestMonth}` : undefined} icon={Calendar} color="var(--accent)" />
         <KpiCard label="מספר קבלות" value={active.length} sub={`${active.filter(r => r.ai_extracted).length} נסרקו ב-AI`} icon={BarChart2} color="#7c3aed" />
         {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1DataAll.length} sub={`${vendorDist.length} ספקים`} icon={Tag} color="#d97706" />}
