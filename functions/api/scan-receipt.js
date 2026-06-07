@@ -1,7 +1,8 @@
 /**
  * Cloudflare Pages Function — /api/scan-receipt
  *
- * POST body:  { imageBase64: string, mimeType: string }
+ * POST body:  { imageBase64?: string, imagesBase64?: string[], mimeType: string }
+ *             (imagesBase64 = several pages of one receipt → combined result)
  * Response:   { vendor_name, receipt_date, total_amount, currency, original_amount, items[] }
  *
  * Uses gemini-2.5-pro for maximum accuracy on Hebrew receipts.
@@ -92,9 +93,13 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400, headers: CORS })
   }
 
-  const { imageBase64, mimeType } = body ?? {}
-  if (!imageBase64 || !mimeType) {
-    return Response.json({ error: 'Missing required fields: imageBase64, mimeType' }, { status: 400, headers: CORS })
+  const { imageBase64, imagesBase64, mimeType } = body ?? {}
+  // Accept either a single image (imageBase64) or several pages (imagesBase64[]).
+  const images = (Array.isArray(imagesBase64) && imagesBase64.length)
+    ? imagesBase64.filter(Boolean)
+    : (imageBase64 ? [imageBase64] : [])
+  if (!images.length || !mimeType) {
+    return Response.json({ error: 'Missing required fields: imageBase64/imagesBase64, mimeType' }, { status: 400, headers: CORS })
   }
 
   // VAT rate from client (defaults to current Israeli rate 18%)
@@ -144,7 +149,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   ]
 
   // ── Build prompt ───────────────────────────────────────────────────────────
-  const prompt = buildPrompt(ALLOWED_CATEGORIES, categoriesTree)
+  const prompt = buildPrompt(ALLOWED_CATEGORIES, categoriesTree, images.length)
 
   // ── Build prompt + call Gemini with retry across models ────────────────────
   let result = null
@@ -154,7 +159,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   let usedModel = null
   for (const model of [GEMINI_PRIMARY, GEMINI_FALLBACK]) {
     try {
-      result = await callGemini(GEMINI_API_KEY, model, imageBase64, mimeType, prompt)
+      result = await callGemini(GEMINI_API_KEY, model, images, mimeType, prompt)
       if (result && (result.total_amount > 0 || result.vendor_name)) { usedModel = model; break }
     } catch (err) {
       lastError = err
@@ -167,7 +172,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     console.warn('[scan-receipt] Amount missing — retrying with focused prompt')
     try {
       const retryResult = await callGemini(
-        GEMINI_API_KEY, GEMINI_PRIMARY, imageBase64, mimeType,
+        GEMINI_API_KEY, GEMINI_PRIMARY, images, mimeType,
         buildRetryPrompt(result)
       )
       if (retryResult?.total_amount > 0) {
@@ -232,10 +237,18 @@ function reconcileVat(result, vatRate) {
 }
 
 // ── Main extraction prompt ─────────────────────────────────────────────────────
-function buildPrompt(allowedCategories, categoriesTree) {
+function buildPrompt(allowedCategories, categoriesTree, pageCount = 1) {
+  const multiPageNote = pageCount > 1 ? `
+## ⚠️ קבלה מרובת עמודים — ${pageCount} תמונות
+התמונות המצורפות הן **${pageCount} עמודים של אותה קבלה אחת** (לפי הסדר).
+- אחֵד את **כל** שורות המוצרים מכל העמודים לרשימת items אחת.
+- הסכום הסופי (total_amount) ופירוט המע"מ מופיעים בדרך כלל **בעמוד האחרון** — קח אותם משם.
+- שם הספק והתאריך מופיעים בדרך כלל בעמוד הראשון.
+- החזר תוצאה **אחת מאוחדת** עבור כל הקבלה (לא תוצאה לכל עמוד).
+` : ''
   return `אתה מומחה לניתוח קבלות ישראליות עבור בית קפה ומסעדה קטנה.
 המטרה: לחלץ נתונים מדויקים מהקבלה כדי לנהל הוצאות עסקיות.
-
+${multiPageNote}
 ## חוקי חילוץ חובה
 
 ### שם הספק (vendor_name):
@@ -335,12 +348,14 @@ function buildRetryPrompt(prevResult) {
 }
 
 // ── Gemini API call ────────────────────────────────────────────────────────────
-async function callGemini(apiKey, model, imageBase64, mimeType, prompt) {
+// `images` is an array of base64 strings (1 or more pages of the same receipt).
+async function callGemini(apiKey, model, images, mimeType, prompt) {
+  const imageArr = Array.isArray(images) ? images : [images]
   const payload = {
     contents: [{
       parts: [
         { text: prompt },
-        { inline_data: { mime_type: mimeType, data: imageBase64 } },
+        ...imageArr.map(data => ({ inline_data: { mime_type: mimeType, data } })),
       ],
     }],
     generationConfig: {

@@ -10,7 +10,7 @@ import toast from 'react-hot-toast'
 import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
-  CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon,
+  CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
 } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
@@ -69,11 +69,14 @@ async function buildStyledExcel(rows) {
 }
 
 // ── CameraModal ────────────────────────────────────────────────────────────────
-function CameraModal({ onCapture, onClose }) {
+function CameraModal({ onCapture, onClose, multi = false }) {
   const videoRef  = useRef(null)
   const streamRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [err,   setErr]   = useState(null)
+  const [pages, setPages] = useState([])   // multi-page: [{ file, url }]
+  const pagesRef = useRef([])
+  useEffect(() => { pagesRef.current = pages }, [pages])
 
   useEffect(() => {
     let cancelled = false
@@ -91,14 +94,39 @@ function CameraModal({ onCapture, onClose }) {
     return () => { cancelled = true; streamRef.current?.getTracks().forEach(t => t.stop()) }
   }, [])
 
-  function capture() {
-    const video = videoRef.current; if (!video || !ready) return
+  // Revoke thumbnail object URLs only on unmount (not on every capture)
+  useEffect(() => () => { pagesRef.current.forEach(p => URL.revokeObjectURL(p.url)) }, [])
+
+  function grabFrame() {
+    const video = videoRef.current; if (!video || !ready) return null
     const canvas = document.createElement('canvas')
     canvas.width  = video.videoWidth  || 1280
     canvas.height = video.videoHeight || 720
     canvas.getContext('2d').drawImage(video, 0, 0)
-    streamRef.current?.getTracks().forEach(t => t.stop())
-    canvas.toBlob(blob => { if (blob) onCapture(new File([blob], 'photo.jpg', { type: 'image/jpeg' })) }, 'image/jpeg', 0.92)
+    return canvas
+  }
+  function stopStream() { streamRef.current?.getTracks().forEach(t => t.stop()) }
+
+  function capture() {
+    const canvas = grabFrame(); if (!canvas) return
+    canvas.toBlob(blob => {
+      if (!blob) return
+      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' })
+      if (multi) {
+        setPages(p => [...p, { file, url: URL.createObjectURL(blob) }])  // keep stream alive
+      } else {
+        stopStream()
+        onCapture([file])
+      }
+    }, 'image/jpeg', 0.92)
+  }
+
+  function finish() {
+    stopStream()
+    onCapture(pages.map(p => p.file))
+  }
+  function removePage(i) {
+    setPages(p => { const n = [...p]; URL.revokeObjectURL(n[i].url); n.splice(i, 1); return n })
   }
 
   return createPortal(
@@ -112,13 +140,40 @@ function CameraModal({ onCapture, onClose }) {
         <>
           <video ref={videoRef} playsInline muted autoPlay style={{ flex: 1, width: '100%', objectFit: 'cover', display: 'block' }} />
           {!ready && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: '#fff', fontSize: 14 }}>מאתחל מצלמה…</div>}
+
+          {/* Multi-page banner + captured thumbnails */}
+          {multi && (
+            <div dir="rtl" style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: 'calc(10px + env(safe-area-inset-top)) 12px 10px', background: 'linear-gradient(rgba(0,0,0,0.55), transparent)' }}>
+              <div style={{ color: '#fff', fontSize: 13.5, fontWeight: 600, marginBottom: pages.length ? 8 : 0, textAlign: 'center' }}>
+                מצב מספר עמודים · צולמו {pages.length} עמודים
+              </div>
+              {pages.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+                  {pages.map((p, i) => (
+                    <div key={p.url} style={{ position: 'relative', flexShrink: 0 }}>
+                      <img src={p.url} alt={`עמ' ${i + 1}`} style={{ width: 48, height: 64, objectFit: 'cover', borderRadius: 7, border: '2px solid rgba(255,255,255,0.8)' }} />
+                      <span style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 4, padding: '0 4px' }}>{i + 1}</span>
+                      <button onClick={() => removePage(i)} aria-label="הסר" style={{ position: 'absolute', top: -6, left: -6, width: 20, height: 20, borderRadius: '50%', background: '#dc2626', color: '#fff', border: '2px solid #000', cursor: 'pointer', fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '24px 24px calc(40px + env(safe-area-inset-bottom))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'linear-gradient(transparent, rgba(0,0,0,0.5))' }}>
-            <button onClick={onClose} style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation' }}>✕</button>
+            <button onClick={() => { stopStream(); onClose() }} style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation' }}>✕</button>
             <button onClick={capture} disabled={!ready}
               style={{ width: 76, height: 76, borderRadius: '50%', background: ready ? '#fff' : '#666', border: '4px solid rgba(255,255,255,0.5)', cursor: ready ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation' }}>
               <div style={{ width: 58, height: 58, borderRadius: '50%', background: ready ? '#fff' : '#888', border: '3px solid #000' }} />
             </button>
-            <div style={{ width: 52 }} />
+            {/* Done button (multi only) */}
+            {multi ? (
+              <button onClick={finish} disabled={!pages.length}
+                style={{ minWidth: 52, height: 52, padding: '0 14px', borderRadius: 26, background: pages.length ? '#16a34a' : 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 14, fontWeight: 700, cursor: pages.length ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', fontFamily: 'var(--font-main)' }}>
+                סיים{pages.length ? ` (${pages.length})` : ''}
+              </button>
+            ) : <div style={{ width: 52 }} />}
           </div>
         </>
       )}
@@ -381,6 +436,7 @@ export default function ReceiptsPage() {
   const [editId, setEditId]             = useState(null)
   const [lightboxUrl, setLightboxUrl]   = useState(null)
   const [showCamera, setShowCamera]     = useState(false)
+  const [cameraMulti, setCameraMulti]   = useState(false)     // multi-page capture mode
   const [showExport, setShowExport]     = useState(false)
   const [scanLoading, setScanLoading]   = useState(false)
   const [showReview, setShowReview]     = useState(false)
@@ -390,6 +446,7 @@ export default function ReceiptsPage() {
   const [reviewBeforeVat, setReviewBeforeVat] = useState('')  // amount before vat
   const [reviewVatAmount, setReviewVatAmount] = useState('')  // vat amount
   const [reviewItems, setReviewItems]   = useState([])
+  const [reviewPages, setReviewPages]   = useState([])        // all page images of a multi-page receipt
   const [scanSource, setScanSource]     = useState('')        // diagnostic: which engine produced the data
   const [reviewCategory, setReviewCategory] = useState('שונות')
   const [reviewImage, setReviewImage]   = useState(null)
@@ -525,25 +582,49 @@ export default function ReceiptsPage() {
   }
 
   function handleScan(e) {
-    const file = e.target.files?.[0]; if (!file) return
-    e.target.value = ''; processScannedFile(file)
+    const files = Array.from(e.target.files || []); if (!files.length) return
+    const multi = e.target.multiple
+    e.target.value = ''
+    if (multi && files.length > 1) processScannedPages(files)
+    else processScannedFile(files[0])
   }
 
-  // Keep the ref current so the bottom-nav event always calls the latest version
-  const handleScanClick = useCallback(function() {
+  // Collect several pages of one receipt (no per-page crop — kept simple).
+  async function processScannedPages(files) {
+    if (!files?.length) return
+    if (files.length === 1) return processScannedFile(files[0])
+    try {
+      toast('מכין עמודים…', { icon: '📄', duration: 4000 })
+      const pages = []
+      for (const f of files) {
+        const { dataUrl } = await compressImage(f)
+        pages.push(dataUrl)
+      }
+      toast.dismiss()
+      handleScanWithPages(pages)
+    } catch (err) {
+      toast.dismiss(); toast.error('שגיאה בטעינת התמונות')
+    }
+  }
+
+  // Keep the ref current so the bottom-nav event always calls the latest version.
+  // `multi` = true → multi-page receipt capture flow.
+  const handleScanClick = useCallback(function(multi = false) {
     if (scanLoading) return
     const isMobileUA = /iPhone|iPad|Android/i.test(navigator.userAgent) || window.innerWidth < 768
     if (isMobileUA) {
-      if (navigator.mediaDevices?.getUserMedia) { setShowCamera(true) }
-      else { scanInputRef.current?.click() }
+      if (navigator.mediaDevices?.getUserMedia) { setCameraMulti(!!multi); setShowCamera(true) }
+      else { if (scanInputRef.current) scanInputRef.current.multiple = !!multi; scanInputRef.current?.click() }
     } else if (typeof window.showOpenFilePicker === 'function') {
       ;(async () => {
         try {
-          const [fh] = await window.showOpenFilePicker({ multiple: false, types: [{ description: 'תמונת קבלה', accept: { 'image/*': ['.jpg','.jpeg','.png','.webp','.heic'] } }] })
-          processScannedFile(await fh.getFile())
+          const handles = await window.showOpenFilePicker({ multiple: !!multi, types: [{ description: 'תמונת קבלה', accept: { 'image/*': ['.jpg','.jpeg','.png','.webp','.heic'] } }] })
+          if (multi && handles.length > 1) processScannedPages(await Promise.all(handles.map(h => h.getFile())))
+          else processScannedFile(await handles[0].getFile())
         } catch (err) { if (err?.name !== 'AbortError') toast.error('שגיאה: ' + (err?.message || '')) }
       })()
     } else {
+      if (scanInputRef.current) scanInputRef.current.multiple = !!multi
       scanInputRef.current?.click()
     }
   }, [scanLoading])
@@ -551,28 +632,35 @@ export default function ReceiptsPage() {
   // Keep ref in sync
   useEffect(() => { scanClickRef.current = handleScanClick }, [handleScanClick])
 
-  async function handleScanWithData(dataUrl, mimeType) {
+  // Single-page entry point (from crop) — delegates to the unified handler.
+  function handleScanWithData(dataUrl /*, mimeType */) { return handleScanWithPages([dataUrl]) }
+
+  // Unified scan handler — works for 1 page or several pages of the same receipt.
+  async function handleScanWithPages(pages) {
+    if (!pages?.length) return
+    const multi = pages.length > 1
     setScanLoading(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.access_token) { toast.error('נדרשת כניסה מחדש'); return }
 
-      toast('שולח ל-AI...', { icon: '✨', duration: 30000 })
+      toast(multi ? `שולח ${pages.length} עמודים ל-AI...` : 'שולח ל-AI...', { icon: '✨', duration: 45000 })
       let result = null
       let source = 'unknown'
       try {
         const controller = new AbortController()
-        const fetchTimer = setTimeout(() => controller.abort(), 60000)
-        // Downscale before upload so large phone photos don't time out
-        const uploadUrl = await downscaleForUpload(dataUrl)
+        const fetchTimer = setTimeout(() => controller.abort(), multi ? 90000 : 60000)
+        // Downscale each page before upload so large phone photos don't time out
+        const uploads = await Promise.all(pages.map(p => downscaleForUpload(p)))
+        const imagesBase64 = uploads.map(u => u.split(',')[1])
         const res = await fetch('/api/scan-receipt', {
           method: 'POST', signal: controller.signal,
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-          body: JSON.stringify({ imageBase64: uploadUrl.split(',')[1], mimeType: 'image/jpeg', vatRate }),
+          body: JSON.stringify({ imagesBase64, mimeType: 'image/jpeg', vatRate }),
         }).finally(() => clearTimeout(fetchTimer))
         if (res.ok) {
           result = await res.json()
-          source = result._model ? `AI: ${result._model}` : 'AI'
+          source = result._model ? `AI: ${result._model}${multi ? ` · ${pages.length} עמ׳` : ''}` : 'AI'
         } else {
           const errBody = await res.json().catch(() => ({}))
           source = `שגיאת שרת ${res.status}: ${errBody.detail || errBody.error || ''}`
@@ -584,9 +672,10 @@ export default function ReceiptsPage() {
       }
 
       if (!result) {
-        toast('AI לא זמין — משתמש ב-OCR...', { icon: '🔍', duration: 5000 })
+        // OCR fallback can only read the first page (it can't combine pages).
+        toast(multi ? 'AI לא זמין — OCR על העמוד הראשון...' : 'AI לא זמין — משתמש ב-OCR...', { icon: '🔍', duration: 5000 })
         const { extractReceiptData } = await import('../lib/ocrService')
-        const ocrData = await extractReceiptData(dataUrl)
+        const ocrData = await extractReceiptData(pages[0])
         const t = parseFloat(ocrData.amount) || 0
         const before = t > 0 ? Math.round(t / (1 + vatRate / 100) * 100) / 100 : 0
         result = { vendor_name: ocrData.vendor_name, receipt_date: ocrData.receipt_date, total_amount: t, amount_before_vat: before, vat_amount: Math.round((t - before) * 100) / 100, items: [] }
@@ -605,7 +694,8 @@ export default function ReceiptsPage() {
       setReviewVatAmount(vat ? String(vat) : '')
       setReviewItems(items)
       setReviewCategory(items[0]?.category_l1 || 'שונות')
-      setReviewImage(dataUrl)
+      setReviewPages(pages)
+      setReviewImage(pages[0])
       setShowReview(true)
       toast.dismiss()
     } catch (err) {
@@ -660,15 +750,24 @@ export default function ReceiptsPage() {
         loadCategories()
       } catch (hErr) { console.warn('[approveScan] hierarchy:', hErr?.message) }
 
-      let finalImage = reviewImage
-      if (reviewImage?.startsWith('data:')) {
+      // Compress a data-URL image (no-op for non-data URLs)
+      async function compressDataUrl(src) {
+        if (!src?.startsWith('data:')) return src
         try {
-          const blob = await fetch(reviewImage).then(r => r.blob())
+          const blob = await fetch(src).then(r => r.blob())
           const file = new File([blob], 'receipt.jpg', { type: 'image/jpeg' })
           const { dataUrl } = await compressImage(file)
-          finalImage = dataUrl
-        } catch {}
+          return dataUrl
+        } catch { return src }
       }
+
+      const pages = reviewPages.length ? reviewPages : (reviewImage ? [reviewImage] : [])
+      const finalImage = await compressDataUrl(pages[0] || reviewImage)
+      // Extra pages of a multi-page receipt (compressed) — kept in ai_summary so
+      // no schema migration is needed.
+      const extraPages = pages.length > 1
+        ? await Promise.all(pages.slice(1).map(compressDataUrl))
+        : []
 
       const totalAmt = parseFloat(reviewTotal) || 0
       const beforeAmt = parseFloat(reviewBeforeVat) || Math.round(totalAmt / (1 + vatRate / 100) * 100) / 100
@@ -682,7 +781,8 @@ export default function ReceiptsPage() {
         receipt_image: finalImage || null, ai_extracted: true,
         // Exact VAT breakdown is stored inside ai_summary too — this works even
         // when the dedicated columns don't exist yet (no migration required).
-        ai_summary: { vendor: reviewVendor, total: totalAmt, before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate, model: 'gemini-2.5-flash' },
+        ai_summary: { vendor: reviewVendor, total: totalAmt, before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate, model: 'gemini-2.5-flash',
+          pages: pages.length, ...(extraPages.length ? { extra_pages: extraPages } : {}) },
       }
       let { error } = await supabase.from('receipts').insert({ ...base, amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate })
       // Graceful fallback if VAT migration hasn't run yet — ai_summary keeps the values
@@ -691,7 +791,7 @@ export default function ReceiptsPage() {
       }
       if (error) throw error
       toast.success('קבלה נשמרה!')
-      setShowReview(false); setReviewItems([]); setReviewImage(null)
+      setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
       setReviewBeforeVat(''); setReviewVatAmount('')
       loadData()
     } catch (err) {
@@ -796,8 +896,13 @@ export default function ReceiptsPage() {
                 <Sparkles size={14} /> סורק...
               </div>
             ) : (
-              <button onClick={handleScanClick} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 16px', background:'linear-gradient(135deg,#2563eb,#1d4ed8)', border:'none', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'white', cursor:'pointer', fontFamily:'var(--font-main)' }}>
+              <button onClick={() => handleScanClick(false)} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 16px', background:'linear-gradient(135deg,#2563eb,#1d4ed8)', border:'none', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'white', cursor:'pointer', fontFamily:'var(--font-main)' }}>
                 <Camera size={14} /> סרוק קבלה
+              </button>
+            )}
+            {!scanLoading && (
+              <button onClick={() => handleScanClick(true)} title="קבלה עם כמה עמודים" style={{ display:'flex', alignItems:'center', gap:'7px', padding:'8px 14px', background:'var(--panel)', border:'1px solid var(--accent)', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'var(--accent)', cursor:'pointer', fontFamily:'var(--font-main)' }}>
+                <Files size={14} /> כמה עמודים
               </button>
             )}
             <button onClick={() => { resetForm(); setShowModal(true) }} style={{ display:'flex', alignItems:'center', gap:'6px', padding:'8px 14px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-btn)', fontSize:'13px', color:'var(--text-dim)', cursor:'pointer', fontFamily:'var(--font-main)' }}>
@@ -813,10 +918,13 @@ export default function ReceiptsPage() {
                 <Sparkles size={13} /> סורק...
               </div>
             )}
-            <button onClick={() => setShowExport(true)} title="ייצוא" style={{ width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:'10px', cursor:'pointer', color:'#16a34a' }}>
+            <button onClick={() => handleScanClick(true)} title="קבלה עם כמה עמודים" style={{ display:'flex', alignItems:'center', gap:'6px', height:40, padding:'0 12px', background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'10px', cursor:'pointer', color:'var(--accent)', fontSize:'12.5px', fontWeight:600, fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+              <Files size={16} /> כמה עמודים
+            </button>
+            <button onClick={() => setShowExport(true)} title="ייצוא" style={{ width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:'10px', cursor:'pointer', color:'#16a34a', flexShrink:0 }}>
               <FileSpreadsheet size={18} />
             </button>
-            <button onClick={() => { resetForm(); setShowModal(true) }} title="הוסף ידנית" style={{ width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'10px', cursor:'pointer', color:'var(--text-dim)' }}>
+            <button onClick={() => { resetForm(); setShowModal(true) }} title="הוסף ידנית" style={{ width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'10px', cursor:'pointer', color:'var(--text-dim)', flexShrink:0 }}>
               <Plus size={18} />
             </button>
             <input ref={scanInputRef} type="file" accept="image/*" capture="environment" onChange={handleScan} style={{ display:'none' }} />
@@ -947,7 +1055,9 @@ export default function ReceiptsPage() {
       )}
 
       {/* ── Camera / Crop ────────────────────────────────────────────────────── */}
-      {showCamera && <CameraModal onCapture={file => { setShowCamera(false); processScannedFile(file) }} onClose={() => setShowCamera(false)} />}
+      {showCamera && <CameraModal multi={cameraMulti}
+        onCapture={files => { setShowCamera(false); if (cameraMulti && files.length > 1) processScannedPages(files); else processScannedFile(files[0]) }}
+        onClose={() => setShowCamera(false)} />}
       {cropSrc && (
         <CropModal
           src={cropSrc.dataUrl}
@@ -960,7 +1070,21 @@ export default function ReceiptsPage() {
       {showReview && (
         <Modal isOpen={true} onClose={() => setShowReview(false)} title="סקירת קבלה" size="md">
           <div style={{ display:'flex', flexDirection:'column', gap:'16px' }} dir="rtl">
-            {reviewImage && (
+            {reviewPages.length > 1 ? (
+              <div>
+                <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:6, fontSize:'12.5px', color:'var(--accent)', fontWeight:600 }}>
+                  <Files size={14} /> קבלה מרובת עמודים · {reviewPages.length} עמודים אוחדו
+                </div>
+                <div style={{ display:'flex', gap:8, overflowX:'auto', paddingBottom:4 }}>
+                  {reviewPages.map((p, i) => (
+                    <div key={i} style={{ position:'relative', flexShrink:0, cursor:'pointer' }} onClick={() => setLightboxUrl(p)}>
+                      <img src={p} alt={`עמ' ${i+1}`} style={{ height: isMobile ? '110px' : '140px', width:'auto', maxWidth:'120px', objectFit:'cover', borderRadius:'9px', background:'var(--panel-2)', border:'1px solid var(--border)' }} />
+                      <span style={{ position:'absolute', bottom:4, right:4, background:'rgba(0,0,0,0.7)', color:'#fff', fontSize:'10.5px', fontWeight:700, borderRadius:5, padding:'1px 6px' }}>{i+1}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : reviewImage && (
               <img src={reviewImage} alt="קבלה" style={{ width:'100%', maxHeight: isMobile ? '160px' : '200px', objectFit:'contain', borderRadius:'10px', background:'var(--panel-2)' }} />
             )}
             {scanSource && (
