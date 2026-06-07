@@ -9,7 +9,9 @@ import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
 import TopVendors    from '../components/charts/TopVendors'
 import CategoryDrilldown from '../components/CategoryDrilldown'
 import ChartTypeToggle from '../components/charts/ChartTypeToggle'
-import { flattenItems } from '../lib/itemAggregation'
+import MultiSelect from '../components/MultiSelect'
+import ProductCompareChart from '../components/charts/ProductCompareChart'
+import { flattenItems, vendorComposition } from '../lib/itemAggregation'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
@@ -79,6 +81,8 @@ export default function DashboardPage() {
   const [availYears,  setAvailYears]  = useState([thisYear])
   const [vendorA,     setVendorA]     = useState('')    // vendor comparison
   const [vendorB,     setVendorB]     = useState('')
+  const [selProdsA,   setSelProdsA]   = useState([])    // products picked for vendor A
+  const [selProdsB,   setSelProdsB]   = useState([])    // products picked for vendor B
   const [chartType,   setChartType]   = useState('bar') // 'bar' | 'line' for time charts
 
   // ── Load data ────────────────────────────────────────────────────────────────
@@ -238,15 +242,20 @@ export default function DashboardPage() {
     return m.total > 0 ? HEB_MONTHS_FULL[m.month - 1] : null
   }, [monthlyData])
 
-  // ── Vendor comparison ──────────────────────────────────────────────────────────
+  // ── Vendor comparison (independent of the category/vendor dashboard filters) ───
   const allVendors = useMemo(() => {
-    const set = new Set(active.map(r => (r.vendor_name || '').trim()).filter(Boolean))
+    const set = new Set(receipts.map(r => (r.vendor_name || '').trim()).filter(Boolean))
     return [...set].sort((a, b) => a.localeCompare(b, 'he'))
-  }, [active])
+  }, [receipts])
+
+  // Flattened items for the whole year (ignores filters) — drives product picking.
+  const flatAll = useMemo(() => flattenItems(receipts), [receipts])
+  const compA = useMemo(() => vendorA ? vendorComposition(flatAll, vendorA) : null, [vendorA, flatAll])
+  const compB = useMemo(() => vendorB ? vendorComposition(flatAll, vendorB) : null, [vendorB, flatAll])
 
   function monthlyForVendor(name) {
     const map = {}
-    active.filter(r => (r.vendor_name || '').trim() === name).forEach(r => {
+    receipts.filter(r => (r.vendor_name || '').trim() === name).forEach(r => {
       if (!r.receipt_date) return
       const m = parseInt(r.receipt_date.slice(5, 7))
       if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
@@ -255,12 +264,22 @@ export default function DashboardPage() {
     return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
   }
   function vendorStats(name) {
-    const rows = active.filter(r => (r.vendor_name || '').trim() === name)
+    const rows = receipts.filter(r => (r.vendor_name || '').trim() === name)
     const total = rows.reduce((s, r) => s + amt(r), 0)
     return { total, count: rows.length, avg: rows.length ? total / rows.length : 0 }
   }
-  const cmpA = useMemo(() => vendorA ? monthlyForVendor(vendorA) : null, [vendorA, active, settings.showWithVat])
-  const cmpB = useMemo(() => vendorB ? monthlyForVendor(vendorB) : null, [vendorB, active, settings.showWithVat])
+  const cmpA = useMemo(() => vendorA ? monthlyForVendor(vendorA) : null, [vendorA, receipts, settings.showWithVat])
+  const cmpB = useMemo(() => vendorB ? monthlyForVendor(vendorB) : null, [vendorB, receipts, settings.showWithVat])
+
+  // Products chosen for comparison (union of A's and B's picks). Empty = overall.
+  const compareProducts = useMemo(() => {
+    const names = [...new Set([...selProdsA, ...selProdsB])]
+    const aMap = Object.fromEntries((compA?.rows || []).map(r => [r.name, r.total]))
+    const bMap = Object.fromEntries((compB?.rows || []).map(r => [r.name, r.total]))
+    return names
+      .map(n => ({ name: n, a: aMap[n] || 0, b: bMap[n] || 0 }))
+      .sort((x, y) => (y.a + y.b) - (x.a + x.b))
+  }, [selProdsA, selProdsB, compA, compB])
 
   const hasFilters = filterCat || filterVendor
 
@@ -448,7 +467,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Interactive drill-down (category → sub → product, over time) ───────── */}
-        <Section id="dash-drilldown" title="ניתוח מעמיק לאורך זמן" sub="לחץ על קטגוריה → מוצר, או על ספק כדי לראות מה נרכש אצלו. מוצר שנקנה אצל כמה ספקים — מציג השוואת מחיר. בחר גרנולריות: יומי/שבועי/חודשי/רבעוני/שנתי">
+        <Section id="dash-drilldown" title="ניתוח מעמיק לאורך זמן" sub="הוצאה לאורך זמן (בחר גרנולריות) · לחץ על ספק כדי לפרק את העמודה שלו למוצרים, ומעבר עכבר/לחיצה על מלבן מציג את הערך הכספי">
           <CategoryDrilldown items={flatItems} />
         </Section>
 
@@ -462,35 +481,50 @@ export default function DashboardPage() {
         </Section>
 
         {/* ── Vendor comparison ─────────────────────────────────────────────────── */}
-        <Section id="dash-compare" title="השוואת ספקים" sub="בחר שני ספקים להשוואת הוצאה חודשית זה מול זה"
-          action={<ChartTypeToggle value={chartType} onChange={setChartType} />}>
+        <Section id="dash-compare" title="השוואת ספקים"
+          sub="בחר שני ספקים. תחת כל אחד בחר מוצרים להשוואה ממוקדת — או השאר ריק להשוואת הוצאה כללית."
+          action={compareProducts.length === 0 ? <ChartTypeToggle value={chartType} onChange={setChartType} /> : undefined}>
 
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: '16px' }}>
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#2563eb', marginBottom: '6px' }}>ספק א'</label>
-              <select value={vendorA} onChange={e => setVendorA(e.target.value)}
-                style={{ width: '100%', height: 44, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
-                <option value="">בחר ספק…</option>
-                {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
-              </select>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
+            {/* Vendor A */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#2563eb', marginBottom: '6px' }}>ספק א'</label>
+                <select value={vendorA} onChange={e => { setVendorA(e.target.value); setSelProdsA([]) }}
+                  style={{ width: '100%', height: 42, padding: '0 12px', borderRadius: 8, border: `1px solid ${vendorA ? '#2563eb' : 'var(--border)'}`, background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
+                  <option value="">בחר ספק…</option>
+                  {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              {vendorA && <MultiSelect label="מוצרים מספק א'" options={compA?.rows || []} value={selProdsA} onChange={setSelProdsA} accent="#2563eb" />}
             </div>
-            <div style={{ flex: '1 1 200px' }}>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#f59e0b', marginBottom: '6px' }}>ספק ב'</label>
-              <select value={vendorB} onChange={e => setVendorB(e.target.value)}
-                style={{ width: '100%', height: 44, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
-                <option value="">בחר ספק…</option>
-                {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
-              </select>
+            {/* Vendor B */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#f59e0b', marginBottom: '6px' }}>ספק ב'</label>
+                <select value={vendorB} onChange={e => { setVendorB(e.target.value); setSelProdsB([]) }}
+                  style={{ width: '100%', height: 42, padding: '0 12px', borderRadius: 8, border: `1px solid ${vendorB ? '#f59e0b' : 'var(--border)'}`, background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
+                  <option value="">בחר ספק…</option>
+                  {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              {vendorB && <MultiSelect label="מוצרים מספק ב'" options={compB?.rows || []} value={selProdsB} onChange={setSelProdsB} accent="#f59e0b" />}
             </div>
           </div>
 
           {(vendorA || vendorB) ? (
             <>
-              <MonthlyBars
-                data={cmpA || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
-                compareData={cmpB || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
-                year={vendorA || 'ספק א'} compareYear={vendorB || 'ספק ב'} chartType={chartType}
-              />
+              {compareProducts.length > 0 ? (
+                /* Focused product comparison */
+                <ProductCompareChart products={compareProducts} labelA={vendorA || "ספק א'"} labelB={vendorB || "ספק ב'"} colorA="#2563eb" colorB="#f59e0b" />
+              ) : (
+                /* Overall monthly comparison */
+                <MonthlyBars
+                  data={cmpA || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
+                  compareData={cmpB || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
+                  year={vendorA || 'ספק א'} compareYear={vendorB || 'ספק ב'} chartType={chartType}
+                />
+              )}
               {/* Comparison stats table */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
                 {[{ n: vendorA, c: '#2563eb' }, { n: vendorB, c: '#f59e0b' }].map(({ n, c }, idx) => {

@@ -94,6 +94,27 @@ export function childrenBreakdown(items, path) {
   return { dim, rows: Object.values(map).sort((a, b) => b.total - a.total) }
 }
 
+/** Most specific label for an item (product name, else deepest category). */
+export function productLabel(it) {
+  return (it.name || it.l3 || it.l2 || it.l1 || 'אחר').trim() || 'אחר'
+}
+
+/**
+ * Composition of a single vendor's spend, grouped by product/sub-category.
+ * Returns { total, rows:[{ name, total, count }] } sorted by total desc.
+ */
+export function vendorComposition(items, vendorName) {
+  const map = {}
+  let total = 0
+  for (const it of items) {
+    if (it.vendor !== vendorName) continue
+    const k = productLabel(it)
+    if (!map[k]) map[k] = { name: k, total: 0, count: 0 }
+    map[k].total += it.price; map[k].count += 1; total += it.price
+  }
+  return { total, rows: Object.values(map).sort((a, b) => b.total - a.total) }
+}
+
 /** Vendor breakdown for the current scope — to compare suppliers of a product. */
 export function vendorBreakdown(items, path) {
   const scoped = filterByPath(items, path)
