@@ -6,7 +6,6 @@ import { BarChart2, TrendingUp, TrendingDown, Receipt, Calendar, Tag, X, Chevron
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
-import TopVendors    from '../components/charts/TopVendors'
 import CategoryDrilldown from '../components/CategoryDrilldown'
 import ChartTypeToggle from '../components/charts/ChartTypeToggle'
 import MultiSelect from '../components/MultiSelect'
@@ -77,7 +76,6 @@ export default function DashboardPage() {
   const [year,        setYear]        = useState(thisYear)
   const [compareYear, setCompareYear] = useState(null)
   const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
-  const [filterVendor,setFilterVendor]= useState(null)
   const [availYears,  setAvailYears]  = useState([thisYear])
   const [vendorA,     setVendorA]     = useState('')    // vendor comparison
   const [vendorB,     setVendorB]     = useState('')
@@ -134,12 +132,11 @@ export default function DashboardPage() {
     load()
   }, [user, year])
 
-  // ── Active receipts (applying category + vendor filters) ─────────────────────
+  // ── Active receipts (applying the category filter) ───────────────────────────
   const active = useMemo(() => receipts.filter(r => {
     if (filterCat && r.category_text !== filterCat) return false
-    if (filterVendor && r.vendor_name !== filterVendor) return false
     return true
-  }), [receipts, filterCat, filterVendor])
+  }), [receipts, filterCat])
 
   const total     = useMemo(() => active.reduce((s, r) => s + amt(r), 0), [active, settings.showWithVat])
   const totalPrev = useMemo(() => prevReceipts.reduce((s, r) => s + amt(r), 0), [prevReceipts, settings.showWithVat])
@@ -210,10 +207,9 @@ export default function DashboardPage() {
   // Filtered view (both category + vendor filters) — used by the tree.
   const l1Data = useMemo(() => aggregateL1(active), [active, categories, l1Cats, settings.showWithVat])
 
-  // ALL categories (vendor filter only, ignores category filter) — used by the
-  // donut + ranking + dropdown, so selecting a category greys the others out
-  // instead of hiding them.
-  const catScope = useMemo(() => receipts.filter(r => !filterVendor || (r.vendor_name || '').trim() === filterVendor), [receipts, filterVendor])
+  // ALL categories (ignores the category filter) — used by the donut + ranking +
+  // dropdown, so selecting a category greys the others out instead of hiding them.
+  const catScope = receipts
   const l1DataAll = useMemo(() => aggregateL1(catScope), [catScope, categories, l1Cats, settings.showWithVat])
   const totalAll  = useMemo(() => l1DataAll.reduce((s, c) => s + c.total, 0), [l1DataAll])
 
@@ -281,7 +277,7 @@ export default function DashboardPage() {
       .sort((x, y) => (y.a + y.b) - (x.a + x.b))
   }, [selProdsA, selProdsB, compA, compB])
 
-  const hasFilters = filterCat || filterVendor
+  const hasFilters = filterCat
 
   if (loading) return <LoadingSpinner />
 
@@ -310,7 +306,7 @@ export default function DashboardPage() {
             {/* Year picker */}
             <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
               <Calendar size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
-              <select value={year} onChange={e => { setYear(+e.target.value); setFilterCat(null); setFilterVendor(null) }}
+              <select value={year} onChange={e => { setYear(+e.target.value); setFilterCat(null) }}
                 style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer' }}>
                 {availYears.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
@@ -328,7 +324,7 @@ export default function DashboardPage() {
             {/* Category filter */}
             <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
               <Tag size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
-              <select value={filterCat || ''} onChange={e => { setFilterCat(e.target.value || null); setFilterVendor(null) }}
+              <select value={filterCat || ''} onChange={e => { setFilterCat(e.target.value || null) }}
                 style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: `1px solid ${filterCat ? 'var(--accent)' : 'var(--border)'}`, background: filterCat ? 'var(--accent-bg)' : 'var(--panel)', color: filterCat ? 'var(--accent)' : 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer' }}>
                 <option value="">כל הקטגוריות</option>
                 {l1DataAll.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
@@ -336,7 +332,7 @@ export default function DashboardPage() {
             </div>
             {/* Clear filters */}
             {hasFilters && (
-              <button onClick={() => { setFilterCat(null); setFilterVendor(null) }}
+              <button onClick={() => { setFilterCat(null) }}
                 style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid var(--danger)', background: '#fef2f2', color: 'var(--danger)', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}>
                 <X size={12} /> נקה
               </button>
@@ -345,20 +341,12 @@ export default function DashboardPage() {
         </div>
 
         {/* Active filter pill */}
-        {(filterCat || filterVendor) && (
+        {filterCat && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {filterCat && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
-                <Tag size={10} /> {filterCat}
-                <button onClick={() => setFilterCat(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
-              </span>
-            )}
-            {filterVendor && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: '#faf5ff', border: '1px solid #e9d5ff', fontSize: '12px', color: '#7c3aed' }}>
-                <Receipt size={10} /> {filterVendor}
-                <button onClick={() => setFilterVendor(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#7c3aed', padding: 0, display: 'flex' }}><X size={10} /></button>
-              </span>
-            )}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
+              <Tag size={10} /> {filterCat}
+              <button onClick={() => setFilterCat(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
+            </span>
           </div>
         )}
       </div>
@@ -469,15 +457,6 @@ export default function DashboardPage() {
         {/* ── Interactive drill-down (category → sub → product, over time) ───────── */}
         <Section id="dash-drilldown" title="ניתוח מעמיק לאורך זמן" sub="הוצאה לאורך זמן (בחר גרנולריות) · לחץ על ספק כדי לפרק את העמודה שלו למוצרים, ומעבר עכבר/לחיצה על מלבן מציג את הערך הכספי">
           <CategoryDrilldown items={flatItems} />
-        </Section>
-
-        {/* ── Top vendors ───────────────────────────────────────────────────────── */}
-        <Section
-          id="dash-vendors"
-          title="ספקים מובילים"
-          sub={`Top ${Math.min(10, vendorData.length)} ספקים${filterVendor ? ` · מסונן: ${filterVendor}` : ''}`}
-        >
-          <TopVendors data={vendorData} selected={filterVendor} onSelect={setFilterVendor} />
         </Section>
 
         {/* ── Vendor comparison ─────────────────────────────────────────────────── */}
