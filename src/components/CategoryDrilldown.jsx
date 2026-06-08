@@ -13,11 +13,17 @@ const fmtNum  = n => Number(n).toLocaleString('he-IL', { maximumFractionDigits: 
 const EXTRA_LABELS = { sku: 'מק"ט', catalog: 'מק"ט', barcode: 'ברקוד', discount: 'הנחה', מפתח: 'מפתח' }
 
 // ── Per-item table for an expanded vendor (data-driven columns) ──────────────────
-function VendorTable({ data }) {
+// Linked to the composition bar: hovering a row highlights its bar segment & vice-versa.
+function VendorTable({ data, activeName, onHover, colorByName = {} }) {
   if (!data || !data.rows.length) return null
   const { rows, hasQuantity, hasUnit, hasUnitPrice, extraKeys } = data
   const cols = [
-    { key: 'name', label: 'שם הפריט', align: 'right', head: true, cell: r => r.name },
+    { key: 'name', label: 'שם הפריט', align: 'right', head: true, cell: r => (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+        <span style={{ width: 10, height: 10, borderRadius: 3, background: colorByName[r.name] || 'var(--border-strong)', flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</span>
+      </span>
+    ) },
     ...(hasQuantity  ? [{ key: 'quantity',   label: 'כמות',       align: 'center', cell: r => r.quantity != null ? fmtNum(r.quantity) : '—' }] : []),
     ...(hasUnit      ? [{ key: 'unit',       label: 'יח׳',        align: 'center', cell: r => r.unit || '—' }] : []),
     ...(hasUnitPrice ? [{ key: 'unit_price', label: 'מחיר ליח׳',  align: 'left',   cell: r => r.unit_price != null ? fmtILS2(r.unit_price) : '—' }] : []),
@@ -34,11 +40,17 @@ function VendorTable({ data }) {
           <tr style={{ background: 'var(--panel-2)' }}>{cols.map(c => <th key={c.key} style={th(c)}>{c.label}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-              {cols.map(c => <td key={c.key} style={td(c)}>{c.cell(r)}</td>)}
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            const hot = activeName === r.name
+            return (
+              <tr key={i}
+                onMouseEnter={() => onHover?.(r.name)}
+                onMouseLeave={() => onHover?.(null)}
+                style={{ borderBottom: '1px solid var(--border)', background: hot ? 'var(--accent-bg)' : 'transparent', cursor: 'default', transition: 'background 120ms' }}>
+                {cols.map(c => <td key={c.key} style={td(c)}>{c.cell(r)}</td>)}
+              </tr>
+            )
+          })}
         </tbody>
         <tfoot>
           <tr style={{ background: 'var(--panel-2)' }}>
@@ -60,13 +72,15 @@ const GRANS = [
 ]
 
 // ── Stacked composition bar: a vendor's spend split into product rectangles ──────
-function CompositionBar({ rows, total }) {
-  const [active, setActive] = useState(null)  // hovered / tapped segment index
+// Linked to the table via `activeName` / `onHover` (hover a segment ↔ a row).
+function CompositionBar({ rows, total, activeName, onHover }) {
   if (!rows.length) return null
+  const active = rows.findIndex(r => r.name === activeName)
+  const act = active >= 0 ? active : null
   return (
     <div style={{ position: 'relative', marginTop: 4 }}>
       {/* Tooltip */}
-      {active != null && rows[active] && (
+      {act != null && rows[act] && (
         <div style={{
           position: 'absolute', bottom: 'calc(100% + 7px)', left: '50%', transform: 'translateX(-50%)',
           background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, padding: '7px 12px',
@@ -74,12 +88,12 @@ function CompositionBar({ rows, total }) {
           maxWidth: '92%', whiteSpace: 'nowrap', pointerEvents: 'none',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
-            <span style={{ width: 9, height: 9, borderRadius: '50%', background: COLORS[active % COLORS.length], flexShrink: 0 }} />
-            <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rows[active].name}</span>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: COLORS[act % COLORS.length], flexShrink: 0 }} />
+            <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{rows[act].name}</span>
           </div>
-          <div style={{ color: 'var(--ok)', fontWeight: 700, fontSize: 15, marginTop: 2 }}>{fmtILS(rows[active].total)}</div>
+          <div style={{ color: 'var(--ok)', fontWeight: 700, fontSize: 15, marginTop: 2 }}>{fmtILS(rows[act].total)}</div>
           <div style={{ color: 'var(--text-mute)', fontSize: 11.5 }}>
-            {Math.round((rows[active].total / total) * 100)}% · {rows[active].count} פריטים
+            {Math.round((rows[act].total / total) * 100)}% · {rows[act].count} פריטים
           </div>
         </div>
       )}
@@ -88,17 +102,18 @@ function CompositionBar({ rows, total }) {
         {rows.map((r, i) => {
           const frac = r.total / total
           const pct = frac * 100
-          const isActive = active === i
+          const isActive = act === i
           const showLabel = frac >= 0.16
           return (
             <div key={r.name}
-              onMouseEnter={() => setActive(i)}
-              onMouseLeave={() => setActive(a => (a === i ? null : a))}
-              onClick={() => setActive(a => (a === i ? null : i))}
+              onMouseEnter={() => onHover?.(r.name)}
+              onMouseLeave={() => onHover?.(null)}
+              onClick={() => onHover?.(activeName === r.name ? null : r.name)}
               title={`${r.name} · ${fmtILS(r.total)}`}
               style={{
                 width: `${pct}%`, minWidth: 3, height: '100%', background: COLORS[i % COLORS.length],
-                opacity: active == null || isActive ? 1 : 0.45, cursor: 'pointer',
+                opacity: act == null || isActive ? 1 : 0.4, cursor: 'pointer',
+                outline: isActive ? '2px solid var(--text)' : 'none', outlineOffset: -2,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                 transition: 'opacity 120ms', borderInlineStart: i ? '1px solid rgba(255,255,255,0.5)' : 'none',
               }}>
@@ -127,6 +142,11 @@ export default function CategoryDrilldown({ items }) {
   }, [vendors, items])
   // Detailed item table for the expanded vendor (computed lazily).
   const openTable = useMemo(() => openVendor ? vendorItemsTable(items, openVendor) : null, [openVendor, items])
+  // Shared hover state linking the colored bar ↔ the table rows (by product name).
+  const [hoverName, setHoverName] = useState(null)
+  const openColors = useMemo(() => {
+    const m = {}; (compositions[openVendor]?.rows || []).forEach((r, i) => { m[r.name] = COLORS[i % COLORS.length] }); return m
+  }, [openVendor, compositions])
 
   const maxVendor = Math.max(...vendors.map(v => v.total), 1)
 
@@ -167,7 +187,7 @@ export default function CategoryDrilldown({ items }) {
               return (
                 <div key={v.name} style={{ border: `1px solid ${open ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 11, background: open ? 'var(--accent-bg)' : 'var(--panel-2)', padding: '10px 14px', transition: 'background 120ms' }}>
                   {/* Header row — click to toggle */}
-                  <button onClick={() => setOpenVendor(open ? null : v.name)}
+                  <button onClick={() => { setOpenVendor(open ? null : v.name); setHoverName(null) }}
                     style={{ display: 'flex', alignItems: 'center', gap: '10px', width: '100%', minWidth: 0, background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right', padding: 0 }}>
                     <Store size={15} style={{ color: 'var(--accent)', flexShrink: 0 }} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: '15px', fontWeight: open ? 700 : 600, color: open ? 'var(--accent)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
@@ -178,8 +198,8 @@ export default function CategoryDrilldown({ items }) {
                   {/* Collapsed: proportional bar. Expanded: composition bar + item table. */}
                   {open ? (
                     <>
-                      {comp && <CompositionBar rows={comp.rows} total={comp.total || 1} />}
-                      <VendorTable data={openTable} />
+                      {comp && <CompositionBar rows={comp.rows} total={comp.total || 1} activeName={hoverName} onHover={setHoverName} />}
+                      <VendorTable data={openTable} activeName={hoverName} onHover={setHoverName} colorByName={openColors} />
                     </>
                   ) : (
                     <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>

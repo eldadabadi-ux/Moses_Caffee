@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useSettings } from '../hooks/useSettings'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
-  RefreshCw, ChevronDown, LogOut, X, PieChart, TrendingUp, Layers,
+  RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
   ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database,
 } from 'lucide-react'
 
@@ -47,7 +47,7 @@ const NAV = [
   },
 ]
 
-export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut }) {
+export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut, onCollapse }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { settings } = useSettings()
@@ -93,6 +93,9 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
         <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{settings.businessName || 'מנהל קבלות'}</span>
         {drawer && (
           <button onClick={onClose} aria-label="סגור" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mute)', padding: 4, display: 'flex' }}><X size={20} /></button>
+        )}
+        {!drawer && onCollapse && (
+          <button onClick={onCollapse} aria-label="כווץ תפריט" title="כווץ תפריט" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mute)', padding: 4, display: 'flex' }}><ChevronRight size={20} /></button>
         )}
       </div>
 

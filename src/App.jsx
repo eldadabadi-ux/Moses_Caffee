@@ -230,16 +230,30 @@ function AppShell() {
   const isMobile  = useIsMobile()
   const location  = useLocation()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try { return localStorage.getItem('moses_sidebar_open') !== '0' } catch { return true }
+  })
+  function toggleSidebar() {
+    setSidebarOpen(o => { const n = !o; try { localStorage.setItem('moses_sidebar_open', n ? '1' : '0') } catch {} ; return n })
+  }
 
   if (loading) return <LoadingSpinner />
   if (!user)   return <Navigate to="/login" replace />
 
   const bottomPad = isMobile ? 'calc(70px + env(safe-area-inset-bottom))' : 0
+  const desktopSidebar = !isMobile && sidebarOpen
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg)', paddingInlineEnd: isMobile ? 0 : SIDEBAR_W }}>
-      {/* Desktop: fixed sidebar (right, RTL). Mobile: slim header + drawer. */}
-      {!isMobile && <Sidebar onSignOut={signOut} />}
+    <div style={{ minHeight: '100dvh', background: 'var(--bg)', paddingInlineEnd: desktopSidebar ? SIDEBAR_W : 0, transition: 'padding-inline-end 200ms ease' }}>
+      {/* Desktop: fixed sidebar (right, RTL), collapsible. Mobile: slim header + drawer. */}
+      {desktopSidebar && <Sidebar onSignOut={signOut} onCollapse={toggleSidebar} />}
+      {/* Desktop: floating "open" button when the sidebar is collapsed */}
+      {!isMobile && !sidebarOpen && (
+        <button onClick={toggleSidebar} aria-label="פתח תפריט"
+          style={{ position: 'fixed', top: 14, right: 14, zIndex: 120, display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10, background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', color: 'var(--text)', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+          <Menu size={18} /> תפריט
+        </button>
+      )}
       {isMobile && <MobileHeader onMenu={() => setDrawerOpen(true)} />}
       {isMobile && drawerOpen && (
         <>
