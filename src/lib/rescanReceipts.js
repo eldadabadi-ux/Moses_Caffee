@@ -1,18 +1,20 @@
 /**
  * rescanReceipts — re-runs the AI scan on every stored receipt image to correct
- * any rounded/inaccurate prices. Updates only the monetary fields + items, and
- * preserves the user's vendor/date/category edits. Throttled for Gemini limits.
+ * rounded/inaccurate prices AND mis-read dates (Israeli day-first DD/MM/YYYY).
+ * Preserves the user's vendor/category. Throttled for Gemini limits.
  */
 import { supabase } from './supabase'
 import { downscaleForUpload } from './imageUtils'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 const r2 = (n) => Math.round(n * 100) / 100
+// A valid ISO date string (YYYY-MM-DD) that is also a real calendar date.
+const isValidISODate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && !Number.isNaN(Date.parse(s))
 
 export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal } = {}) {
   const { data, error } = await supabase
     .from('receipts')
-    .select('id, amount, receipt_image, items, ai_summary, vendor_name')
+    .select('id, amount, receipt_date, receipt_image, items, ai_summary, vendor_name')
     .eq('user_id', user.id)
     .order('receipt_date', { ascending: false })
   if (error) throw error
@@ -43,9 +45,13 @@ export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal
           const vat = Number(result.vat_amount) || r2(t - before)
           const oldT = parseFloat(r.amount) || 0
           const diff = Math.abs(t - oldT)
+          // Correct the date too (now read day-first). Only overwrite with a valid date.
+          const newDate = (result.receipt_date || '').trim()
+          const dateChanged = isValidISODate(newDate) && newDate !== (r.receipt_date || '')
           const patch = {
             amount: t,
             items: Array.isArray(result.items) && result.items.length ? result.items : r.items,
+            ...(isValidISODate(newDate) ? { receipt_date: newDate } : {}),
             ai_summary: { ...(r.ai_summary || {}), total: t, before_vat: before, vat_amount: vat, vat_rate: vatRate, rescanned_at: new Date().toISOString() },
           }
           const vatCols = { amount_before_vat: before, vat_amount: vat, vat_rate: vatRate }
@@ -54,7 +60,7 @@ export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal
             ;({ error: upErr } = await supabase.from('receipts').update(patch).eq('id', r.id))
           }
           if (upErr) failed++
-          else if (diff > 0.005) { fixed++; changes.push({ id: r.id, vendor: r.vendor_name || '', old: oldT, new: t }) }
+          else if (diff > 0.005 || dateChanged) { fixed++; changes.push({ id: r.id, vendor: r.vendor_name || '', old: oldT, new: t, oldDate: r.receipt_date, newDate: dateChanged ? newDate : undefined }) }
         } else { failed++ }
       } else { failed++ }
     } catch { failed++ }

@@ -419,8 +419,9 @@ export default function SettingsPage() {
         </div>
         <div style={{ padding: 20 }}>
           <p style={{ margin: '0 0 14px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
-            סורק מחדש בעזרת AI את כל הקבלות שיש להן תמונה ומתקן מחירים שעוגלו — לדיוק ברמת האגורה.
-            הספק, התאריך והקטגוריות שהגדרת נשמרים. הפעולה עשויה לקחת כמה דקות.
+            סורק מחדש בעזרת AI את כל הקבלות שיש להן תמונה ומתקן <strong>מחירים</strong> שעוגלו (דיוק לאגורה)
+            ו<strong>תאריכים</strong> שזוהו הפוך (פורמט ישראלי יום/חודש). הספק והקטגוריות שהגדרת נשמרים.
+            הפעולה עשויה לקחת כמה דקות.
           </p>
           {rescanBusy && rescanProg && (
             <div style={{ marginBottom: 14 }}>
