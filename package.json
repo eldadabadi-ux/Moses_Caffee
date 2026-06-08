@@ -1,7 +1,7 @@
 {
   "name": "moses-caffee",
   "private": true,
-  "version": "1.9.2",
+  "version": "1.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,6 +15,7 @@
     "d3": "^7.9.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.7.0",
+    "pdfjs-dist": "^4.10.38",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-hot-toast": "^2.6.0",

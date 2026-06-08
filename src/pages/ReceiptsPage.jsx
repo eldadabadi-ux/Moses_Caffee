@@ -5,6 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload } from '../lib/imageUtils'
+import { isPdf, pdfToImages } from '../lib/pdfUtils'
 import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip } from '../lib/receiptExport'
 import ReceiptScanAnimation from '../components/ReceiptScanAnimation'
 import toast from 'react-hot-toast'
@@ -70,9 +71,10 @@ async function buildStyledExcel(rows) {
 }
 
 // ── CameraModal ────────────────────────────────────────────────────────────────
-function CameraModal({ onCapture, onClose, multi = false }) {
+function CameraModal({ onCapture, onClose, multi = false, onFiles }) {
   const videoRef  = useRef(null)
   const streamRef = useRef(null)
+  const filesInputRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [err,   setErr]   = useState(null)
   const [pages, setPages] = useState([])   // multi-page: [{ file, url }]
@@ -141,6 +143,15 @@ function CameraModal({ onCapture, onClose, multi = false }) {
         <>
           <video ref={videoRef} playsInline muted autoPlay style={{ flex: 1, width: '100%', objectFit: 'cover', display: 'block' }} />
           {!ready && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: '#fff', fontSize: 14 }}>מאתחל מצלמה…</div>}
+
+          {/* Pick from files (images or PDF) instead of the camera */}
+          <button onClick={() => filesInputRef.current?.click()}
+            style={{ position: 'absolute', top: 'calc(12px + env(safe-area-inset-top))', left: 12, zIndex: 3, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 13px', borderRadius: 999, background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-main)', cursor: 'pointer', WebkitBackdropFilter: 'blur(4px)', backdropFilter: 'blur(4px)' }}>
+            <Files size={15} /> מהקבצים / PDF
+          </button>
+          <input ref={filesInputRef} type="file" accept="image/*,application/pdf" multiple
+            onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ''; if (f.length) { stopStream(); onFiles?.(f) } }}
+            style={{ display: 'none' }} />
 
           {/* Multi-page banner + captured thumbnails */}
           {multi && (
@@ -585,6 +596,8 @@ export default function ReceiptsPage() {
 
   // ── Scan flow ────────────────────────────────────────────────────────────────
   function processScannedFile(file) {
+    // PDF → render its page(s) to images, then scan (no crop needed).
+    if (isPdf(file)) { convertPdfAndScan(file); return }
     const reader = new FileReader()
     reader.onload = () => {
       cropCallbackRef.current = (croppedDataUrl, croppedMime) => handleScanWithData(croppedDataUrl, croppedMime)
@@ -592,6 +605,18 @@ export default function ReceiptsPage() {
     }
     reader.onerror = () => toast.error('שגיאה בטעינת התמונה')
     reader.readAsDataURL(file)
+  }
+
+  async function convertPdfAndScan(file) {
+    const id = toast.loading('ממיר PDF…')
+    try {
+      const pages = await pdfToImages(file)
+      toast.dismiss(id)
+      if (!pages.length) { toast.error('לא נמצאו עמודים ב-PDF'); return }
+      handleScanWithPages(pages)
+    } catch (err) {
+      toast.dismiss(id); toast.error('שגיאה בהמרת PDF: ' + (err?.message || ''))
+    }
   }
 
   function handleScan(e) {
@@ -602,21 +627,22 @@ export default function ReceiptsPage() {
     else processScannedFile(files[0])
   }
 
-  // Collect several pages of one receipt (no per-page crop — kept simple).
+  // Collect several pages of one receipt (images and/or PDFs). No per-page crop.
   async function processScannedPages(files) {
     if (!files?.length) return
     if (files.length === 1) return processScannedFile(files[0])
+    const id = toast.loading('מכין עמודים…')
     try {
-      toast('מכין עמודים…', { icon: '📄', duration: 4000 })
       const pages = []
       for (const f of files) {
-        const { dataUrl } = await compressImage(f)
-        pages.push(dataUrl)
+        if (isPdf(f)) { pages.push(...await pdfToImages(f)) }
+        else { const { dataUrl } = await compressImage(f); pages.push(dataUrl) }
       }
-      toast.dismiss()
+      toast.dismiss(id)
+      if (!pages.length) { toast.error('לא נמצאו עמודים'); return }
       handleScanWithPages(pages)
     } catch (err) {
-      toast.dismiss(); toast.error('שגיאה בטעינת התמונות')
+      toast.dismiss(id); toast.error('שגיאה בטעינת הקבצים')
     }
   }
 
@@ -632,7 +658,7 @@ export default function ReceiptsPage() {
     } else if (typeof window.showOpenFilePicker === 'function') {
       ;(async () => {
         try {
-          const handles = await window.showOpenFilePicker({ multiple: !!multi, types: [{ description: 'תמונת קבלה', accept: { 'image/*': ['.jpg','.jpeg','.png','.webp','.heic'] } }] })
+          const handles = await window.showOpenFilePicker({ multiple: !!multi, types: [{ description: 'קבלה — תמונה או PDF', accept: { 'image/*': ['.jpg','.jpeg','.png','.webp','.heic'], 'application/pdf': ['.pdf'] } }] })
           if (multi && handles.length > 1) processScannedPages(await Promise.all(handles.map(h => h.getFile())))
           else processScannedFile(await handles[0].getFile())
         } catch (err) { if (err?.name !== 'AbortError') toast.error('שגיאה: ' + (err?.message || '')) }
@@ -871,6 +897,17 @@ export default function ReceiptsPage() {
 
   async function handleImageChange(e) {
     const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
+    // PDF → render first page to an image and use it as the receipt image.
+    if (isPdf(file)) {
+      const id = toast.loading('ממיר PDF…')
+      try {
+        const pages = await pdfToImages(file, { maxPages: 1 })
+        toast.dismiss(id)
+        if (pages[0]) setImagePreview(pages[0])
+        else toast.error('לא נמצאו עמודים ב-PDF')
+      } catch { toast.dismiss(id); toast.error('שגיאה בהמרת PDF') }
+      return
+    }
     try {
       const { dataUrl, mimeType } = await compressImage(file)
       cropCallbackRef.current = (croppedDataUrl) => setImagePreview(croppedDataUrl)
@@ -906,7 +943,7 @@ export default function ReceiptsPage() {
             <button onClick={() => setShowExport(true)} style={{ display:'flex', alignItems:'center', gap:'6px', padding:'8px 14px', background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'#16a34a', cursor:'pointer', fontFamily:'var(--font-main)' }}>
               <FileSpreadsheet size={14} /> ייצוא לרו"ח
             </button>
-            <input ref={scanInputRef} type="file" accept="image/*" capture="environment" onChange={handleScan} style={{ display:'none' }} />
+            <input ref={scanInputRef} type="file" accept="image/*,application/pdf" capture="environment" onChange={handleScan} style={{ display:'none' }} />
             {scanLoading ? (
               <div style={{ display:'inline-flex', alignItems:'center', gap:'8px', padding:'8px 16px', background:'var(--panel-2)', borderRadius:'var(--r-btn)', fontSize:'13px', fontWeight:600, color:'var(--text-mute)', fontFamily:'var(--font-main)' }}>
                 <Sparkles size={14} /> סורק...
@@ -935,7 +972,7 @@ export default function ReceiptsPage() {
             <button onClick={() => { resetForm(); setShowModal(true) }} title="הוסף ידנית" style={{ width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'10px', cursor:'pointer', color:'var(--text-dim)', flexShrink:0 }}>
               <Plus size={18} />
             </button>
-            <input ref={scanInputRef} type="file" accept="image/*" capture="environment" onChange={handleScan} style={{ display:'none' }} />
+            <input ref={scanInputRef} type="file" accept="image/*,application/pdf" capture="environment" onChange={handleScan} style={{ display:'none' }} />
           </div>
         )}
       </div>
@@ -1065,6 +1102,7 @@ export default function ReceiptsPage() {
       {/* ── Camera / Crop ────────────────────────────────────────────────────── */}
       {showCamera && <CameraModal multi={cameraMulti}
         onCapture={files => { setShowCamera(false); if (cameraMulti && files.length > 1) processScannedPages(files); else processScannedFile(files[0]) }}
+        onFiles={files => { setShowCamera(false); if (files.length > 1) processScannedPages(files); else processScannedFile(files[0]) }}
         onClose={() => setShowCamera(false)} />}
 
       {/* Hi-tech scan animation while the AI processes the receipt */}
@@ -1225,8 +1263,8 @@ export default function ReceiptsPage() {
             </div>
           </div>
           <div>
-            <label style={LS}>תמונת קבלה</label>
-            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageChange} style={{ display:'none' }} />
+            <label style={LS}>תמונת קבלה / PDF</label>
+            <input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleImageChange} style={{ display:'none' }} />
             {imagePreview ? (
               <div style={{ position:'relative', display:'inline-block' }}>
                 <img src={imagePreview} alt="קבלה" style={{ height:'80px', borderRadius:'8px', objectFit:'cover', border:'1px solid var(--border)' }} />
@@ -1235,7 +1273,7 @@ export default function ReceiptsPage() {
               </div>
             ) : (
               <button onClick={() => fileInputRef.current?.click()} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'12px 16px', background:'var(--panel-2)', border:'1px dashed var(--border)', borderRadius:'10px', color:'var(--text-mute)', cursor:'pointer', fontSize:'13.5px', fontFamily:'var(--font-main)', width:'100%', justifyContent:'center' }}>
-                <ImageIcon size={16} /> העלה תמונה
+                <ImageIcon size={16} /> העלה תמונה / PDF
               </button>
             )}
           </div>
