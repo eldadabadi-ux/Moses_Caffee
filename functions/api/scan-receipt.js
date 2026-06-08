@@ -292,8 +292,13 @@ ${multiPageNote}
 - ודא ש: amount_before_vat + vat_amount = total_amount
 
 ### פריטים (items):
-- רשום כל שורת מוצר בנפרד **עם המחיר המדויק שלה** (כולל אגורות, ללא עיגול)
-- אם יש כמות × מחיר ליחידה — חשב את הסכום (כמות × מחיר) ושמור על הדיוק לאגורה
+- רשום כל שורת מוצר בנפרד עם **כל** עמודות השורה כפי שמופיעות בקבלה (כולל אגורות, ללא עיגול):
+  - **item_name** = שם המוצר.
+  - **quantity** = הכמות שנרכשה (מספר). למשל 3, 4, 2.77, 16. אם אין כמות — החזר 1.
+  - **unit** = יחידת המידה בדיוק כפי שכתוב: "יח'", "ק"ג", "ל'", "גרם", "מארז" וכו'. אם אין — "".
+  - **unit_price** = המחיר ליחידה אחת / לק"ג (כולל אגורות). אם אין — 0.
+  - **price** = הסכום הכולל של השורה = quantity × unit_price (כולל אגורות). זהו הסכום הקובע.
+- אם יש כמות × מחיר ליחידה — ודא ש-price = quantity × unit_price, בדיוק לאגורה.
 - שמות מוצרים: **בעברית** גם אם מופיעים באנגלית בקבלה
   - "Humus" → "חומוס"
   - "Cucumber" → "מלפפון"
@@ -334,7 +339,10 @@ ${allowedCategories.join(' | ')}
   "items": [
     {
       "item_name": "שם הפריט בעברית",
-      "price": מחיר הפריט,
+      "quantity": כמות (מספר, ברירת מחדל 1),
+      "unit": "יחידת מידה (יח'/ק\\"ג/ל' וכו', או ריק)",
+      "unit_price": מחיר ליחידה (כולל אגורות, 0 אם אין),
+      "price": סכום השורה הכולל (quantity × unit_price),
       "category_l1": "קטגוריה ראשית מהרשימה",
       "category_l2": "תת-קטגוריה",
       "category_l3": "שם המוצר הספציפי",
@@ -388,6 +396,9 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
               type: 'OBJECT',
               properties: {
                 item_name:       { type: 'STRING' },
+                quantity:        { type: 'NUMBER' },
+                unit:            { type: 'STRING' },
+                unit_price:      { type: 'NUMBER' },
                 price:           { type: 'NUMBER' },
                 category_l1:     { type: 'STRING' },
                 category_l2:     { type: 'STRING' },

@@ -1,11 +1,55 @@
 import { useState, useMemo } from 'react'
 import { Store, ChevronDown } from 'lucide-react'
-import { timeSeries, vendorBreakdown, vendorComposition } from '../lib/itemAggregation'
+import { timeSeries, vendorBreakdown, vendorComposition, vendorItemsTable } from '../lib/itemAggregation'
 import TimeSeriesChart from './charts/TimeSeriesChart'
 import ChartTypeToggle from './charts/ChartTypeToggle'
 
 const COLORS = ['#2563eb','#7c3aed','#16a34a','#d97706','#dc2626','#0891b2','#c2410c','#0d9488','#be185d','#6366f1','#65a30d','#9333ea']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
+const fmtILS2 = n => `₪${Number(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtNum  = n => Number(n).toLocaleString('he-IL', { maximumFractionDigits: 2 })
+
+// Hebrew labels for extra item fields that may appear in future receipts.
+const EXTRA_LABELS = { sku: 'מק"ט', catalog: 'מק"ט', barcode: 'ברקוד', discount: 'הנחה', מפתח: 'מפתח' }
+
+// ── Per-item table for an expanded vendor (data-driven columns) ──────────────────
+function VendorTable({ data }) {
+  if (!data || !data.rows.length) return null
+  const { rows, hasQuantity, hasUnit, hasUnitPrice, extraKeys } = data
+  const cols = [
+    { key: 'name', label: 'שם הפריט', align: 'right', head: true, cell: r => r.name },
+    ...(hasQuantity  ? [{ key: 'quantity',   label: 'כמות',       align: 'center', cell: r => r.quantity != null ? fmtNum(r.quantity) : '—' }] : []),
+    ...(hasUnit      ? [{ key: 'unit',       label: 'יח׳',        align: 'center', cell: r => r.unit || '—' }] : []),
+    ...(hasUnitPrice ? [{ key: 'unit_price', label: 'מחיר ליח׳',  align: 'left',   cell: r => r.unit_price != null ? fmtILS2(r.unit_price) : '—' }] : []),
+    ...extraKeys.map(k => ({ key: 'x_' + k, label: EXTRA_LABELS[k] || k, align: 'center', cell: r => (r.extra?.[k] ?? '—') })),
+    { key: 'total', label: 'סה"כ', align: 'left', strong: true, cell: r => fmtILS2(r.total) },
+  ]
+  const grand = rows.reduce((s, r) => s + r.total, 0)
+  const th = (c) => ({ textAlign: c.align, padding: '8px 10px', fontWeight: 700, color: 'var(--text-dim)', fontSize: 12, whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' })
+  const td = (c) => ({ textAlign: c.align, padding: '8px 10px', color: c.strong ? 'var(--ok)' : 'var(--text)', fontWeight: c.strong ? 700 : (c.head ? 600 : 400), whiteSpace: c.head ? 'normal' : 'nowrap', minWidth: c.head ? 110 : 0, direction: c.align === 'left' ? 'ltr' : 'rtl' })
+  return (
+    <div style={{ marginTop: 12, overflowX: 'auto', overflowY: 'hidden', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--panel)' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-main)', fontSize: 13.5, minWidth: 320 }}>
+        <thead>
+          <tr style={{ background: 'var(--panel-2)' }}>{cols.map(c => <th key={c.key} style={th(c)}>{c.label}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
+              {cols.map(c => <td key={c.key} style={td(c)}>{c.cell(r)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr style={{ background: 'var(--panel-2)' }}>
+            <td colSpan={cols.length - 1} style={{ textAlign: 'right', padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>סה"כ</td>
+            <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 800, color: 'var(--ok)', direction: 'ltr', whiteSpace: 'nowrap' }}>{fmtILS2(grand)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  )
+}
 
 const GRANS = [
   { id: 'day',     label: 'יומי' },
@@ -81,6 +125,8 @@ export default function CategoryDrilldown({ items }) {
     for (const v of vendors) m[v.name] = vendorComposition(items, v.name)
     return m
   }, [vendors, items])
+  // Detailed item table for the expanded vendor (computed lazily).
+  const openTable = useMemo(() => openVendor ? vendorItemsTable(items, openVendor) : null, [openVendor, items])
 
   const maxVendor = Math.max(...vendors.map(v => v.total), 1)
 
@@ -111,7 +157,7 @@ export default function CategoryDrilldown({ items }) {
         <div>
           <p style={{ margin: '0 0 8px', fontSize: '13px', fontWeight: 600, color: 'var(--text-mute)' }}>
             <Store size={13} style={{ verticalAlign: '-2px', marginInlineEnd: 4, color: 'var(--accent)' }} />
-            ספקים · לחץ על ספק כדי לפרק את העמודה שלו למוצרים (מעבר עכבר/לחיצה מציג ערך)
+            ספקים · לחץ על ספק כדי לראות את פירוט הפריטים שנרכשו ממנו (שם, כמות, יח׳, מחיר ליח׳, סה"כ)
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {vendors.map((v) => {
@@ -129,14 +175,17 @@ export default function CategoryDrilldown({ items }) {
                     <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--ok)', flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtILS(v.total)}</span>
                     <ChevronDown size={16} style={{ color: 'var(--text-mute)', flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms' }} />
                   </button>
-                  {/* Collapsed: proportional single bar. Expanded: product composition. */}
-                  {open && comp
-                    ? <CompositionBar rows={comp.rows} total={comp.total || 1} />
-                    : (
-                      <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${pct}%`, background: '#60a5fa', borderRadius: 3 }} />
-                      </div>
-                    )}
+                  {/* Collapsed: proportional bar. Expanded: composition bar + item table. */}
+                  {open ? (
+                    <>
+                      {comp && <CompositionBar rows={comp.rows} total={comp.total || 1} />}
+                      <VendorTable data={openTable} />
+                    </>
+                  ) : (
+                    <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: 'var(--border)', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: '#60a5fa', borderRadius: 3 }} />
+                    </div>
+                  )}
                 </div>
               )
             })}
