@@ -14,7 +14,6 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
   const wrapRef = useRef(null)
   const tipRef  = useRef(null)
   const [w, setW] = useState(600)
-  const H = 280
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -30,9 +29,31 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
 
     // RTL: reverse so the first (largest) product is on the right
     const items = [...products].reverse()
-    const margin = { top: 18, right: 12, bottom: 64, left: 54 }
+
+    // ── Adaptive X-label sizing — pick a rotation angle + bottom margin so the
+    //    (Hebrew) product names never overlap each other or ride over the bars ──
+    const isNarrow = w < 520
+    const fs = isNarrow ? 9.5 : 11
+    const maxChars = isNarrow ? 9 : 14
+    const longest = items.reduce((m, d) => Math.max(m, Math.min((d.name || '').length, maxChars)), 1)
+    const labelW = longest * fs * 0.58                      // approx px width of the longest label
+    const sideMargin = { left: 52, right: 12 }
+    const bandW = (w - sideMargin.left - sideMargin.right) / Math.max(items.length, 1)
+    // If labels fit flat under their bar → keep them horizontal. Otherwise steepen
+    // the rotation until each fits within its band, and grow the bottom margin.
+    const horizontal = labelW < bandW * 0.92
+    let ANG = 0, footprint = fs + 22
+    if (!horizontal) {
+      const need = Math.acos(Math.min(1, (bandW * 0.95) / Math.max(labelW, 1))) * 180 / Math.PI
+      ANG = Math.max(34, Math.min(70, Math.round(Math.max(34, need || 0))))
+      footprint = Math.sin(ANG * Math.PI / 180) * labelW + fs + 14
+    }
+    const margin = { top: 18, right: sideMargin.right, bottom: Math.min(160, Math.max(40, Math.round(footprint))), left: sideMargin.left }
+
+    const PLOT_H = 200
     const innerW = w - margin.left - margin.right
-    const innerH = H - margin.top - margin.bottom
+    const innerH = PLOT_H
+    const H = margin.top + PLOT_H + margin.bottom
     svg.attr('width', w).attr('height', H)
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
 
@@ -50,18 +71,20 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
         gg.selectAll('.tick text').attr('fill', 'var(--text-mute)').attr('font-size', '10px').attr('font-family', 'var(--font-main)').attr('dx', '-4')
       })
 
-    // X labels (product names, truncated + angled if crowded)
-    const angle = items.length > 4 || w < 520
+    // X labels — angled below the axis (full name on hover), never over the bars
     g.append('g').attr('transform', `translate(0,${innerH})`)
-      .call(d3.axisBottom(x0).tickFormat(n => trunc(n, angle ? 9 : 12)))
+      .call(d3.axisBottom(x0).tickSize(6).tickFormat(n => trunc(n, maxChars)))
       .call(gg => {
         gg.select('.domain').remove()
-        gg.selectAll('.tick line').remove()
-        gg.selectAll('.tick text')
-          .attr('fill', 'var(--text)').attr('font-size', '11px').attr('font-family', 'var(--font-main)')
-          .attr('transform', angle ? 'rotate(-28)' : null)
-          .attr('text-anchor', angle ? 'end' : 'middle')
-          .attr('dy', angle ? '0.6em' : '1.3em').attr('dx', angle ? '-2px' : null)
+        gg.selectAll('.tick line').attr('stroke', 'var(--border)')
+        const txt = gg.selectAll('.tick text')
+          .attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-family', 'var(--font-main)')
+        if (horizontal) {
+          txt.attr('text-anchor', 'middle').attr('dy', '1.05em')
+        } else {
+          txt.attr('transform', `rotate(-${ANG})`).attr('text-anchor', 'end').attr('dx', '-0.5em').attr('dy', '0.5em')
+        }
+        txt.each(function (d) { d3.select(this).append('title').text(d) })  // full name on hover
       })
 
     const tip = d3.select(tipRef.current)
