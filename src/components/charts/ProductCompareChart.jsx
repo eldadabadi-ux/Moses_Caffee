@@ -27,11 +27,16 @@ function computeLayout(products, w) {
 
   let mode = 'angled', ANG = 36, bottom = 56
   if (labelW < bandW * 0.9) {
+    // Names fit horizontally under their bar → keep them flat.
     mode = 'flat'; ANG = 0; bottom = fs + 22
+  } else if (isNarrow) {
+    // Mobile: never rotate (angled Hebrew names still crowd the bars). Use
+    // numbers under the bars + a legend — guaranteed not to overlap.
+    mode = 'numbers'; bottom = fs + 18
   } else {
     const need = Math.acos(Math.min(1, (bandW * 0.95) / labelW)) * 180 / Math.PI
-    if (need > 58) { mode = 'numbers'; bottom = fs + 18 }
-    else { mode = 'angled'; ANG = Math.max(34, Math.min(58, Math.round(need))); bottom = Math.round(Math.sin(ANG * Math.PI / 180) * labelW + fs + 14) }
+    if (need > 56) { mode = 'numbers'; bottom = fs + 18 }
+    else { mode = 'angled'; ANG = Math.max(34, Math.min(56, Math.round(need))); bottom = Math.round(Math.sin(ANG * Math.PI / 180) * labelW + fs + 14) }
   }
   bottom = Math.min(170, Math.max(34, bottom))
   return { mode, ANG, fs, maxChars, PLOT_H: 200, margin: { top: 18, right: side.right, bottom, left: side.left } }
