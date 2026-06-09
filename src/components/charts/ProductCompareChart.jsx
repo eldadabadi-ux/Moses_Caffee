@@ -1,12 +1,45 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import * as d3 from 'd3'
 
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 const trunc = (s, n = 10) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s)
 
+// Decide how to render the X labels so (Hebrew) product names never overlap the
+// bars or each other. Measures REAL label widths via canvas, then picks:
+//   flat   — names sit horizontally under each bar (fits)
+//   angled — names rotated just enough to fit within each band
+//   numbers— bars get 1,2,3… and a numbered legend lists the full names below
+function computeLayout(products, w) {
+  const n = Math.max(products.length, 1)
+  const isNarrow = w < 520
+  const fs = isNarrow ? 10 : 11
+  const maxChars = isNarrow ? 14 : 18
+  const side = { left: 50, right: 12 }
+  const innerW = Math.max(w - side.left - side.right, 60)
+  const bandW = innerW / n
+
+  let labelW = 12
+  try {
+    const ctx = document.createElement('canvas').getContext('2d')
+    ctx.font = `${fs}px Assistant, Heebo, system-ui, sans-serif`
+    labelW = Math.max(12, ...products.map(p => ctx.measureText(trunc(p.name || '', maxChars)).width))
+  } catch { /* SSR / no canvas */ }
+
+  let mode = 'angled', ANG = 36, bottom = 56
+  if (labelW < bandW * 0.9) {
+    mode = 'flat'; ANG = 0; bottom = fs + 22
+  } else {
+    const need = Math.acos(Math.min(1, (bandW * 0.95) / labelW)) * 180 / Math.PI
+    if (need > 58) { mode = 'numbers'; bottom = fs + 18 }
+    else { mode = 'angled'; ANG = Math.max(34, Math.min(58, Math.round(need))); bottom = Math.round(Math.sin(ANG * Math.PI / 180) * labelW + fs + 14) }
+  }
+  bottom = Math.min(170, Math.max(34, bottom))
+  return { mode, ANG, fs, maxChars, PLOT_H: 200, margin: { top: 18, right: side.right, bottom, left: side.left } }
+}
+
 /**
  * ProductCompareChart — VERTICAL grouped bars (or line+points) comparing two
- * vendors across a set of products. `products` = [{ name, a, b }].
+ * vendors across a set of products. `products` = [{ name, a, b }] (largest first).
  * `chartType` = 'bar' | 'line'.  RTL: first product sits on the right.
  */
 export default function ProductCompareChart({ products = [], labelA, labelB, colorA = '#2563eb', colorB = '#f59e0b', chartType = 'bar' }) {
@@ -14,6 +47,8 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
   const wrapRef = useRef(null)
   const tipRef  = useRef(null)
   const [w, setW] = useState(600)
+
+  const layout = useMemo(() => computeLayout(products, w), [products, w])
 
   useEffect(() => {
     if (!wrapRef.current) return
@@ -29,28 +64,7 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
 
     // RTL: reverse so the first (largest) product is on the right
     const items = [...products].reverse()
-
-    // ── Adaptive X-label sizing — pick a rotation angle + bottom margin so the
-    //    (Hebrew) product names never overlap each other or ride over the bars ──
-    const isNarrow = w < 520
-    const fs = isNarrow ? 9.5 : 11
-    const maxChars = isNarrow ? 9 : 14
-    const longest = items.reduce((m, d) => Math.max(m, Math.min((d.name || '').length, maxChars)), 1)
-    const labelW = longest * fs * 0.58                      // approx px width of the longest label
-    const sideMargin = { left: 52, right: 12 }
-    const bandW = (w - sideMargin.left - sideMargin.right) / Math.max(items.length, 1)
-    // If labels fit flat under their bar → keep them horizontal. Otherwise steepen
-    // the rotation until each fits within its band, and grow the bottom margin.
-    const horizontal = labelW < bandW * 0.92
-    let ANG = 0, footprint = fs + 22
-    if (!horizontal) {
-      const need = Math.acos(Math.min(1, (bandW * 0.95) / Math.max(labelW, 1))) * 180 / Math.PI
-      ANG = Math.max(34, Math.min(70, Math.round(Math.max(34, need || 0))))
-      footprint = Math.sin(ANG * Math.PI / 180) * labelW + fs + 14
-    }
-    const margin = { top: 18, right: sideMargin.right, bottom: Math.min(160, Math.max(40, Math.round(footprint))), left: sideMargin.left }
-
-    const PLOT_H = 200
+    const { mode, ANG, fs, maxChars, PLOT_H, margin } = layout
     const innerW = w - margin.left - margin.right
     const innerH = PLOT_H
     const H = margin.top + PLOT_H + margin.bottom
@@ -71,21 +85,26 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
         gg.selectAll('.tick text').attr('fill', 'var(--text-mute)').attr('font-size', '10px').attr('font-family', 'var(--font-main)').attr('dx', '-4')
       })
 
-    // X labels — angled below the axis (full name on hover), never over the bars
-    g.append('g').attr('transform', `translate(0,${innerH})`)
-      .call(d3.axisBottom(x0).tickSize(6).tickFormat(n => trunc(n, maxChars)))
-      .call(gg => {
-        gg.select('.domain').remove()
-        gg.selectAll('.tick line').attr('stroke', 'var(--border)')
-        const txt = gg.selectAll('.tick text')
-          .attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-family', 'var(--font-main)')
-        if (horizontal) {
-          txt.attr('text-anchor', 'middle').attr('dy', '1.05em')
-        } else {
-          txt.attr('transform', `rotate(-${ANG})`).attr('text-anchor', 'end').attr('dx', '-0.5em').attr('dy', '0.5em')
-        }
-        txt.each(function (d) { d3.select(this).append('title').text(d) })  // full name on hover
-      })
+    // X axis labels (flat / angled / numbers)
+    const axisG = g.append('g').attr('transform', `translate(0,${innerH})`)
+    if (mode === 'numbers') {
+      axisG.call(d3.axisBottom(x0).tickSize(6).tickFormat((_n, i) => String(items.length - i)))
+        .call(gg => {
+          gg.select('.domain').remove()
+          gg.selectAll('.tick line').attr('stroke', 'var(--border)')
+          gg.selectAll('.tick text').attr('fill', 'var(--text-dim)').attr('font-size', `${fs + 1}px`).attr('font-weight', 700).attr('font-family', 'var(--font-main)').attr('dy', '1.1em')
+        })
+    } else {
+      axisG.call(d3.axisBottom(x0).tickSize(6).tickFormat(nm => trunc(nm, maxChars)))
+        .call(gg => {
+          gg.select('.domain').remove()
+          gg.selectAll('.tick line').attr('stroke', 'var(--border)')
+          const txt = gg.selectAll('.tick text').attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-family', 'var(--font-main)')
+          if (mode === 'flat') txt.attr('text-anchor', 'middle').attr('dy', '1.05em')
+          else txt.attr('transform', `rotate(-${ANG})`).attr('text-anchor', 'end').attr('dx', '-0.5em').attr('dy', '0.5em')
+          txt.each(function (d) { d3.select(this).append('title').text(d) })   // full name on hover
+        })
+    }
 
     const tip = d3.select(tipRef.current)
     function showTip(event, name, vendorLabel, value, col) {
@@ -100,7 +119,6 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
     const hideTip = () => tip.style('display', 'none')
 
     if (chartType === 'line') {
-      // Two point-series across products, connected by a line
       const cx = d => x0(d.name) + x0.bandwidth() / 2
       for (const [key, col, lbl] of [['a', colorA, labelA], ['b', colorB, labelB]]) {
         const line = d3.line().x(cx).y(d => y(d[key])).curve(d3.curveMonotoneX)
@@ -119,7 +137,6 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
           .transition().duration(500).delay((_, i) => i * 25).attr('r', 4.5)
       }
     } else {
-      // Vertical grouped bars
       const groups = g.selectAll('.grp').data(items).join('g')
         .attr('class', 'grp').attr('transform', d => `translate(${x0(d.name)},0)`)
       for (const [key, col, lbl] of [['a', colorA, labelA], ['b', colorB, labelB]]) {
@@ -134,7 +151,6 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
           .transition().duration(600).delay((_, i) => i * 40).ease(d3.easeBackOut.overshoot(0.4))
           .attr('y', d => d[key] > 0 ? y(d[key]) : innerH).attr('height', d => d[key] > 0 ? innerH - y(d[key]) : 0)
       }
-      // Value labels on top (desktop, few products)
       if (w > 480 && items.length <= 6) {
         for (const key of ['a', 'b']) {
           groups.append('text')
@@ -145,11 +161,11 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
         }
       }
     }
-  }, [products, w, chartType, labelA, labelB, colorA, colorB])
+  }, [products, w, chartType, labelA, labelB, colorA, colorB, layout])
 
   return (
     <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      {/* Legend */}
+      {/* Vendor legend */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 13 }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <span style={{ width: 11, height: 11, borderRadius: 3, background: colorA, flexShrink: 0 }} />
@@ -170,6 +186,18 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
           boxShadow: 'var(--shadow-modal)', zIndex: 10, minWidth: '120px', textAlign: 'center', direction: 'rtl',
         }} />
       </div>
+
+      {/* Numbered legend — maps the 1,2,3… under the bars to full product names */}
+      {layout.mode === 'numbers' && products.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', fontSize: 12.5 }}>
+          {products.map((p, k) => (
+            <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--panel-2)', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text-dim)', flexShrink: 0 }}>{k + 1}</span>
+              <span style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 240 }}>{p.name}</span>
+            </span>
+          ))}
+        </div>
+      )}
 
       {products.length === 0 && (
         <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '18px 0', fontSize: 14 }}>אין מוצרים משותפים להשוואה</p>
