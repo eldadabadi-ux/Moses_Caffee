@@ -90,26 +90,32 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
         gg.selectAll('.tick text').attr('fill', 'var(--text-mute)').attr('font-size', '10px').attr('font-family', 'var(--font-main)').attr('dx', '-4')
       })
 
-    // X axis labels (flat / angled / numbers)
+    // X axis labels — rendered manually, CENTERED under each bar group (band).
+    const cx = d => x0(d.name) + x0.bandwidth() / 2
     const axisG = g.append('g').attr('transform', `translate(0,${innerH})`)
-    if (mode === 'numbers') {
-      axisG.call(d3.axisBottom(x0).tickSize(6).tickFormat((_n, i) => String(items.length - i)))
-        .call(gg => {
-          gg.select('.domain').remove()
-          gg.selectAll('.tick line').attr('stroke', 'var(--border)')
-          gg.selectAll('.tick text').attr('fill', 'var(--text-dim)').attr('font-size', `${fs + 1}px`).attr('font-weight', 700).attr('font-family', 'var(--font-main)').attr('dy', '1.1em')
-        })
-    } else {
-      axisG.call(d3.axisBottom(x0).tickSize(6).tickFormat(nm => trunc(nm, maxChars)))
-        .call(gg => {
-          gg.select('.domain').remove()
-          gg.selectAll('.tick line').attr('stroke', 'var(--border)')
-          const txt = gg.selectAll('.tick text').attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-family', 'var(--font-main)')
-          if (mode === 'flat') txt.attr('text-anchor', 'middle').attr('dy', '1.05em')
-          else txt.attr('transform', `rotate(-${ANG})`).attr('text-anchor', 'end').attr('dx', '-0.5em').attr('dy', '0.5em')
-          txt.each(function (d) { d3.select(this).append('title').text(d) })   // full name on hover
-        })
-    }
+    axisG.append('line').attr('x1', 0).attr('x2', innerW).attr('y1', 0).attr('y2', 0).attr('stroke', 'var(--border)')
+    items.forEach((d, i) => {
+      const tx = cx(d)
+      axisG.append('line').attr('x1', tx).attr('x2', tx).attr('y1', 0).attr('y2', 5).attr('stroke', 'var(--border)')
+      if (mode === 'numbers') {
+        axisG.append('text')
+          .attr('x', tx).attr('y', fs + 9).attr('text-anchor', 'middle')
+          .attr('fill', 'var(--text-dim)').attr('font-size', `${fs + 1}px`).attr('font-weight', 700).attr('font-family', 'var(--font-main)')
+          .text(String(items.length - i))
+      } else if (mode === 'flat') {
+        const t = axisG.append('text')
+          .attr('x', tx).attr('y', fs + 9).attr('text-anchor', 'middle')
+          .attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-family', 'var(--font-main)')
+          .text(trunc(d.name, maxChars))
+        t.append('title').text(d.name)
+      } else { // angled — pivot at the band centre, hang down-left
+        const t = axisG.append('text')
+          .attr('transform', `translate(${tx},9) rotate(-${ANG})`).attr('text-anchor', 'end')
+          .attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-family', 'var(--font-main)')
+          .text(trunc(d.name, maxChars))
+        t.append('title').text(d.name)
+      }
+    })
 
     const tip = d3.select(tipRef.current)
     function showTip(event, name, vendorLabel, value, col) {
