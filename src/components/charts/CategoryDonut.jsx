@@ -45,6 +45,31 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
     const GREY = '#cbd5e1'
     const fillFor = d => (selected && selected !== d.data.name) ? GREY : colorScale(d.data.name)
 
+    // ── Center label ─────────────────────────────────────────────────────────
+    // Shows the selected (or hovered) slice value BIG + "מתוך {total}" small.
+    const truncName = (s) => (s && s.length > 16 ? s.slice(0, 15) + '…' : s)
+    const sel = data.find(d => d.name === selected)
+    const valFont = Math.max(13, Math.min(19, r * 0.28))
+
+    const centerLabel = g.append('g').style('pointer-events', 'none')
+    const nameT = centerLabel.append('text').attr('y', -18).attr('text-anchor', 'middle')
+      .attr('font-size', '10.5px').attr('font-family', 'var(--font-main)')
+    const valT = centerLabel.append('text').attr('y', 4).attr('text-anchor', 'middle')
+      .attr('fill', 'var(--text)').attr('font-weight', '800').attr('font-family', 'var(--font-main)').attr('font-size', valFont + 'px')
+    const subT = centerLabel.append('text').attr('y', 22).attr('text-anchor', 'middle')
+      .attr('font-size', '10.5px').attr('font-family', 'var(--font-main)')
+
+    function showSlice(name, val) {
+      nameT.text(truncName(name)).attr('fill', name === selected ? 'var(--accent)' : 'var(--text-mute)')
+      valT.text(fmtILS(val))
+      subT.text(`מתוך ${fmtILS(total)}`).attr('fill', 'var(--text-mute)')
+    }
+    function resetCenter() {
+      if (sel) { showSlice(sel.name, sel.total) }
+      else { nameT.text('סה"כ').attr('fill', 'var(--text-mute)'); valT.text(fmtILS(total)); subT.text('').attr('fill', 'var(--text-mute)') }
+    }
+    resetCenter()
+
     const paths = g.selectAll('path')
       .data(pie(data))
       .join('path')
@@ -56,15 +81,11 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
       .attr('transform', 'scale(0)').attr('opacity', 0)
       .on('mouseenter', function(_, d) {
         d3.select(this).transition().duration(180).attr('d', arcHover).attr('filter', 'url(#drop-shadow)')
-        centerLabel.select('.center-name').text(d.data.name)
-        centerLabel.select('.center-val').text(fmtILS(d.data.total))
-        centerLabel.select('.center-pct').text(`${Math.round((d.data.total / total) * 100)}%`)
+        showSlice(d.data.name, d.data.total)
       })
       .on('mouseleave', function(_, d) {
         d3.select(this).transition().duration(180).attr('d', arc).attr('filter', null)
-        centerLabel.select('.center-name').text('סה"כ')
-        centerLabel.select('.center-val').text(fmtILS(total))
-        centerLabel.select('.center-pct').text('')
+        resetCenter()
       })
       .on('click', (_, d) => onSelect?.(d.data.name === selected ? null : d.data.name))
 
@@ -73,29 +94,13 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
       .attr('transform', 'scale(1)')
       .attr('opacity', 0.95)
 
-    // Center label
-    const centerLabel = g.append('g')
-    centerLabel.append('text').attr('class', 'center-name')
-      .attr('y', -16).attr('text-anchor', 'middle')
-      .attr('fill', 'var(--text-mute)').attr('font-size', '10px')
-      .attr('font-family', 'var(--font-main)').text('סה"כ')
-    centerLabel.append('text').attr('class', 'center-val')
-      .attr('y', 5).attr('text-anchor', 'middle')
-      .attr('fill', 'var(--text)').attr('font-size', Math.max(11, Math.min(14, r * 0.22)) + 'px')
-      .attr('font-weight', '700').attr('font-family', 'var(--font-main)')
-      .text(fmtILS(total))
-    centerLabel.append('text').attr('class', 'center-pct')
-      .attr('y', 22).attr('text-anchor', 'middle')
-      .attr('fill', 'var(--accent)').attr('font-size', '10px')
-      .attr('font-family', 'var(--font-main)').text(selected ? 'בטל סינון' : '')
-
-    // Transparent center hit-area — click clears the filter.
+    // Transparent center hit-area — click clears the filter (when a slice is selected).
     g.append('circle')
       .attr('r', ri - 2).attr('fill', 'transparent')
       .style('cursor', selected ? 'pointer' : 'default')
       .on('click', () => { if (selected) onSelect?.(null) })
-      .on('mouseenter', () => { if (selected) centerLabel.select('.center-pct').attr('fill', 'var(--danger)') })
-      .on('mouseleave', () => centerLabel.select('.center-pct').attr('fill', 'var(--accent)'))
+      .on('mouseenter', () => { if (selected) subT.text('בטל סינון').attr('fill', 'var(--danger)') })
+      .on('mouseleave', resetCenter)
   }, [data, total, size, selected])
 
   return (
