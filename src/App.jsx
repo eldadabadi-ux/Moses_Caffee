@@ -2,6 +2,7 @@ import { Suspense, lazy, useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
+import { TenantProvider } from './hooks/useTenant'
 import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
@@ -300,7 +301,8 @@ function AppShell() {
 export default function App() {
   return (
     <AuthProvider>
-      <SettingsProvider>
+      <TenantProvider>
+        <SettingsProvider>
         <BrowserRouter>
           <Toaster
             position="top-center"
@@ -316,7 +318,8 @@ export default function App() {
             </Routes>
           </Suspense>
         </BrowserRouter>
-      </SettingsProvider>
+        </SettingsProvider>
+      </TenantProvider>
     </AuthProvider>
   )
 }
