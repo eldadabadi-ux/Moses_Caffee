@@ -9,6 +9,7 @@ import LoadingSpinner from './components/ui/LoadingSpinner'
 import MonthlyExportPrompt from './components/MonthlyExportPrompt'
 import InstallBanner from './components/InstallBanner'
 import DailyBackup from './components/DailyBackup'
+import AIChatWidget from './components/AIChatWidget'
 import Sidebar from './components/Sidebar'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu } from 'lucide-react'
 
@@ -17,6 +18,7 @@ const ReceiptsPage    = lazy(() => import('./pages/ReceiptsPage'))
 const CategoriesPage  = lazy(() => import('./pages/CategoriesPage'))
 const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
 const SettingsPage    = lazy(() => import('./pages/SettingsPage'))
+const SuppliersPage   = lazy(() => import('./pages/SuppliersPage'))
 const AdminPage       = lazy(() => import('./pages/AdminPage'))
 
 // Reactive mobile detection
@@ -278,6 +280,7 @@ function AppShell() {
             <Route path="/receipts"   element={<ReceiptsPage />} />
             <Route path="/dashboard"  element={<Navigate to="/" replace />} />
             <Route path="/categories" element={<CategoriesPage />} />
+            <Route path="/suppliers"  element={<SuppliersPage />} />
             <Route path="/settings"   element={<SettingsPage />} />
             <Route path="/admin"      element={<AdminPage />} />
             <Route path="*"           element={<Navigate to="/" replace />} />
@@ -293,6 +296,9 @@ function AppShell() {
 
       {/* Daily JSON backup */}
       <DailyBackup />
+
+      {/* AI assistant — floating bot */}
+      <AIChatWidget />
 
       <UpdateBanner />
     </div>

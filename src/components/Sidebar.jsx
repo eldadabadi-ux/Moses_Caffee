@@ -5,7 +5,7 @@ import { useTenant } from '../hooks/useTenant'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database,
+  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store,
 } from 'lucide-react'
 
 // Navigation tree — every section + its options.
@@ -32,6 +32,12 @@ const NAV = [
     children: [
       { label: 'הוסף קטגוריה',     icon: Plus,      action: 'categories-add' },
       { label: 'סווג קבלות מחדש',  icon: RefreshCw, action: 'categories-recat' },
+    ],
+  },
+  {
+    id: 'suppliers', label: 'ספקים', icon: Store, to: '/suppliers',
+    children: [
+      { label: 'הוסף ספק', icon: Plus, action: 'suppliers-add' },
     ],
   },
   {
