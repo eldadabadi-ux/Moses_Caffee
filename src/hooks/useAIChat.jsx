@@ -28,7 +28,8 @@ export function useAIChat() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err?.error || `שגיאת שרת ${res.status}`)
+        const msg = err?.error || `שגיאת שרת ${res.status}`
+        throw new Error(err?.detail ? `${msg} (${err.detail})` : msg)
       }
       const { reply } = await res.json()
       setMessages(prev => [...prev, { role: 'assistant', content: reply, ts: new Date().toISOString() }])

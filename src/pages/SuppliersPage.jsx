@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
-import { loadSuppliers, upsertSupplier, deleteSupplier, deriveVendorStats, waLink, telLink } from '../lib/suppliers'
+import { useSettings } from '../hooks/useSettings'
+import { loadSuppliers, upsertSupplier, deleteSupplier, deriveVendorStats, waLink, telLink, gmailComposeLink } from '../lib/suppliers'
 import { Store, Phone, Mail, MapPin, Pencil, Plus, Trash2, Package, CalendarDays, MessageCircle } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
@@ -13,6 +14,7 @@ const fmtDate = d => d ? d.split('-').reverse().join('.') : '—'
 
 export default function SuppliersPage() {
   const { user } = useAuth()
+  const { settings } = useSettings()
   const isMobile = window.innerWidth < 768
   const [receipts, setReceipts] = useState([])
   const [contacts, setContacts] = useState([])
@@ -123,7 +125,7 @@ export default function SuppliersPage() {
                 <a href={waLink(contact.whatsapp || contact.phone)} target="_blank" rel="noreferrer" style={chip('#16a34a')}><MessageCircle size={14} /> וואטסאפ</a>
               )}
               {contact?.email && (
-                <a href={`mailto:${contact.email}`} style={chip('#d97706')}><Mail size={14} /> מייל</a>
+                <a href={gmailComposeLink(contact.email, user?.email, settings?.businessName)} target="_blank" rel="noreferrer" style={chip('#d97706')}><Mail size={14} /> מייל</a>
               )}
               {!contact?.phone && !contact?.whatsapp && !contact?.email && (
                 <span style={{ fontSize: 12.5, color: 'var(--text-mute)' }}>אין פרטי קשר — לחץ על העיפרון להוספה</span>
@@ -145,26 +147,24 @@ export default function SuppliersPage() {
               </div>
             )}
 
-            {/* Period costs */}
+            {/* Real spend — actual sums from receipts (no invented averages) */}
             {s ? (
-              <>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, background: 'var(--panel-2)', borderRadius: 10, padding: '8px 6px' }}>
-                  {[['יומי', s.perDay], ['שבועי', s.perWeek], ['חודשי', s.perMonth], ['שנתי', s.perYear]].map(([lbl, val]) => (
-                    <div key={lbl} style={{ textAlign: 'center', minWidth: 0 }}>
-                      <div style={{ fontSize: 10.5, color: 'var(--text-mute)' }}>{lbl}</div>
-                      <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtILS(val)}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-mute)', flexWrap: 'wrap', gap: 6 }}>
-                  <span>סה"כ: <strong style={{ color: 'var(--ok)' }}>{fmtILS(s.total)}</strong></span>
-                  <span>החודש: <strong style={{ color: 'var(--text)' }}>{fmtILS(s.thisMonth)}</strong></span>
-                  <span>{s.count} קבלות</span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><CalendarDays size={12} /> {fmtDate(s.lastDate)}</span>
-                </div>
-              </>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6, background: 'var(--panel-2)', borderRadius: 10, padding: '9px 8px' }}>
+                {[['החודש', s.thisMonth], ['השנה', s.thisYear], ['סה"כ', s.total]].map(([lbl, val], i) => (
+                  <div key={lbl} style={{ textAlign: 'center', minWidth: 0 }}>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-mute)' }}>{lbl}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: i === 2 ? 'var(--ok)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{fmtILS(val)}</div>
+                  </div>
+                ))}
+              </div>
             ) : (
               <div style={{ fontSize: 12.5, color: 'var(--text-mute)' }}>ספק ידני — אין עדיין קבלות לחישוב עלויות</div>
+            )}
+            {s && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, color: 'var(--text-mute)', flexWrap: 'wrap', gap: 6 }}>
+                <span>{s.count} קבלות</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><CalendarDays size={12} /> רכישה אחרונה: {fmtDate(s.lastDate)}</span>
+              </div>
             )}
           </div>
         ))}

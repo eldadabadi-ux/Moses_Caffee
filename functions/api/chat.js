@@ -109,21 +109,20 @@ function buildReceiptsBlock(receipts, categories, suppliers) {
   }
   const vendors = Object.entries(vMap).map(([name, v]) => {
     const dates = active.filter(r => ((r.vendor_name || '').trim() || 'לא ידוע') === name).map(r => r.receipt_date).filter(Boolean).sort()
-    const first = dates[0], last = dates[dates.length - 1] || v.last
-    const spanDays = first && last ? Math.max(1, (new Date(last) - new Date(first)) / 86400000 + 1) : 1
+    const last = dates[dates.length - 1] || v.last
     const topCats = Object.entries(v.cats).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([c]) => c).join(', ')
     const topProds = Object.entries(v.prods).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([p, s]) => `${p} (${ils(s)})`).join(', ')
     const receiptCount = dates.length
     const c = supMap[name]
-    return { name, total: v.total, month: v.month, year: v.year, last, receiptCount, spanDays, topCats, topProds, contact: c }
+    return { name, total: v.total, month: v.month, year: v.year, last, receiptCount, topCats, topProds, contact: c }
   }).sort((a, b) => b.total - a.total)
 
+  // Only real summed figures per vendor — no extrapolated averages (a single
+  // receipt must never imply a "yearly" cost).
   const vendorsBlock = vendors.map((v, i) => {
-    const perDay = v.total / v.spanDays
     const lines =
       `${i + 1}. ${v.name} | סה"כ: ${ils(v.total)} | החודש: ${ils(v.month)} | השנה: ${ils(v.year)} | ` +
-      `קבלות: ${v.receiptCount} | רכישה אחרונה: ${v.last || '-'} | ` +
-      `עלות ממוצעת — יומי ${ils(perDay)} · שבועי ${ils(perDay * 7)} · חודשי ${ils(perDay * 30)} · שנתי ${ils(perDay * 365)}` +
+      `קבלות: ${v.receiptCount} | רכישה אחרונה: ${v.last || '-'}` +
       (v.topCats ? ` | מספק: ${v.topCats}` : '') +
       (v.topProds ? `\n     מוצרים מובילים: ${v.topProds}` : '') +
       (v.contact ? `\n     פרטי קשר: ${[v.contact.phone && 'טל ' + v.contact.phone, v.contact.whatsapp && 'וואטסאפ ' + v.contact.whatsapp, v.contact.email, v.contact.address].filter(Boolean).join(' | ')}` : '')
@@ -267,6 +266,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
 
 חוקים:
 - בסס כל מספר/המלצה על הנתונים שלמטה בלבד. אם המידע חסר — אמור זאת בכנות ואל תמציא.
+- אל תמציא ממוצעים תקופתיים (יומי/שבועי/חודשי/שנתי) מתוך קבלה בודדת או מעט קבלות. דווח רק סכומים אמיתיים שנצברו (סה"כ, החודש, השנה). כשאין מספיק היסטוריה לחיזוי — אמור זאת במפורש.
 - בהמלצת ספק זול יותר — השווה מחיר ליחידה (לא רק סה"כ), וציין את ההפרש.
 - כתוב נקי: בלי אימוג'ים, בלי סולמיות (#) או קווים (---). הפרד נושאים בשורה ריקה. השתמש ברשימות רק כשמבקשים.
 - כשמבקשים — בצע מיד (אל תפתח ב"שלום, במה אפשר לעזור").

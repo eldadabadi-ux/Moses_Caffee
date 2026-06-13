@@ -56,16 +56,16 @@ export function deriveVendorStats(receipts) {
   return Object.values(map).map(v => {
     const dates = v.dates.sort()
     const first = dates[0], last = dates[dates.length - 1]
-    const spanDays = first && last ? Math.max(1, (new Date(last) - new Date(first)) / 86400000 + 1) : 1
-    const perDay = v.total / spanDays
     const comp = vendorComposition(flat, v.name)
     const cats = {}
     flat.forEach(f => { if (f.vendor === v.name) cats[f.l1] = (cats[f.l1] || 0) + f.price })
     const topCategories = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, total]) => ({ name, total: r2(total) }))
+    // Only real, summed figures — never extrapolated daily/weekly/yearly averages
+    // (a single receipt must not invent a "yearly" cost). Period sums grow as
+    // more receipts come in.
     return {
       name: v.name, total: r2(v.total), count: v.count, thisMonth: r2(v.thisMonth), thisYear: r2(v.thisYear),
       firstDate: first || null, lastDate: last || null,
-      perDay: r2(perDay), perWeek: r2(perDay * 7), perMonth: r2(perDay * 30.44), perYear: r2(perDay * 365),
       topProducts: comp.rows.slice(0, 6), topCategories,
     }
   }).sort((a, b) => b.total - a.total)
@@ -83,3 +83,21 @@ export function normalizePhoneIntl(phone) {
 }
 export const waLink  = (phone) => { const p = normalizePhoneIntl(phone); return p ? `https://wa.me/${p}` : null }
 export const telLink = (phone) => { const p = String(phone || '').replace(/[^\d+]/g, ''); return p ? `tel:${p}` : null }
+
+/**
+ * Gmail "compose" link — opens a new email TO the supplier, FROM the app
+ * owner's Gmail account. We use this instead of a bare `mailto:` because
+ * `mailto:` silently does nothing on devices without a configured desktop
+ * mail client; the Gmail web composer always opens. `authuser` pins the
+ * sender to the owner's address even when several Google accounts are
+ * signed in on the browser.
+ */
+export function gmailComposeLink(to, ownerEmail, businessName) {
+  const params = new URLSearchParams({
+    view: 'cm', fs: '1', tf: '1',
+    to: to || '',
+    su: `פנייה מ${businessName ? '-' + businessName : 'בית הקפה'}`,
+  })
+  if (ownerEmail) params.set('authuser', ownerEmail)
+  return `https://mail.google.com/mail/?${params.toString()}`
+}
