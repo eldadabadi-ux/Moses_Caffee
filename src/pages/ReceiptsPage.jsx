@@ -33,6 +33,13 @@ const COMMON_CATEGORIES = [
 
 const fmtDate = d => d ? d.split('-').reverse().join('.') : ''
 const fmtILS  = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}`
+// Foreign-currency helpers (for receipts from abroad)
+const CUR_SYMBOL = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'Fr', AUD: 'A$', CAD: 'C$', ILS: '₪' }
+const fmtCur = (n, code) => {
+  const v = parseFloat(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })
+  const sym = CUR_SYMBOL[code]
+  return sym ? `${sym}${v}` : `${v} ${code}`
+}
 
 function useIsMobile() {
   const [v, setV] = useState(() => window.innerWidth < 768)
@@ -470,6 +477,8 @@ export default function ReceiptsPage() {
   const [reviewBeforeVat, setReviewBeforeVat] = useState('')  // amount before vat
   const [reviewVatAmount, setReviewVatAmount] = useState('')  // vat amount
   const [reviewItems, setReviewItems]   = useState([])
+  const [reviewCurrency, setReviewCurrency] = useState('ILS') // detected receipt currency
+  const [reviewFx, setReviewFx]         = useState(null)      // { rate, date, source, currency } for foreign receipts
   const [reviewPages, setReviewPages]   = useState([])        // all page images of a multi-page receipt
   const [scanSource, setScanSource]     = useState('')        // diagnostic: which engine produced the data
   const [reviewCategory, setReviewCategory] = useState('שונות')
@@ -734,6 +743,8 @@ export default function ReceiptsPage() {
       setReviewVatAmount(vat ? String(vat) : '')
       setReviewItems(items)
       setReviewCategory(items[0]?.category_l1 || 'שונות')
+      setReviewCurrency(result.currency || 'ILS')
+      setReviewFx(result.fx || null)   // foreign-currency receipts: { rate, date, source, currency }
       setReviewPages(pages)
       setReviewImage(pages[0])
       setShowReview(true)
@@ -811,20 +822,40 @@ export default function ReceiptsPage() {
         ? await Promise.all(pages.slice(1).map(compressDataUrl))
         : []
 
-      const totalAmt = parseFloat(reviewTotal) || 0
-      const beforeAmt = parseFloat(reviewBeforeVat) || Math.round(totalAmt / (1 + vatRate / 100) * 100) / 100
-      const vatAmt    = parseFloat(reviewVatAmount) || Math.round((totalAmt - beforeAmt) * 100) / 100
+      // Amounts are entered in the ORIGINAL currency; for a foreign receipt we
+      // convert to ILS with the official Bank-of-Israel rate so the dashboard/
+      // exports stay in ILS, and keep the originals in ai_summary.
+      const fx = reviewFx
+      const rate = fx ? fx.rate : 1
+      const r2 = n => Math.round((Number(n) || 0) * 100) / 100
+      const totalOrig  = parseFloat(reviewTotal) || 0
+      const beforeOrig = parseFloat(reviewBeforeVat) || Math.round(totalOrig / (1 + vatRate / 100) * 100) / 100
+      const vatOrig    = parseFloat(reviewVatAmount) || Math.round((totalOrig - beforeOrig) * 100) / 100
+      const totalAmt  = r2(totalOrig * rate)
+      const beforeAmt = r2(beforeOrig * rate)
+      const vatAmt    = r2(vatOrig * rate)
+
+      const storedItems = reviewItems.length > 0 ? reviewItems.map(it => {
+        const { price_ils, unit_price_ils, ...rest } = it
+        if (!fx) return rest
+        const op  = parseFloat(rest.price) || 0
+        const oup = (rest.unit_price != null && rest.unit_price !== '') ? parseFloat(rest.unit_price) : null
+        return { ...rest, price: r2(op * rate), unit_price: oup != null ? r2(oup * rate) : rest.unit_price,
+                 orig_price: op, orig_unit_price: oup, currency: reviewCurrency }
+      }) : null
+
       const base = {
         user_id: user.id, vendor_name: reviewVendor,
         receipt_date: reviewDate || new Date().toISOString().slice(0, 10),
         amount: totalAmt, currency: 'ILS',
         category_id, category_text: reviewCategory,
-        items: reviewItems.length > 0 ? reviewItems : null,
+        items: storedItems,
         receipt_image: finalImage || null, ai_extracted: true,
         // Exact VAT breakdown is stored inside ai_summary too — this works even
         // when the dedicated columns don't exist yet (no migration required).
         ai_summary: { vendor: reviewVendor, total: totalAmt, before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate, model: 'gemini-2.5-flash',
-          pages: pages.length, ...(extraPages.length ? { extra_pages: extraPages } : {}) },
+          pages: pages.length, ...(extraPages.length ? { extra_pages: extraPages } : {}),
+          ...(fx ? { currency: reviewCurrency, fx_rate: rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
       }
       let { error } = await supabase.from('receipts').insert({ ...base, amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate })
       // Graceful fallback if VAT migration hasn't run yet — ai_summary keeps the values
@@ -832,9 +863,9 @@ export default function ReceiptsPage() {
         ;({ error } = await supabase.from('receipts').insert(base))
       }
       if (error) throw error
-      toast.success('קבלה נשמרה!')
+      toast.success(fx ? `קבלה נשמרה! (הומרה לשקלים לפי שער יציג)` : 'קבלה נשמרה!')
       setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
-      setReviewBeforeVat(''); setReviewVatAmount('')
+      setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null)
       loadData()
     } catch (err) {
       toast.error('שגיאה בשמירה: ' + (err?.message || ''))
@@ -1075,6 +1106,12 @@ export default function ReceiptsPage() {
                 <div style={{ display:'flex', alignItems:'baseline', gap:'6px', flexWrap:'wrap' }}>
                   <span style={{ fontWeight:600, fontSize: isMobile ? '16px' : '17px', color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth: isMobile ? '150px' : 'none' }}>{r.vendor_name || '—'}</span>
                   {r.ai_extracted && <Badge variant="info" showDot={false} style={{ fontSize:'12px' }}>AI</Badge>}
+                  {r.ai_summary?.is_fx_estimate && (
+                    <span title={`הומר לשקלים לפי השער היציג של ${r.ai_summary.currency} (בנק ישראל, ${fmtDate(r.ai_summary.fx_date)}) — הערכה בלבד`}
+                      style={{ fontSize:'11px', fontWeight:700, color:'var(--warn)', background:'var(--warn-tint-1)', border:'1px solid var(--warn-tint-border)', borderRadius:6, padding:'1px 6px', whiteSpace:'nowrap' }}>
+                      {(CUR_SYMBOL[r.ai_summary.currency] || r.ai_summary.currency)}→₪ *
+                    </span>
+                  )}
                 </div>
                 <div style={{ display:'flex', gap:'8px', marginTop:'3px', flexWrap:'wrap' }}>
                   {r.receipt_date && <span style={{ fontSize:'14px', color:'var(--text-mute)', display:'flex', alignItems:'center', gap:'3px' }}><CalendarDays size={12} />{fmtDate(r.receipt_date)}</span>}
@@ -1144,6 +1181,21 @@ export default function ReceiptsPage() {
                 {scanSource}
               </div>
             )}
+            {reviewFx && (
+              <div style={{ background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:'10px', padding:'10px 13px', fontSize:'13px' }}>
+                <div style={{ fontWeight:700, color:'var(--text)', display:'flex', alignItems:'center', gap:6, marginBottom:3 }}>💱 קבלה במטבע זר ({reviewCurrency})</div>
+                <div style={{ color:'var(--text-dim)', lineHeight:1.6 }}>
+                  שער יציג ({reviewFx.source}): 1 {reviewCurrency} = ₪{Number(reviewFx.rate).toFixed(4)} · נכון ל-{fmtDate(reviewFx.date)}.<br/>
+                  הסכומים מוצגים במטבע המקור, ולצידם <strong>הערכה בשקלים *</strong>.
+                </div>
+              </div>
+            )}
+            {reviewCurrency !== 'ILS' && !reviewFx && (
+              <div style={{ background:'var(--danger-tint-1)', border:'1px solid var(--danger-tint-border)', borderRadius:'10px', padding:'10px 13px', fontSize:'13px', color:'var(--text)', lineHeight:1.6 }}>
+                <strong>⚠️ זוהה מטבע זר ({reviewCurrency})</strong> אך לא ניתן היה לקבל את השער היציג מבנק ישראל כרגע.
+                הסכומים הם ב-{reviewCurrency} — נא להזין/לתקן את הערך בשקלים ידנית לפני שמירה.
+              </div>
+            )}
             <div style={formGrid}>
               <div>
                 <label style={LS}>ספק</label>
@@ -1156,7 +1208,7 @@ export default function ReceiptsPage() {
             </div>
             <div style={formGrid}>
               <div>
-                <label style={LS}>סכום כולל מע"מ (₪)</label>
+                <label style={LS}>סכום כולל מע"מ ({reviewCurrency !== 'ILS' ? reviewCurrency : '₪'})</label>
                 <input type="number" value={reviewTotal}
                   onChange={e => {
                     const v = e.target.value
@@ -1167,6 +1219,9 @@ export default function ReceiptsPage() {
                     setReviewVatAmount(before ? String(Math.round((t - before) * 100) / 100) : '')
                   }}
                   style={{ ...FS, fontWeight:700, fontSize:'18px' }} dir="ltr" placeholder="0.00" />
+                {reviewFx && reviewTotal > 0 && (
+                  <div style={{ marginTop:5, fontSize:'13px', fontWeight:600, color:'var(--ok)' }}>≈ {fmtILS((parseFloat(reviewTotal)||0) * reviewFx.rate)} <span style={{ color:'var(--text-mute)' }}>*</span></div>
+                )}
               </div>
               <div>
                 <label style={LS}>קטגוריה</label>
@@ -1179,7 +1234,7 @@ export default function ReceiptsPage() {
             {/* VAT breakdown */}
             <div style={{ display:'flex', gap:'10px', background:'var(--panel-2)', borderRadius:'10px', padding:'12px 14px', border:'1px solid var(--border)' }}>
               <div style={{ flex:1 }}>
-                <label style={{ ...LS, marginBottom:6 }}>לפני מע"מ (₪)</label>
+                <label style={{ ...LS, marginBottom:6 }}>לפני מע"מ ({reviewCurrency !== 'ILS' ? reviewCurrency : '₪'})</label>
                 <input type="number" value={reviewBeforeVat}
                   onChange={e => {
                     const v = e.target.value
@@ -1191,7 +1246,7 @@ export default function ReceiptsPage() {
                   style={{ ...FS, height:'40px', fontSize:'14px' }} dir="ltr" placeholder="0.00" />
               </div>
               <div style={{ flex:1 }}>
-                <label style={{ ...LS, marginBottom:6 }}>מע"מ {vatRate}% (₪)</label>
+                <label style={{ ...LS, marginBottom:6 }}>מע"מ {vatRate}% ({reviewCurrency !== 'ILS' ? reviewCurrency : '₪'})</label>
                 <input type="number" value={reviewVatAmount} readOnly
                   style={{ ...FS, height:'40px', fontSize:'14px', background:'var(--panel)', color:'var(--text-mute)' }} dir="ltr" placeholder="0.00" />
               </div>
@@ -1208,21 +1263,36 @@ export default function ReceiptsPage() {
                           <div style={{ color:'var(--text)', fontSize:'15px', fontWeight:500 }}>{item.item_name}</div>
                           {path && <div style={{ color:'var(--text-mute)', fontSize:'12.5px', marginTop:'2px' }}>{path}</div>}
                         </div>
-                        {item.price > 0 && <span style={{ color:'var(--ok)', fontWeight:700, fontSize:'15px', whiteSpace:'nowrap' }}>{fmtILS(item.price)}</span>}
+                        {item.price > 0 && (reviewFx ? (
+                          <span style={{ textAlign:'left', whiteSpace:'nowrap', flexShrink:0 }}>
+                            <span style={{ color:'var(--text)', fontWeight:700, fontSize:'15px' }}>{fmtCur(item.price, reviewCurrency)}</span>
+                            <span style={{ display:'block', color:'var(--ok)', fontWeight:600, fontSize:'12.5px' }}>≈ {fmtILS(item.price * reviewFx.rate)} *</span>
+                          </span>
+                        ) : (
+                          <span style={{ color:'var(--ok)', fontWeight:700, fontSize:'15px', whiteSpace:'nowrap' }}>{fmtILS(item.price)}</span>
+                        ))}
                       </div>
                     )
                   })}
                   {/* Items total */}
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 0', borderTop:'2px solid var(--border)', marginTop:'2px' }}>
                     <span style={{ color:'var(--text)', fontSize:'15px', fontWeight:700 }}>סה"כ פריטים</span>
-                    <span style={{ color:'var(--ok)', fontSize:'16px', fontWeight:800 }}>
-                      {fmtILS(reviewItems.reduce((s, it) => s + (parseFloat(it.price) || 0), 0))}
+                    <span style={{ textAlign:'left', whiteSpace:'nowrap' }}>
+                      <span style={{ color: reviewFx ? 'var(--text)' : 'var(--ok)', fontSize:'16px', fontWeight:800 }}>
+                        {reviewFx ? fmtCur(reviewItems.reduce((s, it) => s + (parseFloat(it.price) || 0), 0), reviewCurrency) : fmtILS(reviewItems.reduce((s, it) => s + (parseFloat(it.price) || 0), 0))}
+                      </span>
+                      {reviewFx && <span style={{ display:'block', color:'var(--ok)', fontSize:'13px', fontWeight:700 }}>≈ {fmtILS(reviewItems.reduce((s, it) => s + (parseFloat(it.price) || 0), 0) * reviewFx.rate)} *</span>}
                     </span>
                   </div>
                 </div>
                 <p style={{ margin:'6px 2px 0', fontSize:'12px', color:'var(--text-mute)' }}>
                   כל פריט מסווג: קטגוריה › תת-קטגוריה › תת-תת. הסכום הכולל למעלה הוא הקובע לשמירה.
                 </p>
+                {reviewFx && (
+                  <p style={{ margin:'4px 2px 0', fontSize:'12px', color:'var(--text-mute)', lineHeight:1.5 }}>
+                    <strong>*</strong> הערך בשקלים הוא הערכה בלבד, מבוסס על השער היציג של {reviewCurrency} בבנק ישראל ({fmtDate(reviewFx.date)}). הקבלה נשמרת בשקלים לפי שער זה.
+                  </p>
+                )}
               </div>
             )}
             <div style={{ display:'flex', gap:'10px', paddingTop:'4px', paddingBottom: isMobile ? '8px' : '0' }}>

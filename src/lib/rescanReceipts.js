@@ -39,20 +39,38 @@ export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal
       })
       if (res.ok) {
         const result = await res.json()
-        const t = Number(result.total_amount) || 0
-        if (t > 0) {
-          const before = Number(result.amount_before_vat) || r2(t / (1 + vatRate / 100))
-          const vat = Number(result.vat_amount) || r2(t - before)
+        const fx = result.fx   // foreign currency → convert to ILS with the official rate
+        const tOrig = Number(result.total_amount) || 0
+        if (tOrig > 0) {
+          // All stored amounts are in ILS (converted for foreign receipts).
+          const t = fx ? (Number(result.total_ils) || r2(tOrig * fx.rate)) : tOrig
+          const before = fx ? (Number(result.before_vat_ils) || r2(t / (1 + vatRate / 100)))
+                            : (Number(result.amount_before_vat) || r2(t / (1 + vatRate / 100)))
+          const vat = fx ? (Number(result.vat_ils) || r2(t - before))
+                         : (Number(result.vat_amount) || r2(t - before))
           const oldT = parseFloat(r.amount) || 0
           const diff = Math.abs(t - oldT)
           // Correct the date too (now read day-first). Only overwrite with a valid date.
           const newDate = (result.receipt_date || '').trim()
           const dateChanged = isValidISODate(newDate) && newDate !== (r.receipt_date || '')
+          let newItems = r.items
+          if (Array.isArray(result.items) && result.items.length) {
+            newItems = result.items.map(it => {
+              const { price_ils, unit_price_ils, ...rest } = it
+              if (!fx) return rest
+              const op = parseFloat(rest.price) || 0
+              const oup = (rest.unit_price != null && rest.unit_price !== '') ? parseFloat(rest.unit_price) : null
+              return { ...rest, price: price_ils != null ? price_ils : r2(op * fx.rate),
+                       unit_price: unit_price_ils != null ? unit_price_ils : (oup != null ? r2(oup * fx.rate) : rest.unit_price),
+                       orig_price: op, orig_unit_price: oup, currency: result.currency }
+            })
+          }
           const patch = {
             amount: t,
-            items: Array.isArray(result.items) && result.items.length ? result.items : r.items,
+            items: newItems,
             ...(isValidISODate(newDate) ? { receipt_date: newDate } : {}),
-            ai_summary: { ...(r.ai_summary || {}), total: t, before_vat: before, vat_amount: vat, vat_rate: vatRate, rescanned_at: new Date().toISOString() },
+            ai_summary: { ...(r.ai_summary || {}), total: t, before_vat: before, vat_amount: vat, vat_rate: vatRate, rescanned_at: new Date().toISOString(),
+              ...(fx ? { currency: result.currency, fx_rate: fx.rate, fx_date: fx.date, fx_source: fx.source, original_total: tOrig, is_fx_estimate: true } : {}) },
           }
           const vatCols = { amount_before_vat: before, vat_amount: vat, vat_rate: vatRate }
           let { error: upErr } = await supabase.from('receipts').update({ ...patch, ...vatCols }).eq('id', r.id)

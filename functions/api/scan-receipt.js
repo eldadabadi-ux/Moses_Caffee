@@ -10,6 +10,7 @@
  */
 
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
+import { getIlsRate, normalizeCurrency } from './_lib/fxRate.js'
 
 // Model chain — flash models work on the free tier and are fast + accurate.
 // gemini-2.5-pro is intentionally NOT used: it returns 429 (quota) on the free tier.
@@ -197,6 +198,26 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   result = reconcileVat(result, vatRate)
   result._model = usedModel   // diagnostic: which model produced this
 
+  // ── Foreign currency → official ILS estimate (Bank of Israel rate) ──────────
+  const currency = normalizeCurrency(result.currency)
+  result.currency = currency
+  result.fx = null
+  if (currency !== 'ILS') {
+    const fx = await getIlsRate(currency)       // ILS per 1 foreign unit (official שער יציג)
+    if (fx) {
+      const r2 = (n) => Math.round((Number(n) || 0) * fx.rate * 100) / 100
+      result.fx = { rate: fx.rate, date: fx.date, source: fx.source, currency }
+      result.total_ils      = r2(result.total_amount)
+      result.before_vat_ils = r2(result.amount_before_vat)
+      result.vat_ils        = r2(result.vat_amount)
+      result.items = (result.items || []).map(it => ({
+        ...it,
+        price_ils: r2(it.price),
+        unit_price_ils: (it.unit_price != null && it.unit_price !== '') ? r2(it.unit_price) : null,
+      }))
+    }
+  }
+
   return Response.json(result, { headers: CORS })
 })
 
@@ -291,6 +312,12 @@ ${multiPageNote}
 - אם הקבלה **לא** מציגה פירוט מע"מ — החזר 0 בשני השדות (המערכת תחשב לבד)
 - ודא ש: amount_before_vat + vat_amount = total_amount
 
+### מטבע (currency) — חשוב לקבלות מחו"ל:
+- זהה את מטבע הקבלה לפי הסמל ($, €, £, ¥) או הקוד (USD, EUR, GBP…) או טקסט (Dollar, Euro).
+- אם הקבלה בשקלים (₪ / ש"ח / NIS) — החזר **"ILS"**.
+- אחרת החזר את **קוד המטבע הבינלאומי (ISO 4217)**, למשל "USD", "EUR", "GBP", "JPY".
+- **כל הסכומים בקבלה (total, items, מע"מ) הם במטבע הזה** — אל תמיר לשקלים, החזר את הערכים המקוריים במטבע המקור. ההמרה לשקלים תתבצע בנפרד.
+
 ### פריטים (items):
 - רשום כל שורת מוצר בנפרד עם **כל** עמודות השורה כפי שמופיעות בקבלה (כולל אגורות, ללא עיגול):
   - **item_name** = שם המוצר.
@@ -334,7 +361,7 @@ ${allowedCategories.join(' | ')}
   "total_amount": מספר כולל מע"מ (לא 0 אם יש מספרים בקבלה),
   "amount_before_vat": מספר לפני מע"מ (0 אם לא מופיע בקבלה),
   "vat_amount": סכום המע"מ (0 אם לא מופיע בקבלה),
-  "currency": "ILS",
+  "currency": "קוד מטבע — ILS אם שקלים, אחרת USD/EUR/GBP וכו'",
   "original_amount": total_amount,
   "items": [
     {
