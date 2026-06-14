@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useSettings } from '../hooks/useSettings'
-import { useTenant } from '../hooks/useTenant'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
@@ -58,7 +57,6 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
   const navigate = useNavigate()
   const location = useLocation()
   const { settings } = useSettings()
-  const { isSuperAdmin } = useTenant()
   const activeSection = NAV.find(s => s.to === location.pathname)?.id
   const [open, setOpen] = useState(() => ({ [activeSection || 'receipts']: true }))
 
@@ -149,16 +147,6 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
             </div>
           )
         })}
-
-        {/* SuperAdmin — customer management (platform owner only) */}
-        {isSuperAdmin && (
-          <button onClick={() => { navigate('/admin'); window.scrollTo({ top: 0 }); onNavigate?.() }}
-            style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', marginTop: 6, padding: '11px 12px', borderRadius: 10, cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right',
-              border: '1px dashed var(--accent)', background: location.pathname === '/admin' ? 'var(--accent-bg)' : 'transparent',
-              color: 'var(--accent)', fontSize: 15, fontWeight: location.pathname === '/admin' ? 700 : 600 }}>
-            <Building2 size={19} /> ניהול לקוחות
-          </button>
-        )}
       </nav>
 
       {/* Footer: connection + signout */}

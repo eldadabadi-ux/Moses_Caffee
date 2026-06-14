@@ -2,7 +2,6 @@ import { Suspense, lazy, useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
-import { TenantProvider } from './hooks/useTenant'
 import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import LoadingSpinner from './components/ui/LoadingSpinner'
@@ -11,7 +10,7 @@ import InstallBanner from './components/InstallBanner'
 import DailyBackup from './components/DailyBackup'
 import AIChatWidget from './components/AIChatWidget'
 import Sidebar from './components/Sidebar'
-import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu } from 'lucide-react'
+import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
 
 const LoginPage       = lazy(() => import('./pages/LoginPage'))
 const ReceiptsPage    = lazy(() => import('./pages/ReceiptsPage'))
@@ -19,7 +18,6 @@ const CategoriesPage  = lazy(() => import('./pages/CategoriesPage'))
 const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
 const SettingsPage    = lazy(() => import('./pages/SettingsPage'))
 const SuppliersPage   = lazy(() => import('./pages/SuppliersPage'))
-const AdminPage       = lazy(() => import('./pages/AdminPage'))
 
 // Reactive mobile detection
 function useIsMobile() {
@@ -128,7 +126,7 @@ function TopNav({ onSignOut }) {
 function BottomNav({ onSignOut }) {
   const location = useLocation()
   const navigate  = useNavigate()
-  const isCategories = location.pathname === '/categories'
+  const isSuppliers = location.pathname === '/suppliers'
 
   const tabStyle = (active) => ({
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px',
@@ -190,10 +188,10 @@ function BottomNav({ onSignOut }) {
         </button>
       </div>
 
-      {/* Categories */}
-      <Link to="/categories" style={tabStyle(isCategories)}>
-        <Tag size={21} />
-        <span>קטגוריות</span>
+      {/* Suppliers — quick access */}
+      <Link to="/suppliers" style={tabStyle(isSuppliers)}>
+        <Store size={21} />
+        <span>ספקים</span>
       </Link>
 
       {/* Settings */}
@@ -282,7 +280,6 @@ function AppShell() {
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/suppliers"  element={<SuppliersPage />} />
             <Route path="/settings"   element={<SettingsPage />} />
-            <Route path="/admin"      element={<AdminPage />} />
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
@@ -309,8 +306,7 @@ function AppShell() {
 export default function App() {
   return (
     <AuthProvider>
-      <TenantProvider>
-        <SettingsProvider>
+      <SettingsProvider>
         <BrowserRouter>
           <Toaster
             position="top-center"
@@ -326,8 +322,7 @@ export default function App() {
             </Routes>
           </Suspense>
         </BrowserRouter>
-        </SettingsProvider>
-      </TenantProvider>
+      </SettingsProvider>
     </AuthProvider>
   )
 }
