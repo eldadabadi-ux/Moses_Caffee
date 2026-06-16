@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { loadSuppliers, upsertSupplier, deleteSupplier, deriveVendorStats, waLink, telLink, gmailComposeLink } from '../lib/suppliers'
+import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { Store, Phone, Mail, MapPin, Pencil, Plus, Trash2, Package, CalendarDays, MessageCircle } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
@@ -16,15 +17,15 @@ export default function SuppliersPage() {
   const { user } = useAuth()
   const { settings } = useSettings()
   const isMobile = window.innerWidth < 768
-  const [receipts, setReceipts] = useState([])
-  const [contacts, setContacts] = useState([])
-  const [loading, setLoading]   = useState(true)
+  const [receipts, setReceipts] = useState(() => getCached('suppliers')?.receipts || [])
+  const [contacts, setContacts] = useState(() => getCached('suppliers')?.contacts || [])
+  const [loading, setLoading]   = useState(() => !hasCached('suppliers'))
   const [search, setSearch]     = useState('')
   const [edit, setEdit]         = useState(null)   // supplier being edited (form object) or null
 
   const loadAll = useCallback(async () => {
     if (!user) return
-    setLoading(true)
+    if (!hasCached('suppliers')) setLoading(true)
     try {
       const [{ data: recs }, sup] = await Promise.all([
         supabase.from('receipts').select('id, vendor_name, receipt_date, amount, category_text, items, archived_at, created_at').eq('user_id', user.id),
@@ -32,6 +33,7 @@ export default function SuppliersPage() {
       ])
       setReceipts(recs || [])
       setContacts(sup || [])
+      setCached('suppliers', { receipts: recs || [], contacts: sup || [] })
     } catch (e) { console.error('[suppliers] load', e?.message) }
     finally { setLoading(false) }
   }, [user])

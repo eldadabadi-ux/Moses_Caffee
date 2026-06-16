@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
+import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload } from '../lib/imageUtils'
 import { isPdf, pdfToImages } from '../lib/pdfUtils'
@@ -453,9 +454,9 @@ export default function ReceiptsPage() {
   const { user } = useAuth()
   const { settings, displayAmount, toggleVatDisplay } = useSettings()
   const isMobile = useIsMobile()
-  const [receipts, setReceipts]         = useState([])
+  const [receipts, setReceipts]         = useState(() => getCached('receipts') || [])
   const [categories, setCategories]     = useState([])
-  const [loading, setLoading]           = useState(true)
+  const [loading, setLoading]           = useState(() => !hasCached('receipts'))
   const [search, setSearch]             = useState('')
   const [filterFrom, setFilterFrom]     = useState('')
   const [filterTo, setFilterTo]         = useState('')
@@ -527,13 +528,14 @@ export default function ReceiptsPage() {
   useEffect(() => { loadCategories() }, [])
 
   async function loadData() {
-    setLoading(true)
+    if (!hasCached('receipts')) setLoading(true)
     try {
       const { data, error } = await supabase
         .from('receipts').select('*').is('archived_at', null)
         .order('receipt_date', { ascending: false })
       if (error) throw error
       setReceipts(data || [])
+      setCached('receipts', data || [])
     } catch (err) {
       toast.error('שגיאה בטעינה: ' + err.message)
     } finally { setLoading(false) }

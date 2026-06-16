@@ -39,8 +39,12 @@ if (isCacheBustReload) {
 if ('serviceWorker' in navigator) {
   let reloading = false
   function swReload() { if (reloading) return; reloading = true; cacheBustingReload() }
+  // On the first visit the SW installs and claims control, firing
+  // 'controllerchange' once — reloading there is a spurious full-page refresh.
+  // Only reload when an EXISTING controller is replaced (a genuine update).
+  const hadController = !!navigator.serviceWorker.controller
   navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'SW_RESET_RELOAD') swReload() })
-  navigator.serviceWorker.addEventListener('controllerchange', swReload)
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) swReload() })
   if (!isCacheBustReload) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {})

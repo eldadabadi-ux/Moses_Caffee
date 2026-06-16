@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
+import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
@@ -70,16 +71,16 @@ export default function DashboardPage() {
   // Amount of a receipt respecting the with/without-VAT display preference
   const amt = (r) => displayAmount(parseFloat(r.amount) || 0, r.amount_before_vat)
 
-  const [receipts,    setReceipts]    = useState([])
-  const [prevReceipts,setPrevReceipts]= useState([])
-  const [categories,  setCategories]  = useState([])
-  const [loading,     setLoading]     = useState(true)
+  const [receipts,    setReceipts]    = useState(() => getCached('dash:' + thisYear)?.receipts || [])
+  const [prevReceipts,setPrevReceipts]= useState(() => getCached('dash:' + thisYear)?.prevReceipts || [])
+  const [categories,  setCategories]  = useState(() => getCached('dash:' + thisYear)?.categories || [])
+  const [loading,     setLoading]     = useState(() => !hasCached('dash:' + thisYear))
   const [year,        setYear]        = useState(thisYear)
   const [compareYear, setCompareYear] = useState(null)
   const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
   const [distMode,    setDistMode]    = useState('cat') // distribution donut: 'cat' | 'vendor'
   const [selVendor,   setSelVendor]   = useState(null)  // highlighted vendor slice (local)
-  const [availYears,  setAvailYears]  = useState([thisYear])
+  const [availYears,  setAvailYears]  = useState(() => getCached('dash:' + thisYear)?.availYears || [thisYear])
   const [vendorA,     setVendorA]     = useState('')    // vendor comparison
   const [vendorB,     setVendorB]     = useState('')
   const [selProdsA,   setSelProdsA]   = useState([])    // products picked for vendor A
@@ -90,7 +91,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return
     async function load() {
-      setLoading(true)
+      if (!hasCached('dash:' + year)) setLoading(true)
       try {
         // Current year (include items for drill-down)
         const { data: recs } = await supabase
@@ -128,6 +129,10 @@ export default function DashboardPage() {
         setPrevReceipts(prevRecs || [])
         setCategories(cats || [])
         setAvailYears(years.length ? years : [thisYear])
+        setCached('dash:' + year, {
+          receipts: recs || [], prevReceipts: prevRecs || [],
+          categories: cats || [], availYears: years.length ? years : [thisYear],
+        })
       } catch (err) {
         console.error('Dashboard load error:', err)
       } finally { setLoading(false) }

@@ -4,6 +4,7 @@ import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { useAppUpdate } from './hooks/useAppUpdate'
+import { clearPageCache } from './lib/pageCache'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import MonthlyExportPrompt from './components/MonthlyExportPrompt'
 import InstallBanner from './components/InstallBanner'
@@ -239,6 +240,22 @@ function AppShell() {
     setSidebarOpen(o => { const n = !o; try { localStorage.setItem('moses_sidebar_open', n ? '1' : '0') } catch {} ; return n })
   }
 
+  // Preload all route chunks during idle time so switching tabs never waits on
+  // a lazy chunk download (the second cause of the blank "loading" flash).
+  useEffect(() => {
+    const preload = () => {
+      import('./pages/DashboardPage'); import('./pages/ReceiptsPage')
+      import('./pages/CategoriesPage'); import('./pages/SuppliersPage')
+      import('./pages/SettingsPage')
+    }
+    const ric = typeof window.requestIdleCallback === 'function'
+    const id = ric ? window.requestIdleCallback(preload, { timeout: 2500 }) : setTimeout(preload, 1500)
+    return () => { if (ric) { try { window.cancelIdleCallback(id) } catch {} } else clearTimeout(id) }
+  }, [])
+
+  // Drop cached page data on sign-out so a different account never sees it.
+  const handleSignOut = () => { clearPageCache(); signOut() }
+
   if (loading) return <LoadingSpinner />
   if (!user)   return <Navigate to="/login" replace />
 
@@ -248,7 +265,7 @@ function AppShell() {
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)', paddingInlineEnd: desktopSidebar ? SIDEBAR_W : 0, transition: 'padding-inline-end 200ms ease' }}>
       {/* Desktop: fixed sidebar (right, RTL), collapsible. Mobile: slim header + drawer. */}
-      {desktopSidebar && <Sidebar onSignOut={signOut} onCollapse={toggleSidebar} />}
+      {desktopSidebar && <Sidebar onSignOut={handleSignOut} onCollapse={toggleSidebar} />}
       {/* Desktop: floating "open" button when the sidebar is collapsed */}
       {!isMobile && !sidebarOpen && (
         <button onClick={toggleSidebar} aria-label="פתח תפריט"
@@ -260,7 +277,7 @@ function AppShell() {
       {isMobile && drawerOpen && (
         <>
           <div onClick={() => setDrawerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 199, background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(2px)' }} />
-          <Sidebar drawer onSignOut={signOut} onClose={() => setDrawerOpen(false)} onNavigate={() => setDrawerOpen(false)} />
+          <Sidebar drawer onSignOut={handleSignOut} onClose={() => setDrawerOpen(false)} onNavigate={() => setDrawerOpen(false)} />
         </>
       )}
 
@@ -286,7 +303,7 @@ function AppShell() {
       </main>
 
       {/* Bottom nav — mobile only (quick access; full nav is the drawer) */}
-      {isMobile && <BottomNav onSignOut={signOut} />}
+      {isMobile && <BottomNav onSignOut={handleSignOut} />}
 
       {/* End-of-month export reminder */}
       <MonthlyExportPrompt />

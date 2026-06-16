@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { recategorizeAll } from '../lib/recategorize'
 import toast from 'react-hot-toast'
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Tag, X, Check, RefreshCw } from 'lucide-react'
@@ -9,10 +10,10 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 
 export default function CategoriesPage() {
   const { user } = useAuth()
-  const [categories, setCategories] = useState([])
-  const [loading, setLoading]       = useState(true)
+  const [categories, setCategories] = useState(() => getCached('categories')?.categories || [])
+  const [loading, setLoading]       = useState(() => !hasCached('categories'))
   const [deleteId, setDeleteId]     = useState(null)
-  const [expanded, setExpanded]     = useState({})
+  const [expanded, setExpanded]     = useState(() => getCached('categories')?.expanded || {})
   const [editId, setEditId]         = useState(null)
   const [editName, setEditName]     = useState('')
   const [addingTo, setAddingTo]     = useState(null)
@@ -62,7 +63,7 @@ export default function CategoriesPage() {
   }
 
   async function load() {
-    setLoading(true)
+    if (!hasCached('categories')) setLoading(true)
     try {
       const { data, error } = await supabase
         .from('categories')
@@ -71,9 +72,10 @@ export default function CategoriesPage() {
       if (error) throw error
       const cats = data || []
       setCategories(cats)
-      const initExpanded = {}
-      cats.filter(c => c.level === 1).forEach(c => { initExpanded[c.id] = true })
+      const initExpanded = { ...(getCached('categories')?.expanded || {}) }
+      cats.filter(c => c.level === 1).forEach(c => { if (!(c.id in initExpanded)) initExpanded[c.id] = true })
       setExpanded(initExpanded)
+      setCached('categories', { categories: cats, expanded: initExpanded })
     } catch (err) {
       toast.error('שגיאה בטעינה: ' + err.message)
       setCategories([])
