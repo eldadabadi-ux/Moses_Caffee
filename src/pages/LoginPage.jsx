@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import toast from 'react-hot-toast'
@@ -45,6 +45,7 @@ export default function LoginPage() {
 
   const INPUT = { display: 'block', width: '100%', height: '44px', padding: '0 14px', borderRadius: '10px', border: '1.5px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '17px', fontFamily: 'var(--font-main)', outline: 'none', boxSizing: 'border-box' }
   const LINK = { background: 'none', border: 'none', color: 'var(--accent)', fontSize: '15px', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)', padding: '4px', marginTop: '2px' }
+  const FOOT = { color: 'var(--text-mute)', textDecoration: 'none', fontSize: '13.5px' }
 
   return (
     <div dir="rtl" style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: '16px', fontFamily: 'var(--font-main)' }}>
@@ -147,6 +148,13 @@ export default function LoginPage() {
             </button>
           </form>
         )}
+
+        {/* Legal footer */}
+        <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap', marginTop: 28 }}>
+          <Link to="/terms" style={FOOT}>תקנון</Link>
+          <Link to="/privacy" style={FOOT}>פרטיות</Link>
+          <Link to="/accessibility" style={FOOT}>נגישות</Link>
+        </div>
       </div>
     </div>
   )

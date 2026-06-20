@@ -3,6 +3,7 @@ import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
 import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check, RefreshCw, Database, Upload, ScanLine, KeyRound, ShieldCheck, AlertTriangle } from 'lucide-react'
 import Modal from '../components/ui/Modal'
+import { Link } from 'react-router-dom'
 import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import { useInstall } from '../hooks/useInstall'
@@ -602,6 +603,13 @@ export default function SettingsPage() {
             סכום ÷ (1 + {settings.vatRate}%)
           </code>
         </div>
+      </div>
+
+      {/* Legal links */}
+      <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', paddingTop: 4, fontSize: 13.5 }}>
+        <Link to="/terms" style={{ color: 'var(--text-mute)', textDecoration: 'none' }}>תקנון</Link>
+        <Link to="/privacy" style={{ color: 'var(--text-mute)', textDecoration: 'none' }}>מדיניות פרטיות</Link>
+        <Link to="/accessibility" style={{ color: 'var(--text-mute)', textDecoration: 'none' }}>הצהרת נגישות</Link>
       </div>
 
     </div>

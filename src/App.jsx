@@ -10,11 +10,15 @@ import MonthlyExportPrompt from './components/MonthlyExportPrompt'
 import InstallBanner from './components/InstallBanner'
 import DailyBackup from './components/DailyBackup'
 import AIChatWidget from './components/AIChatWidget'
+import CookieConsent from './components/CookieConsent'
 import Sidebar from './components/Sidebar'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
 
 const LoginPage          = lazy(() => import('./pages/LoginPage'))
 const ResetPasswordPage  = lazy(() => import('./pages/ResetPasswordPage'))
+const PrivacyPage        = lazy(() => import('./pages/PrivacyPage'))
+const TermsPage          = lazy(() => import('./pages/TermsPage'))
+const AccessibilityPage  = lazy(() => import('./pages/AccessibilityPage'))
 const ReceiptsPage    = lazy(() => import('./pages/ReceiptsPage'))
 const CategoriesPage  = lazy(() => import('./pages/CategoriesPage'))
 const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
@@ -337,9 +341,13 @@ export default function App() {
             <Routes>
               <Route path="/login"          element={<LoginPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/privacy"        element={<PrivacyPage />} />
+              <Route path="/terms"          element={<TermsPage />} />
+              <Route path="/accessibility"  element={<AccessibilityPage />} />
               <Route path="/*"              element={<AppShell />} />
             </Routes>
           </Suspense>
+          <CookieConsent />
         </BrowserRouter>
       </SettingsProvider>
     </AuthProvider>
