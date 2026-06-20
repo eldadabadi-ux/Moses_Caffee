@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
-import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check, RefreshCw, Database, Upload, ScanLine } from 'lucide-react'
+import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check, RefreshCw, Database, Upload, ScanLine, KeyRound, ShieldCheck, AlertTriangle } from 'lucide-react'
+import Modal from '../components/ui/Modal'
 import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import { useInstall } from '../hooks/useInstall'
@@ -15,7 +16,7 @@ const AUTO_BACKUP_KEY = 'moses_auto_backup'
 
 export default function SettingsPage() {
   const { settings, updateSettings, saving } = useSettings()
-  const { user } = useAuth()
+  const { user, updatePassword, deleteAccount } = useAuth()
   const { canInstall, promptInstall, isIOS, isStandalone } = useInstall()
   const [vatInput, setVatInput] = useState(String(settings.vatRate))
   const [changed, setChanged] = useState(false)
@@ -35,6 +36,40 @@ export default function SettingsPage() {
   const [restoreBusy, setRestoreBusy] = useState(false)
   const [lastBackup, setLastBackup] = useState(() => { try { return localStorage.getItem(LAST_BACKUP_KEY) } catch { return null } })
   const [autoBackup, setAutoBackup] = useState(() => { try { return (localStorage.getItem(AUTO_BACKUP_KEY) ?? '1') === '1' } catch { return true } })
+
+  // Account security
+  const [pwNew, setPwNew]         = useState('')
+  const [pwConfirm, setPwConfirm] = useState('')
+  const [pwBusy, setPwBusy]       = useState(false)
+  const [delOpen, setDelOpen]     = useState(false)
+  const [delText, setDelText]     = useState('')
+  const [delBusy, setDelBusy]     = useState(false)
+
+  async function changePassword() {
+    if (pwBusy) return
+    if (pwNew.length < 8) { toast.error('הסיסמה חייבת להיות לפחות 8 תווים'); return }
+    if (pwNew !== pwConfirm) { toast.error('הסיסמאות אינן תואמות'); return }
+    setPwBusy(true)
+    try {
+      await updatePassword(pwNew)
+      setPwNew(''); setPwConfirm('')
+      toast.success('הסיסמה עודכנה ✓')
+    } catch (err) {
+      toast.error(err?.message || 'עדכון הסיסמה נכשל')
+    } finally { setPwBusy(false) }
+  }
+
+  async function confirmDelete() {
+    if (delBusy) return
+    setDelBusy(true)
+    try {
+      await deleteAccount()
+      // deleteAccount signs out → auth state change redirects to /login.
+    } catch (err) {
+      toast.error(err?.message || 'מחיקת החשבון נכשלה')
+      setDelBusy(false)
+    }
+  }
 
   async function doRescan() {
     if (rescanBusy) return
@@ -482,6 +517,79 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* Account security Card */}
+      <div id="set-account" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
+        <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <ShieldCheck size={17} color="var(--accent)" />
+          <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>אבטחת חשבון</span>
+        </div>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {/* Change password */}
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14.5, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 10 }}>
+              <KeyRound size={15} color="var(--accent)" /> שינוי סיסמה
+            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <input type="password" value={pwNew} onChange={e => setPwNew(e.target.value)} placeholder="סיסמה חדשה (לפחות 8 תווים)" autoComplete="new-password" style={FS} />
+              <input type="password" value={pwConfirm} onChange={e => setPwConfirm(e.target.value)} placeholder="אימות סיסמה חדשה" autoComplete="new-password" style={FS} />
+              <button onClick={changePassword} disabled={pwBusy || !pwNew || !pwConfirm}
+                style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 8, border: 'none', background: (pwBusy || !pwNew || !pwConfirm) ? 'var(--panel-2)' : 'var(--accent)', color: (pwBusy || !pwNew || !pwConfirm) ? 'var(--text-mute)' : 'white', fontSize: 14.5, fontWeight: 600, cursor: (pwBusy || !pwNew || !pwConfirm) ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
+                <KeyRound size={15} /> {pwBusy ? 'מעדכן…' : 'עדכן סיסמה'}
+              </button>
+            </div>
+          </div>
+
+          {/* Danger zone — delete account */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 18 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14.5, fontWeight: 600, color: 'var(--danger)', marginBottom: 8 }}>
+              <AlertTriangle size={15} /> מחיקת חשבון
+            </label>
+            <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+              מחיקת החשבון תמחק לצמיתות את כל הקבלות, הקטגוריות, הספקים וההגדרות שלך — ללא אפשרות שחזור.
+            </p>
+            <button onClick={() => { setDelText(''); setDelOpen(true) }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 16px', borderRadius: 8, border: '1px solid var(--danger)', background: 'var(--panel)', color: 'var(--danger)', fontSize: 14.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+              <Trash2 size={15} /> מחק את החשבון שלי
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Delete-account confirmation (type-to-confirm) */}
+      <Modal isOpen={delOpen} onClose={() => { if (!delBusy) setDelOpen(false) }} title="מחיקת חשבון לצמיתות" size="sm">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', gap: 10, padding: '12px 14px', background: 'var(--danger-tint, rgba(220,38,38,0.08))', border: '1px solid var(--danger)', borderRadius: 10 }}>
+            <AlertTriangle size={18} color="var(--danger)" style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.6 }}>
+              פעולה זו <strong>בלתי הפיכה</strong>. כל הנתונים שלך יימחקו לצמיתות והגישה לחשבון תיחסם מיד.
+            </div>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13.5, color: 'var(--text-dim)', marginBottom: 7 }}>
+              לאישור, הקלד את האימייל שלך: <strong dir="ltr">{user?.email}</strong>
+            </label>
+            <input value={delText} onChange={e => setDelText(e.target.value)} dir="ltr" placeholder={user?.email} style={FS} />
+          </div>
+          {(() => {
+            const ready = delText.trim().toLowerCase() === (user?.email || '').toLowerCase()
+            return (
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
+                <button onClick={() => setDelOpen(false)} disabled={delBusy}
+                  style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-dim)', fontSize: 14.5, cursor: delBusy ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
+                  ביטול
+                </button>
+                <button onClick={confirmDelete} disabled={delBusy || !ready}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', borderRadius: 8, border: 'none',
+                    background: (delBusy || !ready) ? 'var(--panel-2)' : 'var(--danger)', color: (delBusy || !ready) ? 'var(--text-mute)' : 'white',
+                    fontSize: 14.5, fontWeight: 700, cursor: (delBusy || !ready) ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
+                  <Trash2 size={15} /> {delBusy ? 'מוחק…' : 'מחק לצמיתות'}
+                </button>
+              </div>
+            )
+          })()}
+        </div>
+      </Modal>
 
       {/* Info box */}
       <div style={{ display: 'flex', gap: 10, padding: '14px 16px', background: 'var(--accent-bg)', border: '1px solid var(--accent-tint-border)', borderRadius: 12, fontSize: 14, color: 'var(--text-dim)', lineHeight: 1.6 }}>

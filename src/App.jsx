@@ -13,7 +13,8 @@ import AIChatWidget from './components/AIChatWidget'
 import Sidebar from './components/Sidebar'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
 
-const LoginPage       = lazy(() => import('./pages/LoginPage'))
+const LoginPage          = lazy(() => import('./pages/LoginPage'))
+const ResetPasswordPage  = lazy(() => import('./pages/ResetPasswordPage'))
 const ReceiptsPage    = lazy(() => import('./pages/ReceiptsPage'))
 const CategoriesPage  = lazy(() => import('./pages/CategoriesPage'))
 const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
@@ -334,8 +335,9 @@ export default function App() {
           />
           <Suspense fallback={<LoadingSpinner />}>
             <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              <Route path="/*"     element={<AppShell />} />
+              <Route path="/login"          element={<LoginPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
+              <Route path="/*"              element={<AppShell />} />
             </Routes>
           </Suspense>
         </BrowserRouter>
