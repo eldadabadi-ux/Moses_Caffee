@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate 
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import { SettingsProvider, useSettings } from './hooks/useSettings'
+import { TenantProvider, useBrand } from './hooks/useTenant'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import { clearPageCache } from './lib/pageCache'
 import LoadingSpinner from './components/ui/LoadingSpinner'
@@ -62,9 +63,9 @@ function UpdateBanner() {
 
 // ── Brand logo (round) — business logo or ₪ placeholder ──────────────────────
 function BrandLogo({ size = 30 }) {
-  const { settings } = useSettings()
-  if (settings.logo) {
-    return <img src={settings.logo} alt="לוגו" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }} />
+  const { logo } = useBrand()
+  if (logo) {
+    return <img src={logo} alt="לוגו" style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }} />
   }
   return (
     <div style={{ width: size, height: size, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -76,7 +77,7 @@ function BrandLogo({ size = 30 }) {
 // ── Top navigation (desktop ≥ 768px) ─────────────────────────────────────────
 function TopNav({ onSignOut }) {
   const location = useLocation()
-  const { settings } = useSettings()
+  const { businessName } = useBrand()
   const isCategories = location.pathname === '/categories'
 
   const navBtn = (active) => ({
@@ -98,7 +99,7 @@ function TopNav({ onSignOut }) {
       {/* Logo (top-right in RTL) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <BrandLogo size={34} />
-        <span style={{ fontWeight: 700, fontSize: '17px', color: 'var(--text)' }}>{settings.businessName || 'מנהל קבלות'}</span>
+        <span style={{ fontWeight: 700, fontSize: '17px', color: 'var(--text)' }}>{businessName}</span>
       </div>
       {/* Nav links */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -211,7 +212,7 @@ function BottomNav({ onSignOut }) {
 
 // ── Mobile header — slim bar with hamburger + logo + business name ───────────
 function MobileHeader({ onMenu }) {
-  const { settings } = useSettings()
+  const { businessName } = useBrand()
   return (
     <header style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -223,7 +224,7 @@ function MobileHeader({ onMenu }) {
         <Menu size={24} />
       </button>
       <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
-        <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text)' }}>{settings.businessName || 'מנהל קבלות'}</span>
+        <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--text)' }}>{businessName}</span>
         <BrandLogo size={32} />
       </div>
     </header>
@@ -329,6 +330,7 @@ export default function App() {
   return (
     <AuthProvider>
       <SettingsProvider>
+        <TenantProvider>
         <BrowserRouter>
           <Toaster
             position="top-center"
@@ -349,6 +351,7 @@ export default function App() {
           </Suspense>
           <CookieConsent />
         </BrowserRouter>
+        </TenantProvider>
       </SettingsProvider>
     </AuthProvider>
   )
