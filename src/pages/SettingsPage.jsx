@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
+import { useTenant } from '../hooks/useTenant'
 import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check, RefreshCw, Database, Upload, ScanLine, KeyRound, ShieldCheck, AlertTriangle } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import { Link } from 'react-router-dom'
@@ -18,6 +19,7 @@ const AUTO_BACKUP_KEY = 'moses_auto_backup'
 export default function SettingsPage() {
   const { settings, updateSettings, saving } = useSettings()
   const { user, updatePassword, deleteAccount } = useAuth()
+  const { org, updateOrg } = useTenant()
   const { canInstall, promptInstall, isIOS, isStandalone } = useInstall()
   const [vatInput, setVatInput] = useState(String(settings.vatRate))
   const [changed, setChanged] = useState(false)
@@ -142,6 +144,7 @@ export default function SettingsPage() {
     try {
       const dataUrl = await fileToSquareLogo(file, 400, 0.92)
       await updateSettings({ logo: dataUrl })
+      if (org) await updateOrg({ logo: dataUrl })
       toast.success('הלוגו נשמר ✓')
     } catch {
       toast.error('שגיאה בטעינת הלוגו')
@@ -150,6 +153,7 @@ export default function SettingsPage() {
 
   async function saveName() {
     await updateSettings({ businessName: nameInput.trim() || 'מנהל קבלות' })
+    if (org) await updateOrg({ business_name: nameInput.trim() || null })
     setNameChanged(false)
     toast.success('שם העסק נשמר ✓')
   }
@@ -284,7 +288,7 @@ export default function SettingsPage() {
                   <ImageIcon size={15} /> {settings.logo ? 'החלף לוגו' : 'העלה לוגו'}
                 </button>
                 {settings.logo && (
-                  <button onClick={() => updateSettings({ logo: null })}
+                  <button onClick={() => { updateSettings({ logo: null }); if (org) updateOrg({ logo: null }) }}
                     style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--danger)', fontSize: 14.5, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
                     <Trash2 size={15} /> הסר
                   </button>

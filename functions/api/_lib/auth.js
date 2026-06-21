@@ -45,6 +45,32 @@ export async function requireUser(request, env) {
   return user
 }
 
+// Resolve the organization a user belongs to (service-role lookup of their first
+// membership). Returns null if multi-tenancy isn't set up yet or the user has no
+// membership — callers then fall back to user_id scoping.
+export async function resolveOrgId(userId, env) {
+  const sk = env.SUPABASE_SERVICE_ROLE_KEY
+  if (!sk || !userId) return null
+  const url = env.VITE_SUPABASE_URL || env.SUPABASE_URL || FALLBACK_SUPABASE_URL
+  try {
+    const res = await fetch(`${url}/rest/v1/memberships?user_id=eq.${userId}&select=org_id&limit=1`, {
+      headers: { apikey: sk, Authorization: `Bearer ${sk}` },
+    })
+    if (!res.ok) return null
+    const rows = await res.json()
+    return rows?.[0]?.org_id || null
+  } catch {
+    return null
+  }
+}
+
+// Like requireUser, plus the user's resolved org_id (may be null pre-migration).
+export async function requireMember(request, env) {
+  const user = await requireUser(request, env)
+  const org_id = await resolveOrgId(user.user_id, env)
+  return { ...user, org_id }
+}
+
 export function wrapAuthErrors(handler) {
   return async (context) => {
     try {

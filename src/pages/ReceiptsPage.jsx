@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useTenant } from '../hooks/useTenant'
 import { useSettings } from '../hooks/useSettings'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { downloadFile } from '../lib/downloadFile'
@@ -454,6 +455,7 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 1
 // ── Main ReceiptsPage ─────────────────────────────────────────────────────────
 export default function ReceiptsPage() {
   const { user } = useAuth()
+  const { orgId } = useTenant()
   const { settings, displayAmount, toggleVatDisplay } = useSettings()
   const isMobile = useIsMobile()
   const [receipts, setReceipts]         = useState(() => getCached('receipts') || [])
@@ -785,7 +787,7 @@ export default function ReceiptsPage() {
       let cat = find(nm, level, parentId)
       if (cat) return cat.id
       const { data: created } = await supabase.from('categories')
-        .insert({ user_id: user.id, name: nm, level, parent_id: parentId || null,
+        .insert({ user_id: user.id, org_id: orgId || null, name: nm, level, parent_id: parentId || null,
                   sort_order: cats.filter(c => c.level === level && c.parent_id === (parentId||null)).length })
         .select().single()
       if (created) { cats.push(created); return created.id }
@@ -867,10 +869,10 @@ export default function ReceiptsPage() {
           pages: pages.length, ...(extraPages.length ? { extra_pages: extraPages } : {}),
           ...(fx ? { currency: reviewCurrency, fx_rate: rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
       }
-      let { error } = await supabase.from('receipts').insert({ ...base, amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate })
+      let { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate })
       // Graceful fallback if VAT migration hasn't run yet — ai_summary keeps the values
       if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').insert(base))
+        ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null }))
       }
       if (error) throw error
       toast.success(fx ? `קבלה נשמרה! (הומרה לשקלים לפי שער יציג)` : 'קבלה נשמרה!')
@@ -905,9 +907,9 @@ export default function ReceiptsPage() {
       toast.success('קבלה עודכנה')
       setReceipts(prev => prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols } : r))
     } else {
-      let resp = await supabase.from('receipts').insert({ ...payload, ...vatCols }).select().single()
+      let resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols }).select().single()
       if (resp.error && /amount_before_vat|vat_amount|vat_rate/.test(resp.error.message || '')) {
-        resp = await supabase.from('receipts').insert(payload).select().single()
+        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null }).select().single()
       }
       if (resp.error) { toast.error('שגיאה בשמירה'); return }
       toast.success('קבלה נשמרה')

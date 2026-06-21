@@ -49,7 +49,18 @@ export function TenantProvider({ children }) {
 
   useEffect(() => { setLoading(true); load() }, [load])
 
-  const value = { org, orgId: org?.id || null, role, features: org?.features || {}, loading, refresh: load }
+  // Update org-level fields (branding, etc.). RLS (update_own_orgs) restricts this
+  // to the user's own org. No-op when multi-tenancy isn't set up.
+  const updateOrg = useCallback(async (patch) => {
+    if (!org?.id) return
+    try {
+      const { data, error } = await supabase
+        .from('organizations').update(patch).eq('id', org.id).select().maybeSingle()
+      if (!error && data) setOrg(data)
+    } catch { /* ignore — settings still saved per-user */ }
+  }, [org?.id])
+
+  const value = { org, orgId: org?.id || null, role, features: org?.features || {}, loading, refresh: load, updateOrg }
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>
 }
 

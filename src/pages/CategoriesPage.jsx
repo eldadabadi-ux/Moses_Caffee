@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useTenant } from '../hooks/useTenant'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { recategorizeAll } from '../lib/recategorize'
 import toast from 'react-hot-toast'
@@ -10,6 +11,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 
 export default function CategoriesPage() {
   const { user } = useAuth()
+  const { orgId } = useTenant()
   const [categories, setCategories] = useState(() => getCached('categories')?.categories || [])
   const [loading, setLoading]       = useState(() => !hasCached('categories'))
   const [deleteId, setDeleteId]     = useState(null)
@@ -90,6 +92,7 @@ export default function CategoriesPage() {
     try {
       const { error } = await supabase.from('categories').insert({
         user_id:    user.id,
+        org_id:     orgId || null,
         name:       newName.trim(),
         parent_id:  parentId || null,
         level:      level || 1,

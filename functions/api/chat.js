@@ -10,7 +10,7 @@
  * Anthropic Claude — same model/pattern as the CRM bot.
  */
 
-import { requireUser, wrapAuthErrors } from './_lib/auth.js'
+import { requireMember, wrapAuthErrors } from './_lib/auth.js'
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS   = 2048
@@ -224,7 +224,7 @@ ${treeBlock}
 
 // ── handler ─────────────────────────────────────────────────────────────────
 export const onRequestPost = wrapAuthErrors(async (context) => {
-  const user = await requireUser(context.request, context.env)
+  const user = await requireMember(context.request, context.env)
   const CORS = corsHeaders(context.request, context.env)
   const { ANTHROPIC_API_KEY, SUPABASE_SERVICE_ROLE_KEY: sk } = context.env
   const SUPABASE_URL = getSupabaseUrl(context.env)
@@ -242,9 +242,13 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   let receipts = [], categories = [], suppliers = []
   if (sk) {
     const sbGet = makeSbGet(SUPABASE_URL, sk)
+    // Org-scoped when multi-tenancy is set up (so the bot sees all of the org's
+    // data, not just the current member's); falls back to user_id otherwise.
+    // suppliers has no org_id column yet → stays user-scoped.
+    const scope = user.org_id ? `org_id=eq.${user.org_id}` : `user_id=eq.${user.user_id}`
     const [r, c, s] = await Promise.allSettled([
-      sbGet(`receipts?user_id=eq.${user.user_id}&select=id,vendor_name,receipt_date,amount,currency,category_text,items,ai_summary,archived_at,created_at&order=receipt_date.desc.nullslast`),
-      sbGet(`categories?user_id=eq.${user.user_id}&select=id,name,parent_id,level&order=level,sort_order`),
+      sbGet(`receipts?${scope}&select=id,vendor_name,receipt_date,amount,currency,category_text,items,ai_summary,archived_at,created_at&order=receipt_date.desc.nullslast`),
+      sbGet(`categories?${scope}&select=id,name,parent_id,level&order=level,sort_order`),
       sbGet(`suppliers?user_id=eq.${user.user_id}&select=name,phone,email,address,whatsapp,supplies,notes`),
     ])
     receipts   = r.status === 'fulfilled' ? (r.value || []) : []
