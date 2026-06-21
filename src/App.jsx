@@ -25,6 +25,7 @@ const CategoriesPage  = lazy(() => import('./pages/CategoriesPage'))
 const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
 const SettingsPage    = lazy(() => import('./pages/SettingsPage'))
 const SuppliersPage   = lazy(() => import('./pages/SuppliersPage'))
+const AdminPage       = lazy(() => import('./pages/AdminPage'))
 
 // Reactive mobile detection
 function useIsMobile() {
@@ -303,6 +304,7 @@ function AppShell() {
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/suppliers"  element={<SuppliersPage />} />
             <Route path="/settings"   element={<SettingsPage />} />
+            <Route path="/admin"      element={<AdminPage />} />
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

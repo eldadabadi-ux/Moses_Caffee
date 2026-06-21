@@ -609,6 +609,13 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Owner-only: customer management */}
+      {(user?.email || '').toLowerCase() === 'eldadabadi@gmail.com' && (
+        <Link to="/admin" style={{ display:'flex', alignItems:'center', gap:8, padding:'14px 18px', borderRadius:14, border:'1px solid var(--accent)', background:'var(--accent-bg)', color:'var(--accent)', textDecoration:'none', fontSize:15, fontWeight:700, fontFamily:'var(--font-main)' }}>
+          <ShieldCheck size={18} /> ניהול לקוחות (אדמין) — הקמת עסק חדש
+        </Link>
+      )}
+
       {/* Legal links */}
       <div style={{ display: 'flex', gap: 16, justifyContent: 'center', flexWrap: 'wrap', paddingTop: 4, fontSize: 13.5 }}>
         <Link to="/terms" style={{ color: 'var(--text-mute)', textDecoration: 'none' }}>תקנון</Link>
