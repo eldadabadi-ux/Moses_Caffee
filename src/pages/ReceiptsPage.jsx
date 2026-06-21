@@ -14,7 +14,9 @@ import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
   CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
+  Archive, RotateCcw, AlertTriangle,
 } from 'lucide-react'
+import { deleteReceiptFile } from '../lib/storage'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -462,7 +464,13 @@ export default function ReceiptsPage() {
   const [filterTo, setFilterTo]         = useState('')
   const [showFilters, setShowFilters]   = useState(false) // mobile: collapse filters
   const [showModal, setShowModal]       = useState(false)
-  const [deleteId, setDeleteId]         = useState(null)
+  const [deleteId, setDeleteId]         = useState(null)   // → archive (soft)
+  const [archiveView, setArchiveView]   = useState(false)
+  const [archived, setArchived]         = useState([])
+  const [archivedLoading, setArchivedLoading] = useState(false)
+  const [permDeleteId, setPermDeleteId] = useState(null)   // permanent delete (from archive)
+  const [permText, setPermText]         = useState('')
+  const [permBusy, setPermBusy]         = useState(false)
   const [editId, setEditId]             = useState(null)
   const [lightboxUrl, setLightboxUrl]   = useState(null)
   const [showCamera, setShowCamera]     = useState(false)
@@ -548,12 +556,12 @@ export default function ReceiptsPage() {
     } catch { setCategories([]) }
   }
 
-  const filtered = useMemo(() => receipts.filter(r => {
+  const filtered = useMemo(() => (archiveView ? archived : receipts).filter(r => {
     const q = search.toLowerCase()
     const matchSearch = !q || r.vendor_name?.toLowerCase().includes(q) || r.category_text?.toLowerCase().includes(q)
     const date = r.receipt_date || ''
     return matchSearch && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
-  }), [receipts, search, filterFrom, filterTo])
+  }), [archiveView, archived, receipts, search, filterFrom, filterTo])
 
   // Total respects the with/without-VAT display preference
   // VAT-aware per-receipt helpers — prefer the exact values scanned from the
@@ -908,12 +916,60 @@ export default function ReceiptsPage() {
     setShowModal(false); setEditId(null); resetForm()
   }
 
-  async function deleteReceipt() {
-    const { error } = await supabase.from('receipts').delete().eq('id', deleteId)
+  // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
+  // from the archive view, behind a type-to-confirm step.
+  async function archiveReceipt() {
+    const { error } = await supabase.from('receipts').update({ archived_at: new Date().toISOString() }).eq('id', deleteId)
     if (error) { toast.error('שגיאה'); return }
-    toast.success('קבלה נמחקה')
-    setReceipts(prev => prev.filter(r => r.id !== deleteId))
+    toast.success('הקבלה הועברה לארכיון')
+    const next = receipts.filter(r => r.id !== deleteId)
+    setReceipts(next); setCached('receipts', next)
     setDeleteId(null)
+  }
+
+  async function loadArchived() {
+    setArchivedLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('receipts').select('*').not('archived_at', 'is', null)
+        .order('archived_at', { ascending: false })
+      if (error) throw error
+      setArchived(data || [])
+    } catch (err) {
+      toast.error('שגיאה בטעינת הארכיון: ' + (err?.message || ''))
+    } finally { setArchivedLoading(false) }
+  }
+
+  function toggleArchiveView() {
+    setArchiveView(v => {
+      const nv = !v
+      if (nv) loadArchived()
+      return nv
+    })
+  }
+
+  async function restoreReceipt(id) {
+    const { error } = await supabase.from('receipts').update({ archived_at: null }).eq('id', id)
+    if (error) { toast.error('שגיאה'); return }
+    toast.success('הקבלה שוחזרה')
+    setArchived(prev => prev.filter(r => r.id !== id))
+    loadData()  // refresh the active list + cache
+  }
+
+  async function permanentDelete() {
+    if (permBusy || !permDeleteId) return
+    setPermBusy(true)
+    try {
+      const rec = archived.find(r => r.id === permDeleteId)
+      const { error } = await supabase.from('receipts').delete().eq('id', permDeleteId)
+      if (error) throw error
+      if (rec?.storage_path) { try { await deleteReceiptFile(rec.storage_path) } catch {} }
+      toast.success('הקבלה נמחקה לצמיתות')
+      setArchived(prev => prev.filter(r => r.id !== permDeleteId))
+      setPermDeleteId(null); setPermText('')
+    } catch (err) {
+      toast.error('שגיאה במחיקה: ' + (err?.message || ''))
+    } finally { setPermBusy(false) }
   }
 
   function resetForm() {
@@ -1017,6 +1073,11 @@ export default function ReceiptsPage() {
           <div style={{ flex:1 }}>
             <SearchInput value={search} onChange={setSearch} placeholder="חיפוש לפי ספק / קטגוריה..." />
           </div>
+          {/* Archive view toggle */}
+          <button onClick={toggleArchiveView} title={archiveView ? 'חזרה לקבלות' : 'ארכיון'}
+            style={{ display:'flex', alignItems:'center', gap:'6px', height:36, padding: isMobile ? '0 10px' : '0 14px', background: archiveView ? 'var(--accent-bg)' : 'var(--panel)', border:`1px solid ${archiveView ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--r-btn)', cursor:'pointer', color: archiveView ? 'var(--accent)' : 'var(--text-mute)', fontFamily:'var(--font-main)', fontSize:'13px', fontWeight:600, flexShrink:0, whiteSpace:'nowrap' }}>
+            <Archive size={16} />{!isMobile && (archiveView ? 'הצג קבלות' : 'ארכיון')}
+          </button>
           {/* On mobile: toggle button for date filters */}
           {isMobile && (
             <button
@@ -1048,7 +1109,7 @@ export default function ReceiptsPage() {
       </div>
 
       {/* ── Summary: paid / VAT / before-VAT ─────────────────────────────────── */}
-      {filtered.length > 0 && (
+      {!archiveView && filtered.length > 0 && (
         <div style={{ display:'flex', alignItems:'stretch', gap:'10px', flexWrap:'wrap' }}>
           {/* Total paid (with VAT) — primary */}
           <div style={{ display:'flex', flexDirection:'column', gap:'2px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 16px' : '12px 20px', boxShadow:'var(--shadow-card)' }}>
@@ -1084,9 +1145,17 @@ export default function ReceiptsPage() {
       {/* ── Receipt list ─────────────────────────────────────────────────────── */}
       {filtered.length === 0 ? (
         <div style={{ textAlign:'center', padding:'56px 16px', color:'var(--text-mute)' }}>
-          <Receipt size={40} style={{ margin:'0 auto 12px', display:'block', opacity:0.3 }} />
-          <p style={{ fontWeight:600, color:'var(--text)', fontSize:'15px' }}>{receipts.length === 0 ? 'אין קבלות עדיין' : 'אין תוצאות לסינון הנוכחי'}</p>
-          <p style={{ fontSize:'13px', marginTop:'6px' }}>{receipts.length === 0 ? 'לחץ על כפתור המצלמה כדי לסרוק קבלה' : 'שנה את מסנני החיפוש'}</p>
+          {archiveView
+            ? <Archive size={40} style={{ margin:'0 auto 12px', display:'block', opacity:0.3 }} />
+            : <Receipt size={40} style={{ margin:'0 auto 12px', display:'block', opacity:0.3 }} />}
+          <p style={{ fontWeight:600, color:'var(--text)', fontSize:'15px' }}>
+            {archiveView ? (archivedLoading ? 'טוען ארכיון…' : 'הארכיון ריק')
+              : (receipts.length === 0 ? 'אין קבלות עדיין' : 'אין תוצאות לסינון הנוכחי')}
+          </p>
+          <p style={{ fontSize:'13px', marginTop:'6px' }}>
+            {archiveView ? 'קבלות שתמחק יופיעו כאן — ניתן לשחזר או למחוק לצמיתות'
+              : (receipts.length === 0 ? 'לחץ על כפתור המצלמה כדי לסרוק קבלה' : 'שנה את מסנני החיפוש')}
+          </p>
         </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
@@ -1129,9 +1198,18 @@ export default function ReceiptsPage() {
                     לפני מע"מ {fmtILS(amtBefore(r))}
                   </span>
                 </div>
-                {/* Action buttons — slightly larger on mobile for touch */}
-                <button onClick={() => openEdit(r)} style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Pencil size={14} /></button>
-                <button onClick={() => setDeleteId(r.id)} style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='#fef2f2';e.currentTarget.style.color='var(--danger)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><Trash2 size={14} /></button>
+                {/* Action buttons — archive view shows restore + permanent delete */}
+                {archiveView ? (
+                  <>
+                    <button onClick={() => restoreReceipt(r.id)} title="שחזר" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='var(--accent-bg)';e.currentTarget.style.color='var(--accent)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><RotateCcw size={15} /></button>
+                    <button onClick={() => { setPermText(''); setPermDeleteId(r.id) }} title="מחק לצמיתות" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--danger)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='#fef2f2'}} onMouseLeave={e=>{e.currentTarget.style.background='none'}}><Trash2 size={15} /></button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => openEdit(r)} title="עריכה" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Pencil size={14} /></button>
+                    <button onClick={() => setDeleteId(r.id)} title="העבר לארכיון" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='var(--accent-bg)';e.currentTarget.style.color='var(--accent)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><Archive size={14} /></button>
+                  </>
+                )}
               </div>
             </div>
           ))}
@@ -1370,8 +1448,39 @@ export default function ReceiptsPage() {
         <ExportDialog receipts={filtered} totalAmount={totalAmount} filterFrom={filterFrom} filterTo={filterTo} vatRate={vatRate} onClose={() => setShowExport(false)} />
       )}
 
-      {/* ── Confirm delete ───────────────────────────────────────────────────────── */}
-      <ConfirmDialog isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={deleteReceipt} title="מחיקת קבלה" message="האם למחוק את הקבלה? לא ניתן לשחזר." />
+      {/* ── Archive (soft delete) — recoverable ──────────────────────────────────── */}
+      <ConfirmDialog isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={archiveReceipt}
+        title="העברה לארכיון"
+        message="הקבלה תועבר לארכיון. תוכל לשחזר אותה או למחוק לצמיתות מתוך הארכיון."
+        confirmText="העבר לארכיון" variant="primary" />
+
+      {/* ── Permanent delete (from archive) — type-to-confirm ────────────────────── */}
+      <Modal isOpen={!!permDeleteId} onClose={() => { if (!permBusy) { setPermDeleteId(null); setPermText('') } }} title="מחיקה לצמיתות" size="sm">
+        <div style={{ display:'flex', flexDirection:'column', gap:14 }} dir="rtl">
+          <div style={{ display:'flex', gap:10, padding:'12px 14px', background:'var(--danger-tint, rgba(220,38,38,0.08))', border:'1px solid var(--danger)', borderRadius:10 }}>
+            <AlertTriangle size={18} color="var(--danger)" style={{ flexShrink:0, marginTop:1 }} />
+            <div style={{ fontSize:14, color:'var(--text)', lineHeight:1.6 }}>
+              פעולה זו <strong>בלתי הפיכה</strong>. הקבלה והקובץ שלה יימחקו לצמיתות ולא ניתן יהיה לשחזר.
+            </div>
+          </div>
+          <div>
+            <label style={{ display:'block', fontSize:13.5, color:'var(--text-dim)', marginBottom:7 }}>לאישור, הקלד <strong>מחק</strong>:</label>
+            <input value={permText} onChange={e => setPermText(e.target.value)} placeholder="מחק"
+              style={{ display:'block', width:'100%', boxSizing:'border-box', height:44, padding:'0 14px', borderRadius:10, border:'1.5px solid var(--border)', background:'var(--panel)', color:'var(--text)', fontSize:16, fontFamily:'var(--font-main)', outline:'none' }} />
+          </div>
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', paddingTop:4 }}>
+            <button onClick={() => { setPermDeleteId(null); setPermText('') }} disabled={permBusy}
+              style={{ padding:'10px 16px', borderRadius:8, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-dim)', fontSize:14.5, cursor: permBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>ביטול</button>
+            <button onClick={permanentDelete} disabled={permBusy || permText.trim() !== 'מחק'}
+              style={{ display:'flex', alignItems:'center', gap:6, padding:'10px 18px', borderRadius:8, border:'none',
+                background:(permBusy || permText.trim() !== 'מחק') ? 'var(--panel-2)' : 'var(--danger)',
+                color:(permBusy || permText.trim() !== 'מחק') ? 'var(--text-mute)' : 'white',
+                fontSize:14.5, fontWeight:700, cursor:(permBusy || permText.trim() !== 'מחק') ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
+              <Trash2 size={15} /> {permBusy ? 'מוחק…' : 'מחק לצמיתות'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
