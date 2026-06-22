@@ -496,7 +496,7 @@ export default function ReceiptsPage() {
   const [reviewImage, setReviewImage]   = useState(null)
   const [approving, setApproving]       = useState(false)
   const [cropSrc, setCropSrc]           = useState(null)
-  const [form, setForm]                 = useState({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'' })
+  const [form, setForm]                 = useState({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[] })
   const vatRate = settings?.vatRate ?? 18
   const [imagePreview, setImagePreview] = useState(null)
 
@@ -888,13 +888,20 @@ export default function ReceiptsPage() {
   async function saveReceipt() {
     if (!form.amount || parseFloat(form.amount) <= 0) { toast.error('נא להזין סכום תקין'); return }
     const totalAmt  = parseFloat(form.amount)
-    const beforeAmt = Math.round(totalAmt / (1 + vatRate / 100) * 100) / 100
-    const vatAmt    = Math.round((totalAmt - beforeAmt) * 100) / 100
+    // Use the manually-entered VAT split if provided, otherwise derive it.
+    const beforeIn  = parseFloat(form.amount_before_vat)
+    const beforeAmt = (beforeIn > 0 && beforeIn <= totalAmt) ? Math.round(beforeIn * 100) / 100 : Math.round(totalAmt / (1 + vatRate / 100) * 100) / 100
+    const vatIn     = parseFloat(form.vat_amount)
+    const vatAmt    = (form.vat_amount !== '' && !isNaN(vatIn) && vatIn >= 0) ? Math.round(vatIn * 100) / 100 : Math.round((totalAmt - beforeAmt) * 100) / 100
+    const cleanItems = (Array.isArray(form.items) ? form.items : [])
+      .map(it => ({ ...it, quantity: parseFloat(it.quantity) || 1, unit_price: parseFloat(it.unit_price) || 0, price: parseFloat(it.price) || 0 }))
+      .filter(it => (it.item_name || '').trim() || it.price > 0)
     const payload = {
       user_id: user.id, vendor_name: form.vendor_name || null,
       receipt_date: form.receipt_date || new Date().toISOString().slice(0, 10),
       amount: totalAmt, currency: 'ILS',
       category_text: form.category_text || 'שונות', receipt_image: imagePreview || null,
+      items: cleanItems.length ? cleanItems : null,
     }
     const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
 
@@ -975,16 +982,26 @@ export default function ReceiptsPage() {
   }
 
   function resetForm() {
-    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'' })
+    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[] })
     setImagePreview(null)
   }
 
   function openEdit(r) {
     setEditId(r.id)
-    setForm({ amount: r.amount||'', vendor_name: r.vendor_name||'', category_text: r.category_text||'שונות', receipt_date: r.receipt_date||new Date().toISOString().slice(0,10), receipt_image: r.receipt_image||'' })
+    setForm({
+      amount: r.amount||'', vendor_name: r.vendor_name||'', category_text: r.category_text||'שונות',
+      receipt_date: r.receipt_date||new Date().toISOString().slice(0,10), receipt_image: r.receipt_image||'',
+      amount_before_vat: r.amount_before_vat ?? '', vat_amount: r.vat_amount ?? '',
+      items: Array.isArray(r.items) ? r.items.map(it => ({ ...it })) : [],
+    })
     setImagePreview(r.receipt_image||null)
     setShowModal(true)
   }
+
+  // ── Editable line items (in the add/edit modal) ──────────────────────────────
+  const updateItem = (i, field, value) => setForm(p => { const items = [...(p.items || [])]; items[i] = { ...items[i], [field]: value }; return { ...p, items } })
+  const removeItem = (i) => setForm(p => ({ ...p, items: (p.items || []).filter((_, j) => j !== i) }))
+  const addItem    = () => setForm(p => ({ ...p, items: [...(p.items || []), { item_name:'', quantity:1, unit:'', unit_price:0, price:0, category_l1: p.category_text || 'שונות' }] }))
 
   async function handleImageChange(e) {
     const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
@@ -1414,6 +1431,59 @@ export default function ReceiptsPage() {
               </select>
             </div>
           </div>
+
+          {/* VAT breakdown — editable (leave blank to auto-calculate) */}
+          <div style={formGrid}>
+            <div>
+              <label style={LS}>לפני מע"מ (₪)</label>
+              <input type="number" value={form.amount_before_vat} onChange={e => setForm(p => ({ ...p, amount_before_vat: e.target.value }))} style={FS} dir="ltr" placeholder="אוטומטי" />
+            </div>
+            <div>
+              <label style={LS}>מע"מ (₪)</label>
+              <input type="number" value={form.vat_amount} onChange={e => setForm(p => ({ ...p, vat_amount: e.target.value }))} style={FS} dir="ltr" placeholder="אוטומטי" />
+            </div>
+          </div>
+
+          {/* Line items — fully editable */}
+          <div>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+              <label style={{ ...LS, margin:0 }}>פריטים {form.items?.length ? `(${form.items.length})` : ''}</label>
+              <button type="button" onClick={addItem} style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--accent)', fontSize:12.5, fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}><Plus size={13} /> הוסף פריט</button>
+            </div>
+            {(form.items || []).length === 0 ? (
+              <p style={{ margin:0, fontSize:12.5, color:'var(--text-mute)' }}>אין פריטים מפורטים. אפשר להוסיף ידנית.</p>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:280, overflowY:'auto' }}>
+                {(form.items || []).map((it, i) => (
+                  <div key={i} style={{ border:'1px solid var(--border)', borderRadius:10, padding:'10px', background:'var(--panel-2)', display:'flex', flexDirection:'column', gap:7 }}>
+                    <div style={{ display:'flex', gap:7, alignItems:'center' }}>
+                      <input value={it.item_name || ''} onChange={e => updateItem(i, 'item_name', e.target.value)} placeholder="שם הפריט" dir="auto" style={{ ...FS, flex:1, height:38, fontSize:14 }} />
+                      <button type="button" onClick={() => removeItem(i)} aria-label="מחק פריט" style={{ flexShrink:0, width:34, height:34, borderRadius:7, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--danger)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}><Trash2 size={14} /></button>
+                    </div>
+                    <div style={{ display:'flex', gap:7 }}>
+                      <div style={{ flex:1 }}>
+                        <label style={{ display:'block', fontSize:11.5, color:'var(--text-mute)', marginBottom:3 }}>כמות</label>
+                        <input type="number" value={it.quantity ?? 1} onChange={e => updateItem(i, 'quantity', e.target.value)} dir="ltr" style={{ ...FS, height:36, fontSize:14 }} />
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <label style={{ display:'block', fontSize:11.5, color:'var(--text-mute)', marginBottom:3 }}>מחיר ליח'</label>
+                        <input type="number" value={it.unit_price ?? 0} onChange={e => updateItem(i, 'unit_price', e.target.value)} dir="ltr" style={{ ...FS, height:36, fontSize:14 }} />
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <label style={{ display:'block', fontSize:11.5, color:'var(--text-mute)', marginBottom:3 }}>סה"כ שורה</label>
+                        <input type="number" value={it.price ?? 0} onChange={e => updateItem(i, 'price', e.target.value)} dir="ltr" style={{ ...FS, height:36, fontSize:14, fontWeight:600 }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={{ display:'block', fontSize:11.5, color:'var(--text-mute)', marginBottom:3 }}>קטגוריה</label>
+                      <input value={it.category_l1 || ''} onChange={e => updateItem(i, 'category_l1', e.target.value)} placeholder="קטגוריה ראשית" dir="auto" style={{ ...FS, height:36, fontSize:14 }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div>
             <label style={LS}>תמונת קבלה / PDF</label>
             <input ref={fileInputRef} type="file" accept="image/*,application/pdf" onChange={handleImageChange} style={{ display:'none' }} />
