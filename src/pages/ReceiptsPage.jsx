@@ -988,14 +988,44 @@ export default function ReceiptsPage() {
 
   function openEdit(r) {
     setEditId(r.id)
+    const t = parseFloat(r.amount) || 0
+    const before = (r.amount_before_vat != null && r.amount_before_vat > 0)
+      ? r.amount_before_vat
+      : (t > 0 ? Math.round(t / (1 + vatRate / 100) * 100) / 100 : '')
+    const vat = (r.vat_amount != null && r.vat_amount > 0)
+      ? r.vat_amount
+      : (t > 0 ? Math.round((t - (before || 0)) * 100) / 100 : '')
     setForm({
       amount: r.amount||'', vendor_name: r.vendor_name||'', category_text: r.category_text||'שונות',
       receipt_date: r.receipt_date||new Date().toISOString().slice(0,10), receipt_image: r.receipt_image||'',
-      amount_before_vat: r.amount_before_vat ?? '', vat_amount: r.vat_amount ?? '',
+      amount_before_vat: before, vat_amount: vat,
       items: Array.isArray(r.items) ? r.items.map(it => ({ ...it })) : [],
     })
     setImagePreview(r.receipt_image||null)
     setShowModal(true)
+  }
+
+  // ── VAT split — auto-filled from the total, freely editable; the three values
+  //    (total / before / VAT) stay consistent (before + VAT = total). ───────────
+  const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
+  function setAmountField(v) {
+    const t = parseFloat(v)
+    setForm(p => {
+      if (t > 0) { const before = round2(t / (1 + vatRate / 100)); return { ...p, amount: v, amount_before_vat: before, vat_amount: round2(t - before) } }
+      return { ...p, amount: v }
+    })
+  }
+  function setBeforeField(v) {
+    setForm(p => {
+      const t = parseFloat(p.amount) || 0, before = parseFloat(v)
+      return { ...p, amount_before_vat: v, vat_amount: (t > 0 && before >= 0 && before <= t) ? round2(t - before) : p.vat_amount }
+    })
+  }
+  function setVatField(v) {
+    setForm(p => {
+      const t = parseFloat(p.amount) || 0, vat = parseFloat(v)
+      return { ...p, vat_amount: v, amount_before_vat: (t > 0 && vat >= 0 && vat <= t) ? round2(t - vat) : p.amount_before_vat }
+    })
   }
 
   // ── Editable line items (in the add/edit modal) ──────────────────────────────
@@ -1422,7 +1452,7 @@ export default function ReceiptsPage() {
           <div style={formGrid}>
             <div>
               <label style={LS}>סכום (₪) *</label>
-              <input type="number" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} style={{ ...FS, fontWeight:600 }} dir="ltr" placeholder="0.00" />
+              <input type="number" value={form.amount} onChange={e => setAmountField(e.target.value)} style={{ ...FS, fontWeight:600 }} dir="ltr" placeholder="0.00" />
             </div>
             <div>
               <label style={LS}>קטגוריה</label>
@@ -1436,11 +1466,11 @@ export default function ReceiptsPage() {
           <div style={formGrid}>
             <div>
               <label style={LS}>לפני מע"מ (₪)</label>
-              <input type="number" value={form.amount_before_vat} onChange={e => setForm(p => ({ ...p, amount_before_vat: e.target.value }))} style={FS} dir="ltr" placeholder="אוטומטי" />
+              <input type="number" value={form.amount_before_vat} onChange={e => setBeforeField(e.target.value)} style={FS} dir="ltr" placeholder="אוטומטי" />
             </div>
             <div>
               <label style={LS}>מע"מ (₪)</label>
-              <input type="number" value={form.vat_amount} onChange={e => setForm(p => ({ ...p, vat_amount: e.target.value }))} style={FS} dir="ltr" placeholder="אוטומטי" />
+              <input type="number" value={form.vat_amount} onChange={e => setVatField(e.target.value)} style={FS} dir="ltr" placeholder="אוטומטי" />
             </div>
           </div>
 
