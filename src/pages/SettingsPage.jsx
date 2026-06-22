@@ -431,23 +431,41 @@ export default function SettingsPage() {
           <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--text-mute)', lineHeight: 1.6 }}>
             מתי שתופיע ההודעה "האם לייצא את הקבלות לרואה החשבון?" בכל חודש.
           </p>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {[
-              { id: 'start', label: 'תחילת החודש', sub: '1 בחודש' },
-              { id: 'mid',   label: 'אמצע החודש',  sub: '15 בחודש' },
-              { id: 'end',   label: 'סוף החודש',   sub: 'יום אחרון' },
-            ].map(opt => {
-              const active = (settings.reminderTiming || 'start') === opt.id
-              return (
-                <button key={opt.id} onClick={() => updateSettings({ reminderTiming: opt.id })}
-                  style={{ flex: '1 1 110px', padding: '12px 10px', borderRadius: 10, cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'center',
-                    border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent-bg)' : 'var(--panel-2)', color: active ? 'var(--accent)' : 'var(--text-mute)' }}>
-                  <div style={{ fontSize: 15, fontWeight: active ? 700 : 600 }}>{opt.label}</div>
-                  <div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 2 }}>{opt.sub}</div>
-                </button>
-              )
-            })}
-          </div>
+          {(() => {
+            const rt = String(settings.reminderTiming || 'start')
+            const isCustom = /^\d+$/.test(rt)
+            return (
+              <>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[
+                    { id: 'start',  label: 'תחילת החודש', sub: '1 בחודש' },
+                    { id: 'mid',    label: 'אמצע החודש',  sub: '15 בחודש' },
+                    { id: 'end',    label: 'סוף החודש',   sub: 'יום אחרון' },
+                    { id: 'custom', label: 'יום מותאם',   sub: 'בחר תאריך' },
+                  ].map(opt => {
+                    const active = opt.id === 'custom' ? isCustom : (rt === opt.id)
+                    return (
+                      <button key={opt.id} onClick={() => updateSettings({ reminderTiming: opt.id === 'custom' ? (isCustom ? rt : '3') : opt.id })}
+                        style={{ flex: '1 1 100px', padding: '12px 10px', borderRadius: 10, cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'center',
+                          border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`, background: active ? 'var(--accent-bg)' : 'var(--panel-2)', color: active ? 'var(--accent)' : 'var(--text-mute)' }}>
+                        <div style={{ fontSize: 15, fontWeight: active ? 700 : 600 }}>{opt.label}</div>
+                        <div style={{ fontSize: 12.5, opacity: 0.75, marginTop: 2 }}>{opt.sub}</div>
+                      </button>
+                    )
+                  })}
+                </div>
+                {isCustom && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+                    <label style={{ fontSize: 14.5, color: 'var(--text-dim)' }}>תזכיר לי ב-</label>
+                    <input type="number" min="1" max="31" value={rt}
+                      onChange={e => { const n = Math.max(1, Math.min(31, parseInt(e.target.value, 10) || 1)); updateSettings({ reminderTiming: String(n) }) }}
+                      style={{ width: 74, height: 42, textAlign: 'center', borderRadius: 8, border: '1.5px solid var(--accent)', background: 'var(--panel)', color: 'var(--text)', fontSize: 16, fontWeight: 600, fontFamily: 'var(--font-main)', outline: 'none' }} />
+                    <label style={{ fontSize: 14.5, color: 'var(--text-dim)' }}>בכל חודש</label>
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       </div>
 

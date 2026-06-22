@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { saveBackupToFolder, downloadBackup } from '../lib/backup'
 import { hasDir } from '../lib/saveFolder'
-import { Database, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const LAST_KEY = 'moses_last_backup'   // YYYY-MM-DD of the last successful backup
@@ -10,70 +9,48 @@ const AUTO_KEY = 'moses_auto_backup'   // '1' (default) | '0'
 const todayStr = () => new Date().toISOString().slice(0, 10)
 
 /**
- * DailyBackup — runs once per day. If a save folder is configured (desktop) it
- * writes the JSON backup there silently; otherwise it shows a small one-tap
- * prompt to download the backup. Mounted once in the app shell.
+ * DailyBackup — automatic, silent daily backup. NO prompt. Runs once per
+ * calendar day (on the first app open of the day, and again at midnight if the
+ * app stays open). Writes to the configured save folder when available;
+ * otherwise downloads the JSON in the background. The data is also always safe
+ * in the cloud (Supabase), so a missing local backup is never a risk.
  */
 export default function DailyBackup() {
   const { user } = useAuth()
-  const [prompt, setPrompt] = useState(false)
   const ran = useRef(false)
 
   useEffect(() => {
-    if (!user || ran.current) return
-    ran.current = true
-    let auto = '1'
-    try { auto = localStorage.getItem(AUTO_KEY) ?? '1' } catch {}
-    if (auto !== '1') return
-    let last = null
-    try { last = localStorage.getItem(LAST_KEY) } catch {}
-    if (last === todayStr()) return
+    if (!user) return
+    let timer
 
-    ;(async () => {
+    async function runIfDue() {
+      let auto = '1'
+      try { auto = localStorage.getItem(AUTO_KEY) ?? '1' } catch {}
+      if (auto !== '1') return
+      let last = null
+      try { last = localStorage.getItem(LAST_KEY) } catch {}
+      if (last === todayStr()) return
       try {
-        if (await hasDir()) {
-          const ok = await saveBackupToFolder(user)
-          if (ok) {
-            try { localStorage.setItem(LAST_KEY, todayStr()) } catch {}
-            toast.success('גיבוי יומי נשמר לתיקייה ✓', { icon: '💾', duration: 4000 })
-            return
-          }
-        }
-      } catch { /* fall through to prompt */ }
-      // No folder (or save failed) → offer a one-tap download, a moment after load.
-      setTimeout(() => setPrompt(true), 2500)
-    })()
+        let saved = false
+        if (await hasDir()) saved = await saveBackupToFolder(user)
+        if (!saved) await downloadBackup(user)   // no folder → silent background download
+        try { localStorage.setItem(LAST_KEY, todayStr()) } catch {}
+        toast.success('גיבוי יומי בוצע ✓', { icon: '💾', duration: 3000 })
+      } catch { /* best-effort — the data is also safe in the cloud */ }
+    }
+
+    if (!ran.current) { ran.current = true; runIfDue() }
+
+    // Re-run at the next midnight (and reschedule) so an always-open app backs
+    // up at 00:00 as well.
+    function scheduleMidnight() {
+      const now = new Date()
+      const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 10)
+      timer = setTimeout(async () => { await runIfDue(); scheduleMidnight() }, next - now)
+    }
+    scheduleMidnight()
+    return () => clearTimeout(timer)
   }, [user])
 
-  async function doDownload() {
-    try {
-      await downloadBackup(user)
-      try { localStorage.setItem(LAST_KEY, todayStr()) } catch {}
-      toast.success('גיבוי יומי נשמר ✓')
-      setPrompt(false)
-    } catch {
-      toast.error('שגיאה בגיבוי')
-    }
-  }
-  function dismiss() {
-    try { localStorage.setItem(LAST_KEY, todayStr()) } catch {}
-    setPrompt(false)
-  }
-
-  if (!prompt) return null
-  return (
-    <div dir="rtl" style={{
-      position: 'fixed', zIndex: 300, left: 16, right: 16, bottom: 'calc(78px + env(safe-area-inset-bottom))',
-      maxWidth: 420, margin: '0 auto', background: 'var(--panel)', border: '1px solid var(--accent)',
-      borderRadius: 14, boxShadow: 'var(--shadow-modal)', padding: '13px 15px', display: 'flex', alignItems: 'center', gap: 12,
-    }}>
-      <Database size={22} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14.5, color: 'var(--text)' }}>גיבוי יומי</div>
-        <div style={{ fontSize: 12.5, color: 'var(--text-mute)' }}>שמירת עותק של כל הנתונים (JSON) לשחזור עתידי.</div>
-      </div>
-      <button onClick={doDownload} style={{ padding: '9px 16px', borderRadius: 9, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)', flexShrink: 0 }}>גבה</button>
-      <button onClick={dismiss} aria-label="סגור" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mute)', padding: 4, display: 'flex', flexShrink: 0 }}><X size={18} /></button>
-    </div>
-  )
+  return null
 }

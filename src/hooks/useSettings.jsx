@@ -15,7 +15,14 @@ const DEFAULT_SETTINGS = {
   showWithVat: true,   // true = show prices WITH VAT, false = show prices WITHOUT VAT
   logo:        null,   // base64 data URL of the business logo
   businessName: 'מנהל קבלות', // shown next to the logo
-  reminderTiming: 'start',    // 'start' (1st) | 'mid' (15th) | 'end' (last day)
+  reminderTiming: 'start',    // 'start' (1st) | 'mid' (15th) | 'end' (last day) | '1'..'31' (custom day)
+}
+
+// reminderTiming is 'start'|'mid'|'end' OR a day-of-month number stored as a string.
+function normTiming(v) {
+  if (['start', 'mid', 'end'].includes(v)) return v
+  const n = parseInt(v, 10)
+  return (n >= 1 && n <= 31) ? String(n) : 'start'
 }
 
 function loadLocal() {
@@ -26,7 +33,7 @@ function loadLocal() {
       showWithVat:  typeof s.showWithVat === 'boolean' ? s.showWithVat : DEFAULT_SETTINGS.showWithVat,
       logo:         typeof s.logo        === 'string'  ? s.logo        : DEFAULT_SETTINGS.logo,
       businessName: typeof s.businessName === 'string' && s.businessName ? s.businessName : DEFAULT_SETTINGS.businessName,
-      reminderTiming: ['start','mid','end'].includes(s.reminderTiming) ? s.reminderTiming : DEFAULT_SETTINGS.reminderTiming,
+      reminderTiming: normTiming(s.reminderTiming),
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -60,7 +67,7 @@ export function SettingsProvider({ children }) {
             showWithVat:    typeof data.show_with_vat === 'boolean' ? data.show_with_vat : DEFAULT_SETTINGS.showWithVat,
             logo:           data.logo ?? null,
             businessName:   data.business_name || DEFAULT_SETTINGS.businessName,
-            reminderTiming: ['start','mid','end'].includes(data.reminder_timing) ? data.reminder_timing : DEFAULT_SETTINGS.reminderTiming,
+            reminderTiming: normTiming(data.reminder_timing),
           }
           setSettings(s)
           saveLocal(s)

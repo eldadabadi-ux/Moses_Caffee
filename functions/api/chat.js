@@ -239,26 +239,33 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   const { messages = [], context: ctx = {} } = body ?? {}
 
   // ── Load the user's data (service role, filtered by user_id) ───────────────
-  let receipts = [], categories = [], suppliers = []
+  let receipts = [], categories = [], suppliers = [], userSettings = null
   if (sk) {
     const sbGet = makeSbGet(SUPABASE_URL, sk)
     // Org-scoped when multi-tenancy is set up (so the bot sees all of the org's
     // data, not just the current member's); falls back to user_id otherwise.
-    // suppliers has no org_id column yet → stays user-scoped.
+    // suppliers/user_settings have no org_id column yet → stay user-scoped.
     const scope = user.org_id ? `org_id=eq.${user.org_id}` : `user_id=eq.${user.user_id}`
-    const [r, c, s] = await Promise.allSettled([
+    const [r, c, s, st] = await Promise.allSettled([
       sbGet(`receipts?${scope}&select=id,vendor_name,receipt_date,amount,currency,category_text,items,ai_summary,archived_at,created_at&order=receipt_date.desc.nullslast`),
       sbGet(`categories?${scope}&select=id,name,parent_id,level&order=level,sort_order`),
       sbGet(`suppliers?user_id=eq.${user.user_id}&select=name,phone,email,address,whatsapp,supplies,notes`),
+      sbGet(`user_settings?user_id=eq.${user.user_id}&select=vat_rate,show_with_vat,business_name`),
     ])
     receipts   = r.status === 'fulfilled' ? (r.value || []) : []
     categories = c.status === 'fulfilled' ? (c.value || []) : []
     suppliers  = s.status === 'fulfilled' ? (s.value || []) : []
+    userSettings = (st.status === 'fulfilled' && Array.isArray(st.value)) ? (st.value[0] || null) : null
   }
 
   const dataBlock = (receipts.length || categories.length)
     ? buildReceiptsBlock(receipts, categories, suppliers)
     : '(אין עדיין נתונים — המשתמש לא סרק קבלות.)'
+
+  // Configured business settings — authoritative facts the bot must respect.
+  const vatRate     = userSettings?.vat_rate ?? 18
+  const showWithVat = userSettings?.show_with_vat !== false
+  const bizName     = userSettings?.business_name || 'בית הקפה'
 
   const systemPrompt = `אתה "העוזר החכם" של בית הקפה של משה — מערכת לניהול קבלות והוצאות.
 הטון שלך: חברי, ענייני ומקצועי. השב תמיד בעברית, בניסוח קצר וברור.
@@ -274,6 +281,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
 - בהמלצת ספק זול יותר — השווה מחיר ליחידה (לא רק סה"כ), וציין את ההפרש.
 - כתוב נקי: בלי אימוג'ים, בלי סולמיות (#) או קווים (---). הפרד נושאים בשורה ריקה. השתמש ברשימות רק כשמבקשים.
 - כשמבקשים — בצע מיד (אל תפתח ב"שלום, במה אפשר לעזור").
+- שיעור המע"מ המוגדר במערכת הוא ${vatRate}% — התייחס אליו כעובדה הקובעת בכל חישוב. אם המשתמש טוען לערך אחר, או אם יש סתירה בין הערך המוגדר לבין מה שאתה חושב לנכון, אל תחליט לבד: שאל את המשתמש מהו הערך הנכון, והנחה אותו לעדכן ב"הגדרות → שיעור מע"מ".
+
+[הגדרות מוגדרות במערכת]
+שם העסק: ${bizName} · שיעור מע"מ: ${vatRate}% · תצוגת מחירים: ${showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
 
 מסך נוכחי: ${ctx.screen || 'לא ידוע'}${ctx.path ? ` (${ctx.path})` : ''}
 

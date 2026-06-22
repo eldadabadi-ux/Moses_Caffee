@@ -33,8 +33,10 @@ export default function MonthlyExportPrompt() {
     // Reminder day for THIS month, based on the user's chosen timing.
     const now = new Date()
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-    const triggerDay = settings?.reminderTiming === 'mid' ? 15
-      : settings?.reminderTiming === 'end' ? lastDay
+    const t = settings?.reminderTiming
+    const triggerDay = t === 'mid' ? 15
+      : t === 'end' ? lastDay
+      : /^\d+$/.test(String(t)) ? Math.min(parseInt(t, 10), lastDay)  // custom day, clamped to month length
       : 1
     // Show once per calendar month, only on/after the trigger day, until answered.
     let answered = null
