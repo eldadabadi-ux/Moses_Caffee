@@ -565,6 +565,10 @@ export default function ReceiptsPage() {
     return matchSearch && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
   }), [archiveView, archived, receipts, search, filterFrom, filterTo])
 
+  // Existing top-level (L1) category names — used to flag AI-proposed NEW
+  // categories in the scan review + drive the category autocomplete.
+  const existingL1Names = useMemo(() => [...new Set(categories.filter(c => c.level === 1).map(c => (c.name || '').trim()).filter(Boolean))], [categories])
+
   // Total respects the with/without-VAT display preference
   // VAT-aware per-receipt helpers — prefer the exact values scanned from the
   // receipt (dedicated column OR ai_summary fallback), else compute from the
@@ -896,11 +900,23 @@ export default function ReceiptsPage() {
     const cleanItems = (Array.isArray(form.items) ? form.items : [])
       .map(it => ({ ...it, quantity: parseFloat(it.quantity) || 1, unit_price: parseFloat(it.unit_price) || 0, price: parseFloat(it.price) || 0 }))
       .filter(it => (it.item_name || '').trim() || it.price > 0)
+    // Resolve the chosen category to an L1 id — creating the category if it's new,
+    // so the dashboard (which resolves by category_id) reflects the change.
+    const catName = (form.category_text || '').trim() || 'שונות'
+    let category_id = categories.find(c => c.level === 1 && (c.name || '').trim() === catName)?.id ?? null
+    if (!category_id) {
+      try {
+        const { data: created } = await supabase.from('categories')
+          .insert({ user_id: user.id, org_id: orgId || null, name: catName, level: 1, parent_id: null, sort_order: categories.filter(c => c.level === 1).length })
+          .select().single()
+        if (created) { category_id = created.id; loadCategories() }
+      } catch { /* category row optional — category_text still drives display */ }
+    }
     const payload = {
       user_id: user.id, vendor_name: form.vendor_name || null,
       receipt_date: form.receipt_date || new Date().toISOString().slice(0, 10),
       amount: totalAmt, currency: 'ILS',
-      category_text: form.category_text || 'שונות', receipt_image: imagePreview || null,
+      category_text: catName, category_id, receipt_image: imagePreview || null,
       items: cleanItems.length ? cleanItems : null,
     }
     const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
@@ -1353,9 +1369,16 @@ export default function ReceiptsPage() {
               </div>
               <div>
                 <label style={LS}>קטגוריה</label>
-                <select value={reviewCategory} onChange={e => setReviewCategory(e.target.value)} style={{ ...FS, paddingRight:'10px' }}>
-                  {formCategories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select>
+                <input list="review-cat-list" value={reviewCategory} onChange={e => setReviewCategory(e.target.value)}
+                  placeholder="בחר או הקלד קטגוריה" dir="auto" style={{ ...FS, paddingRight:'10px' }} />
+                <datalist id="review-cat-list">
+                  {existingL1Names.map(n => <option key={n} value={n} />)}
+                </datalist>
+                {reviewCategory?.trim() && (
+                  existingL1Names.includes(reviewCategory.trim())
+                    ? <div style={{ marginTop:5, fontSize:'12.5px', color:'var(--ok)', fontWeight:600 }}>✓ קטגוריה קיימת</div>
+                    : <div style={{ marginTop:5, fontSize:'12.5px', color:'var(--accent)', fontWeight:600 }}>🆕 קטגוריה חדשה — תיווצר עם השמירה. אפשר לבחור קיימת מהרשימה.</div>
+                )}
               </div>
             </div>
 
@@ -1455,9 +1478,14 @@ export default function ReceiptsPage() {
             </div>
             <div>
               <label style={LS}>קטגוריה</label>
-              <select value={form.category_text} onChange={e => setForm(p => ({ ...p, category_text: e.target.value }))} style={{ ...FS, paddingRight:'10px' }}>
-                {formCategories.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-              </select>
+              <input list="edit-cat-list" value={form.category_text} onChange={e => setForm(p => ({ ...p, category_text: e.target.value }))}
+                placeholder="בחר או הקלד קטגוריה" dir="auto" style={{ ...FS, paddingRight:'10px' }} />
+              <datalist id="edit-cat-list">
+                {existingL1Names.map(n => <option key={n} value={n} />)}
+              </datalist>
+              {form.category_text?.trim() && !existingL1Names.includes(form.category_text.trim()) && (
+                <div style={{ marginTop:5, fontSize:'12px', color:'var(--accent)', fontWeight:600 }}>🆕 קטגוריה חדשה</div>
+              )}
             </div>
           </div>
 
