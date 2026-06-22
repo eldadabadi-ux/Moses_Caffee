@@ -1015,7 +1015,7 @@ export default function ReceiptsPage() {
   const LS = { display:'block', fontSize:'16px', fontWeight:600, color:'var(--text-dim)', marginBottom:'8px' }
   const formGrid = { display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap:'14px' }
 
-  if (loading) return <LoadingSpinner />
+  if (loading && receipts.length === 0) return <LoadingSpinner />
 
   const hasActiveFilter = search || filterFrom || filterTo
 

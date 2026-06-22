@@ -91,7 +91,18 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return
     async function load() {
-      if (!hasCached('dash:' + year)) setLoading(true)
+      // Show the year's cached data immediately (instant year switch); only show
+      // the spinner when there's truly nothing cached for this year yet.
+      const cached = getCached('dash:' + year)
+      if (cached) {
+        setReceipts(cached.receipts || [])
+        setPrevReceipts(cached.prevReceipts || [])
+        setCategories(cached.categories || [])
+        setAvailYears(cached.availYears || [year])
+        setLoading(false)
+      } else {
+        setLoading(true)
+      }
       try {
         // Current year (include items for drill-down)
         const { data: recs } = await supabase
@@ -159,9 +170,12 @@ export default function DashboardPage() {
   }, [active, total])
 
   // ── Monthly aggregation ───────────────────────────────────────────────────────
+  // The monthly overview is INDEPENDENT of the category-distribution filter
+  // (filterCat) — it always shows the whole year's monthly spend. Selecting a
+  // category in the donut below must not reshape this chart.
   const monthlyData = useMemo(() => {
     const map = {}
-    active.forEach(r => {
+    receipts.forEach(r => {
       if (!r.receipt_date) return
       const m = parseInt(r.receipt_date.slice(5, 7))
       if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
@@ -169,7 +183,7 @@ export default function DashboardPage() {
       map[m].count += 1
     })
     return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
-  }, [active, settings.showWithVat])
+  }, [receipts, settings.showWithVat])
 
   const prevMonthlyData = useMemo(() => {
     if (!compareYear) return null
@@ -304,7 +318,9 @@ export default function DashboardPage() {
   const distSetSel = isVendorDist ? setSelVendor : setFilterCat
   const distColorOf = (name) => { const i = distRank.findIndex(d => d.name === name); return i >= 0 ? COLORS[i % COLORS.length] : 'var(--accent)' }
 
-  if (loading) return <LoadingSpinner />
+  // Only blank to a spinner on the very first load (nothing to show yet). On
+  // year switches / background refreshes we keep the current data on screen.
+  if (loading && receipts.length === 0) return <LoadingSpinner />
 
   return (
     <div className="animate-fade-in" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '14px' : '20px' }}>
@@ -399,7 +415,7 @@ export default function DashboardPage() {
         <Section
           id="dash-monthly"
           title={`הוצאות חודשיות — ${year}${compareYear ? ` מול ${compareYear}` : ''}`}
-          sub={compareYear ? undefined : `סה"כ: ${fmtILS(total)}`}
+          sub={compareYear ? undefined : `סה"כ: ${fmtILS(totalAll)}`}
           action={
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               {compareYear && !isMobile && (
@@ -416,7 +432,7 @@ export default function DashboardPage() {
             </div>
           }
         >
-          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} chartType={chartType} color={selColor} />
+          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} chartType={chartType} color="#2563eb" />
         </Section>
 
         {/* ── Distribution donut + ranking (by category OR by vendor) ───────────── */}

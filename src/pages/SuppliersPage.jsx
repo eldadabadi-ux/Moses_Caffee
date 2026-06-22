@@ -79,7 +79,7 @@ export default function SuppliersPage() {
     catch (e) { toast.error('שגיאה במחיקה') }
   }
 
-  if (loading) return <LoadingSpinner />
+  if (loading && receipts.length === 0 && contacts.length === 0) return <LoadingSpinner />
 
   return (
     <div className="animate-fade-in" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '14px' : '18px' }}>

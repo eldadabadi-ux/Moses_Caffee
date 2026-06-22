@@ -221,7 +221,7 @@ export default function CategoriesPage() {
     )
   }
 
-  if (loading) return <LoadingSpinner />
+  if (loading && categories.length === 0) return <LoadingSpinner />
 
   return (
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap:'24px', maxWidth:'800px' }} dir="rtl">
