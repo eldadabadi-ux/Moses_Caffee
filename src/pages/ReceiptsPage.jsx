@@ -1031,7 +1031,6 @@ export default function ReceiptsPage() {
   // ── Editable line items (in the add/edit modal) ──────────────────────────────
   const updateItem = (i, field, value) => setForm(p => { const items = [...(p.items || [])]; items[i] = { ...items[i], [field]: value }; return { ...p, items } })
   const removeItem = (i) => setForm(p => ({ ...p, items: (p.items || []).filter((_, j) => j !== i) }))
-  const addItem    = () => setForm(p => ({ ...p, items: [...(p.items || []), { item_name:'', quantity:1, unit:'', unit_price:0, price:0, category_l1: p.category_text || 'שונות' }] }))
 
   async function handleImageChange(e) {
     const file = e.target.files?.[0]; if (!file) return; e.target.value = ''
@@ -1476,12 +1475,11 @@ export default function ReceiptsPage() {
 
           {/* Line items — fully editable */}
           <div>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
+            <div style={{ marginBottom:8 }}>
               <label style={{ ...LS, margin:0 }}>פריטים {form.items?.length ? `(${form.items.length})` : ''}</label>
-              <button type="button" onClick={addItem} style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:7, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--accent)', fontSize:12.5, fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}><Plus size={13} /> הוסף פריט</button>
             </div>
             {(form.items || []).length === 0 ? (
-              <p style={{ margin:0, fontSize:12.5, color:'var(--text-mute)' }}>אין פריטים מפורטים. אפשר להוסיף ידנית.</p>
+              <p style={{ margin:0, fontSize:12.5, color:'var(--text-mute)' }}>אין פריטים מפורטים.</p>
             ) : (
               <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight:280, overflowY:'auto' }}>
                 {(form.items || []).map((it, i) => (
