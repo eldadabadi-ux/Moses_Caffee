@@ -49,6 +49,7 @@ export default function CategoriesPage() {
       toast.dismiss(tid)
       if (total === 0) { if (!silent) toast('אין קבלות לסיווג', { icon: 'ℹ️' }) }
       else toast.success(`עודכנו ${changed} מתוך ${total} קבלות`)
+      load()   // refresh the tree — categories created during the sync now appear
     } catch (err) {
       toast.dismiss(tid)
       toast.error('שגיאה בסיווג מחדש: ' + (err?.message || ''))
@@ -64,9 +65,33 @@ export default function CategoriesPage() {
     recatTimer.current = setTimeout(() => runRecategorize(true), 4000)
   }
 
+  // Full sync: make sure every category a receipt actually uses (category_text)
+  // also exists as a row in the tree, so the Categories tab always reflects the
+  // receipts — e.g. a "תחבורה ודלק" created by a fuel receipt / re-classification.
+  async function syncMissingCategories() {
+    try {
+      const [{ data: recs }, { data: cats }] = await Promise.all([
+        supabase.from('receipts').select('category_text').is('archived_at', null).not('category_text', 'is', null),
+        supabase.from('categories').select('name, level'),
+      ])
+      const existingL1 = new Set((cats || []).filter(c => c.level === 1).map(c => (c.name || '').trim().toLowerCase()))
+      const used = [...new Set((recs || []).map(r => (r.category_text || '').trim()).filter(Boolean))]
+      const missing = used.filter(n => !existingL1.has(n.toLowerCase()))
+      if (!missing.length) return false
+      const baseOrder = (cats || []).filter(c => c.level === 1).length
+      const rows = missing.map((name, i) => ({
+        user_id: user.id, org_id: orgId || null, name, level: 1, parent_id: null, sort_order: baseOrder + i,
+      }))
+      const { error } = await supabase.from('categories').insert(rows)
+      if (error) { console.warn('[categories] sync insert:', error.message); return false }
+      return true
+    } catch (e) { console.warn('[categories] sync:', e?.message); return false }
+  }
+
   async function load() {
     if (!hasCached('categories')) setLoading(true)
     try {
+      await syncMissingCategories()   // create any categories used by receipts but missing here
       const { data, error } = await supabase
         .from('categories')
         .select('*')
@@ -237,7 +262,7 @@ export default function CategoriesPage() {
           </button>
           <button onClick={() => { setAddingTo({ parentId: null, level: 1 }); setNewName('') }}
             style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--r-btn)', fontSize:'15px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}>
-            <Plus size={16} /> קטגוריה ראשית
+            <Plus size={16} /> להוסיף קטגוריה
           </button>
         </div>
       </div>

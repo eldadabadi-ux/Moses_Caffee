@@ -29,10 +29,23 @@ export async function recategorizeAll() {
   const { results } = await res.json()
   if (!Array.isArray(results)) return { changed: 0, total: receipts.length }
 
-  // 3. Map L1 category name → id
+  // 3. Map L1 category name → id, creating any category the classifier assigned
+  //    that doesn't exist yet — keeps the categories tree in full sync with what
+  //    the receipts now use (so e.g. a new "תחבורה ודלק" shows in the Categories tab).
   const { data: cats } = await supabase.from('categories').select('id, name, level')
   const l1Id = {}
   ;(cats || []).filter(c => c.level === 1).forEach(c => { l1Id[c.name.trim().toLowerCase()] = c.id })
+
+  const needed = [...new Set(results.map(r => (r.category_l1 || '').trim()).filter(Boolean))]
+  const toCreate = needed.filter(n => !l1Id[n.toLowerCase()])
+  if (toCreate.length) {
+    const baseOrder = (cats || []).filter(c => c.level === 1).length
+    const uid = session.user?.id
+    const { data: created } = await supabase.from('categories')
+      .insert(toCreate.map((name, i) => ({ user_id: uid, name, level: 1, parent_id: null, sort_order: baseOrder + i })))
+      .select('id, name')
+    ;(created || []).forEach(c => { l1Id[c.name.trim().toLowerCase()] = c.id })
+  }
 
   // 4. Apply updates per receipt
   let changed = 0
