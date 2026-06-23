@@ -6,6 +6,7 @@ import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { TenantProvider, useBrand } from './hooks/useTenant'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import { clearPageCache } from './lib/pageCache'
+import { prefetchAllPages } from './lib/prefetch'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import MonthlyExportPrompt from './components/MonthlyExportPrompt'
 import InstallBanner from './components/InstallBanner'
@@ -264,6 +265,10 @@ function AppShell() {
     import('./pages/CategoriesPage'); import('./pages/SuppliersPage')
     import('./pages/SettingsPage'); import('./pages/AdminPage')
   }, [])
+
+  // Warm the data cache for the other tabs while on the home page, so the first
+  // switch to each tab shows instantly (no data spinner).
+  useEffect(() => { if (user) prefetchAllPages(user) }, [user])
 
   // Drop cached page data on sign-out so a different account never sees it.
   const handleSignOut = () => { clearPageCache(); signOut() }
