@@ -1,88 +1,89 @@
 /**
- * classifyReceipt — deterministic receipt-type → category safety net.
+ * classifyReceipt — deterministic receipt-type → { l1, l2 } safety net.
  *
- * Runs AFTER the AI (used by /api/scan-receipt via extractReceipt, and by
- * /api/recategorize) so an UNAMBIGUOUS vendor type — above all FUEL / TRANSPORT
- * — is never mis-filed into a food category just because the model defaulted to
- * the café's food-heavy category tree.
+ * Runs AFTER the AI (used by /api/scan-receipt via extractReceipt, by
+ * /api/recategorize, and by the Categories-tab tree reconcile) so an UNAMBIGUOUS
+ * vendor type is never mis-filed — and so it always gets a sensible SUB-category
+ * (L2), e.g. a parking receipt → "תחבורה ודלק" › "חניון".
  *
- * Returns a forced L1 category name, or null to keep the AI's own choice.
+ * Returns { l1, l2 } or null (null → keep the AI's own choice).
  *
  * Tokens are deliberately specific (real vendor names / domain words) to avoid
- * false positives. The scan flow also shows an editable review screen, so a rare
- * wrong guess is correctable before saving.
+ * false positives. The scan flow also shows an editable review screen.
  */
 
-// Standalone-token match (handles short ambiguous names like "פז" that we don't
-// want to match as a substring of another word). The haystack joins fields with
-// " | ", so a real token is bounded by spaces / pipes / string ends.
+// Standalone-token match — for short ambiguous names (e.g. "פז", "דלק") that we
+// don't want to match as a substring of another word. The haystack joins fields
+// with " | ", so a real token is bounded by spaces / pipes / string ends.
 function hasToken(hay, token) {
   const t = token.toLowerCase()
   const re = new RegExp(`(?:^|[\\s|/,.\-])${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[\\s|/,.\-]|$)`)
   return re.test(hay)
 }
 
-// Substring match — for distinctive multi-char tokens that are safe anywhere.
-function hasSub(hay, token) { return hay.includes(token.toLowerCase()) }
+// All of these roll up to one L1 ("תחבורה ודלק"), each with its own sub-category.
+const L1_TRANSPORT = 'תחבורה ודלק'
 
-// ── Rules, in priority order (first match wins) ───────────────────────────────
-// FUEL + PARKING + TOLL + PUBLIC-TRANSPORT all roll up to one L1, as the owner
-// grouped them ("תחבורה ודלק").
-const FUEL_TRANSPORT = 'תחבורה ודלק'
-
-// Distinctive substrings — safe to match anywhere in vendor/item text.
-const FUEL_SUBSTRINGS = [
-  'תחנת דלק', 'תחנת תדלוק', 'תדלוק', 'בנזין', 'סולר', 'דיזל', 'אוקטן',
-  'סונול', 'דור אלון', 'דלקן', 'פזגז', 'פז דלק',
-  'חניון', 'חנייה', 'פנגו', 'pango', 'סלופארק', 'cellopark', 'אחוזות החוף',
-  'כביש 6', 'דרך ארץ', 'כביש אגרה', 'רב קו', 'רב-קו',
-  'מטרופולין', 'דן תחבורה', 'רכבת ישראל', 'מונית', 'מוניות', 'טקסי',
-  'sonol', 'delek', 'petrol', 'diesel', 'octane', 'gas station', 'fuel',
+// First matching rule wins → more specific types (parking/taxi) before the
+// generic fuel fallback. `subs` = safe substrings, `toks` = standalone words.
+const RULES = [
+  { l2: 'חניון',           subs: ['חניון', 'חנייה', 'חניה', 'אחוזות החוף'],                              toks: ['פנגו', 'pango', 'סלופארק', 'cellopark'] },
+  { l2: 'מוניות',          subs: ['מונית', 'מוניות', 'טקסי'],                                            toks: ['taxi', 'gett', 'uber', 'אובר', 'yango', 'יאנגו'] },
+  { l2: 'תחבורה ציבורית',  subs: ['רב קו', 'רב-קו', 'רכבת ישראל', 'רכבת', 'מטרופולין', 'דן תחבורה'],      toks: ['אגד'] },
+  { l2: 'כביש אגרה',        subs: ['כביש 6', 'כביש שש', 'דרך ארץ', 'כביש אגרה'],                          toks: [] },
+  { l2: 'דלק',             subs: ['תחנת דלק', 'תחנת תדלוק', 'תדלוק', 'בנזין', 'סולר', 'דיזל', 'אוקטן', 'סונול', 'דור אלון', 'דלקן', 'פזגז', 'פז דלק', 'sonol', 'delek', 'petrol', 'diesel', 'octane', 'gas station', 'fuel'], toks: ['דלק', 'פז', 'yellow', 'paz'] },
 ]
-// Short / ambiguous tokens — only as standalone words.
-const FUEL_TOKENS = ['דלק', 'פז', 'yellow', 'paz', 'אגד', 'gett', 'uber', 'סד"ש', 'סדש']
 
 /**
- * Infer a forced category from a receipt's vendor + items.
- * @param {object} receipt { vendor_name, items:[{ item_name, category_l1 }] }
- * @returns {string|null} forced L1 category, or null to defer to the AI.
+ * Infer { l1, l2 } from a receipt's vendor + items, or null.
+ * @param {object} receipt { vendor_name, items:[{ item_name, category_l1, category_l2 }] }
  */
-export function inferReceiptCategory(receipt) {
+export function classifyReceipt(receipt) {
   if (!receipt) return null
   const parts = [String(receipt.vendor_name || '')]
   for (const it of (receipt.items || [])) {
-    parts.push(String(it?.item_name || ''))
-    parts.push(String(it?.category_l1 || ''))
+    parts.push(String(it?.item_name || ''), String(it?.category_l1 || ''), String(it?.category_l2 || ''))
   }
   const hay = (' | ' + parts.join(' | ') + ' | ').toLowerCase()
 
-  if (FUEL_SUBSTRINGS.some(s => hasSub(hay, s)) || FUEL_TOKENS.some(t => hasToken(hay, t))) {
-    return FUEL_TRANSPORT
+  for (const rule of RULES) {
+    if ((rule.subs || []).some(s => hay.includes(s.toLowerCase())) ||
+        (rule.toks || []).some(t => hasToken(hay, t))) {
+      return { l1: L1_TRANSPORT, l2: rule.l2 }
+    }
   }
   return null
 }
 
+// Back-compat helper — some callers only need the forced L1 name.
+export function inferReceiptCategory(receipt) {
+  return classifyReceipt(receipt)?.l1 || null
+}
+
 /**
- * Apply the deterministic category to a receipt result IN PLACE: sets the
- * receipt-level `category` and re-labels item L1s so the breakdown matches.
- * Falls back to the AI's category / first item / "שונות" when no rule fires.
- * @returns {string} the chosen receipt category.
+ * Apply the deterministic category to a scan result IN PLACE: sets the
+ * receipt-level `category` (L1) and relabels items under L1 › L2 so the receipt
+ * always carries a category AND a sub-category. When the receipt has no line
+ * items, a single representative item (named after the sub-category) is added so
+ * the L1 › L2 pair still gets created in the tree.
+ * @returns {string} the chosen receipt category (L1).
  */
 export function applyReceiptCategory(result) {
-  const forced = inferReceiptCategory(result)
-  const aiCat  = (result?.category && String(result.category).trim()) || ''
+  const hit = classifyReceipt(result)
+  const aiCat = (result?.category && String(result.category).trim()) || ''
   const firstItem = result?.items?.[0]?.category_l1
-  const chosen = forced || aiCat || firstItem || 'שונות'
+  const chosen = hit?.l1 || aiCat || firstItem || 'שונות'
 
-  if (forced) {
-    // The whole receipt is this type — keep item names but roll them up under
-    // the forced L1 so dashboards/drill-downs don't show contradictory food rows.
-    result.items = (result.items || []).map(it => ({
+  if (hit) {
+    const base = (result.items && result.items.length)
+      ? result.items
+      : [{ item_name: hit.l2, price: Number(result.total_amount) || 0 }]
+    result.items = base.map(it => ({
       ...it,
-      category_l1: forced,
-      category_l2: '',
+      category_l1: hit.l1,
+      category_l2: hit.l2,
       category_l3: it.category_l3 || it.item_name || '',
-      is_new_category: it.category_l1 !== forced ? true : it.is_new_category,
+      is_new_category: true,
     }))
   }
   result.category = chosen

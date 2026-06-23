@@ -12,7 +12,7 @@
  */
 
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
-import { inferReceiptCategory } from './_lib/classifyReceipt.js'
+import { classifyReceipt } from './_lib/classifyReceipt.js'
 
 const GEMINI_PRIMARY  = 'gemini-2.5-flash'
 const GEMINI_FALLBACK = 'gemini-flash-latest'
@@ -144,21 +144,22 @@ ${JSON.stringify(compact, null, 1)}
   if (!out) return Response.json({ error: 'AI failed', detail: lastErr?.message }, { status: 502, headers: CORS })
 
   // ── Deterministic safety net ────────────────────────────────────────────────
-  // Force fuel/transport receipts to "תחבורה ודלק" regardless of the AI, matching
-  // on the ORIGINAL receipt vendor + item names (not just what the model echoed).
+  // Force fuel/transport receipts to "תחבורה ודלק" + a real sub-category (חניון /
+  // דלק / מוניות …) regardless of the AI, matching on the ORIGINAL receipt vendor
+  // + item names (not just what the model echoed).
   const byId = new Map(receipts.map(r => [String(r.id), r]))
   for (const r of (out.results || [])) {
     const src = byId.get(String(r.id))
-    const forced = inferReceiptCategory({
+    const hit = classifyReceipt({
       vendor_name: src?.vendor_name,
       items: (src?.items || []).length ? src.items : (r.items || []),
     })
-    if (forced) {
-      r.category_l1 = forced
-      r.category_l2 = ''
+    if (hit) {
+      r.category_l1 = hit.l1
+      r.category_l2 = hit.l2
       r.category_l3 = ''
       r.items = (r.items || []).map(it => ({
-        ...it, category_l1: forced, category_l2: '', category_l3: it.category_l3 || it.item_name || '',
+        ...it, category_l1: hit.l1, category_l2: hit.l2, category_l3: it.category_l3 || it.item_name || '',
       }))
     }
   }

@@ -34,9 +34,8 @@ export async function prefetchAllPages(user) {
         .from('categories').select('*').order('level').order('sort_order')
       if (error) return
       const cats = data || []
-      const expanded = {}
-      cats.filter(c => c.level === 1).forEach(c => { expanded[c.id] = true })
-      setCached('categories', { categories: cats, expanded })
+      // Collapsed by default — the tree opens one level at a time on click.
+      setCached('categories', { categories: cats, expanded: {} })
     })(),
 
     // SuppliersPage
