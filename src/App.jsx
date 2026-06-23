@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, useEffect } from 'react'
+import { Suspense, lazy, useState, useEffect, useTransition } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import { AuthProvider, useAuth } from './hooks/useAuth'
@@ -239,6 +239,16 @@ function AppShell() {
   const { user, signOut, loading } = useAuth()
   const isMobile  = useIsMobile()
   const location  = useLocation()
+  // The page actually rendered. We update it inside a transition so that while
+  // the next tab's lazy chunk (or first data) loads, React keeps the CURRENT
+  // page on screen instead of flashing the Suspense fallback — no blank/loading
+  // feeling on tab switches. The nav highlights the new tab immediately (it uses
+  // the real location), only the content waits for the new page to be ready.
+  const [displayLocation, setDisplayLocation] = useState(location)
+  const [, startNavTransition] = useTransition()
+  useEffect(() => {
+    startNavTransition(() => setDisplayLocation(location))
+  }, [location]) // eslint-disable-line react-hooks/exhaustive-deps
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem('moses_sidebar_open') !== '0' } catch { return true }
@@ -247,17 +257,12 @@ function AppShell() {
     setSidebarOpen(o => { const n = !o; try { localStorage.setItem('moses_sidebar_open', n ? '1' : '0') } catch {} ; return n })
   }
 
-  // Preload all route chunks during idle time so switching tabs never waits on
-  // a lazy chunk download (the second cause of the blank "loading" flash).
+  // Kick off ALL route chunk loads immediately so the first switch to each tab is
+  // instant; the navigation transition above hides any remaining load time.
   useEffect(() => {
-    const preload = () => {
-      import('./pages/DashboardPage'); import('./pages/ReceiptsPage')
-      import('./pages/CategoriesPage'); import('./pages/SuppliersPage')
-      import('./pages/SettingsPage')
-    }
-    const ric = typeof window.requestIdleCallback === 'function'
-    const id = ric ? window.requestIdleCallback(preload, { timeout: 2500 }) : setTimeout(preload, 1500)
-    return () => { if (ric) { try { window.cancelIdleCallback(id) } catch {} } else clearTimeout(id) }
+    import('./pages/DashboardPage'); import('./pages/ReceiptsPage')
+    import('./pages/CategoriesPage'); import('./pages/SuppliersPage')
+    import('./pages/SettingsPage'); import('./pages/AdminPage')
   }, [])
 
   // Drop cached page data on sign-out so a different account never sees it.
@@ -291,13 +296,13 @@ function AppShell() {
       {/* Page content */}
       <main style={{
         padding: isMobile ? '16px 14px' : '24px 28px',
-        maxWidth: location.pathname === '/' ? '1100px' : '900px',
+        maxWidth: displayLocation.pathname === '/' ? '1100px' : '900px',
         margin: '0 auto',
         paddingBottom: isMobile ? bottomPad : '32px',
       }}>
         <InstallBanner />
         <Suspense fallback={<LoadingSpinner />}>
-          <Routes>
+          <Routes location={displayLocation}>
             <Route path="/"           element={<DashboardPage />} />
             <Route path="/receipts"   element={<ReceiptsPage />} />
             <Route path="/dashboard"  element={<Navigate to="/" replace />} />
