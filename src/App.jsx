@@ -280,7 +280,7 @@ function AppShell() {
   const desktopSidebar = !isMobile && sidebarOpen
 
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg)', paddingInlineEnd: desktopSidebar ? SIDEBAR_W : 0, transition: 'padding-inline-end 200ms ease' }}>
+    <div style={{ minHeight: '100dvh', background: 'var(--bg)', paddingInlineStart: desktopSidebar ? SIDEBAR_W : 0, transition: 'padding-inline-start 200ms ease' }}>
       {/* Desktop: fixed sidebar (right, RTL), collapsible. Mobile: slim header + drawer. */}
       {desktopSidebar && <Sidebar onSignOut={handleSignOut} onCollapse={toggleSidebar} />}
       {/* Desktop: floating "open" button when the sidebar is collapsed */}
