@@ -80,6 +80,7 @@ export default function DashboardPage() {
   const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
   const [distMode,    setDistMode]    = useState('cat') // distribution donut: 'cat' | 'vendor'
   const [selVendor,   setSelVendor]   = useState(null)  // highlighted vendor slice (local)
+  const [selCat,      setSelCat]      = useState(null)  // highlighted category slice (local — NO filtering)
   const [availYears,  setAvailYears]  = useState(() => getCached('dash:' + thisYear)?.availYears || [thisYear])
   const [vendorA,     setVendorA]     = useState('')    // vendor comparison
   const [vendorB,     setVendorB]     = useState('')
@@ -242,17 +243,20 @@ export default function DashboardPage() {
   // When a category is selected, the time charts adopt its colour.
   const selColor = filterCat ? (catColor[filterCat] || '#2563eb') : '#2563eb'
 
-  // ── Vendor aggregation (full) — powers the optional "by vendor" distribution ──
+  // ── Vendor aggregation (full) — powers the "by vendor" distribution ──────────
+  // Always over ALL receipts (not the category-filtered `active`), so switching
+  // the distribution to "ספק" always shows every supplier — selecting a category
+  // never narrows the supplier view.
   const vendorDist = useMemo(() => {
     const map = {}
-    active.forEach(r => {
+    receipts.forEach(r => {
       const name = (r.vendor_name || '').trim() || 'לא ידוע'
       if (!map[name]) map[name] = { name, total: 0, count: 0 }
       map[name].total += amt(r)
       map[name].count += 1
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
-  }, [active, settings.showWithVat])
+  }, [receipts, settings.showWithVat])
   const vendorTotal = useMemo(() => vendorDist.reduce((s, v) => s + v.total, 0), [vendorDist])
   // Cap to top 8 + "אחר" so the donut stays readable
   const vendorDonutData = useMemo(() => {
@@ -314,8 +318,11 @@ export default function DashboardPage() {
   const distDonut = isVendorDist ? vendorDonutData : l1DataAll   // capped for donut
   const distRank  = isVendorDist ? vendorDist : l1DataAll        // full list for ranking
   const distTotal = isVendorDist ? vendorTotal : totalAll
-  const distSel   = isVendorDist ? selVendor : filterCat
-  const distSetSel = isVendorDist ? setSelVendor : setFilterCat
+  // The distribution selection is a LOCAL highlight in BOTH modes (it greys the
+  // other slices) — it does NOT filter the rest of the dashboard, so a category
+  // click never carries over to the supplier view.
+  const distSel   = isVendorDist ? selVendor : selCat
+  const distSetSel = isVendorDist ? setSelVendor : setSelCat
   const distColorOf = (name) => { const i = distRank.findIndex(d => d.name === name); return i >= 0 ? COLORS[i % COLORS.length] : 'var(--accent)' }
 
   // Only blank to a spinner on the very first load (nothing to show yet). On
@@ -442,7 +449,7 @@ export default function DashboardPage() {
             <span style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--text-mute)' }}>התפלגות לפי:</span>
             <div style={{ display: 'flex', gap: 4, background: 'var(--panel-2)', borderRadius: 9, padding: 3 }}>
               {[{ id: 'cat', label: 'קטגוריה' }, { id: 'vendor', label: 'ספק' }].map(o => (
-                <button key={o.id} onClick={() => { setDistMode(o.id); setSelVendor(null) }}
+                <button key={o.id} onClick={() => { setDistMode(o.id); setSelVendor(null); setSelCat(null) }}
                   style={{ padding: '6px 16px', borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)', fontSize: '13.5px', fontWeight: distMode === o.id ? 700 : 500,
                     background: distMode === o.id ? 'var(--accent)' : 'transparent', color: distMode === o.id ? '#fff' : 'var(--text-dim)' }}>
                   {o.label}
@@ -453,7 +460,7 @@ export default function DashboardPage() {
 
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.6fr', gap: isMobile ? '14px' : '20px' }}>
             {/* Donut */}
-            <Section title={`התפלגות לפי ${isVendorDist ? 'ספק' : 'קטגוריה'}`} sub={isVendorDist ? 'לחץ על פלח להדגשה · לחיצה במרכז מבטלת' : 'לחץ על פלח לסינון · לחיצה במרכז מבטלת'}>
+            <Section title={`התפלגות לפי ${isVendorDist ? 'ספק' : 'קטגוריה'}`} sub="לחץ על פלח להדגשה · לחיצה במרכז מבטלת">
               {/* Selected slice title — so it's clear which slice was clicked */}
               {distSel && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>

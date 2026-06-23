@@ -12,7 +12,7 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
   useEffect(() => {
     if (!wrapRef.current) return
     const obs = new ResizeObserver(([e]) => {
-      setSize(Math.min(Math.floor(e.contentRect.width), 240))
+      setSize(Math.min(Math.floor(e.contentRect.width), 300))
     })
     obs.observe(wrapRef.current)
     return () => obs.disconnect()
@@ -23,7 +23,10 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
     svg.selectAll('*').remove()
     if (!data?.length) return
 
-    const r  = size / 2 - 6
+    // Leave a margin inside the SVG for the hover-expansion (+7) and the drop
+    // shadow so the donut is never clipped on any side.
+    const PAD = Math.max(18, size * 0.075)
+    const r  = size / 2 - PAD
     const ri = r * 0.56
 
     svg.attr('width', size).attr('height', size).attr('viewBox', `0 0 ${size} ${size}`)
@@ -99,7 +102,7 @@ export default function CategoryDonut({ data, total, onSelect, selected }) {
       .attr('r', ri - 2).attr('fill', 'transparent')
       .style('cursor', selected ? 'pointer' : 'default')
       .on('click', () => { if (selected) onSelect?.(null) })
-      .on('mouseenter', () => { if (selected) subT.text('בטל סינון').attr('fill', 'var(--danger)') })
+      .on('mouseenter', () => { if (selected) subT.text('בטל בחירה').attr('fill', 'var(--danger)') })
       .on('mouseleave', resetCenter)
   }, [data, total, size, selected])
 
