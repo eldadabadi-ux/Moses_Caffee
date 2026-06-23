@@ -758,7 +758,7 @@ export default function ReceiptsPage() {
       setReviewBeforeVat(before ? String(before) : '')
       setReviewVatAmount(vat ? String(vat) : '')
       setReviewItems(items)
-      setReviewCategory(items[0]?.category_l1 || 'שונות')
+      setReviewCategory(result.category || items[0]?.category_l1 || 'שונות')
       setReviewCurrency(result.currency || 'ILS')
       setReviewFx(result.fx || null)   // foreign-currency receipts: { rate, date, source, currency }
       setReviewPages(pages)

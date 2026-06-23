@@ -15,6 +15,7 @@
  */
 
 import { getIlsRate, normalizeCurrency } from './fxRate.js'
+import { applyReceiptCategory } from './classifyReceipt.js'
 
 // Model chain — flash models work on the free tier and are fast + accurate.
 // gemini-2.5-pro is intentionally NOT used: it returns 429 (quota) on the free tier.
@@ -162,6 +163,12 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
   result = reconcileVat(result, rate)
   result._model = usedModel
 
+  // ── Deterministic category safety net ─────────────────────────────────────
+  // Forces fuel/transport receipts to "תחבורה ודלק" regardless of what the
+  // model said, and sets the receipt-level `category` (instead of the UI having
+  // to guess from items[0]). No-op when no strong rule matches → AI's choice.
+  applyReceiptCategory(result)
+
   // ── Foreign currency → official ILS estimate (Bank of Israel rate) ─────────
   const currency = normalizeCurrency(result.currency)
   result.currency = currency
@@ -305,6 +312,12 @@ ${multiPageNote}
 
 **דוגמה מחייבת:** קבלה מתחנת דלק = "תחבורה ודלק". **אסור** לסווג אותה כ"מוצרי מזון ומכולת".
 
+### שדה category (קטגוריה ראשית של הקבלה כולה) — חובה!
+- החזר שדה **category** ברמת הקבלה = הקטגוריה הראשית (L1) שמייצגת את **כל הקבלה**, לפי סוג הקבלה/הספק (הכללים למעלה).
+- זו הקטגוריה שתוצג למשתמש — קבע אותה לפי הספק וסוג הקבלה, **לא** לפי פריט מקרי בודד.
+- קבלת דלק/חניה/תחבורה → category = "תחבורה ודלק". קבלת מסעדה → "מסעדות ואירוח". וכן הלאה.
+- אם אין התאמה לקטגוריה קיימת — צור שם קטגוריה חדש, ספציפי ומדויק (לא "שונות" אלא אם באמת אין סיווג).
+
 ### כללי סיווג למוצרי מזון (כשהקבלה באמת מזון — לעסק קפה):
 - ירקות, פירות, עלים, עגבניות, מלפפון, פלפל, בצל = "ירקות ופירות"
 - חומוס, טחינה, סלטים מוכנים, ממרחים = "מוצרי מזון ומכולת"
@@ -328,6 +341,7 @@ ${multiPageNote}
   "vat_amount": סכום המע"מ (0 אם לא מופיע בקבלה),
   "currency": "קוד מטבע — ILS אם שקלים, אחרת USD/EUR/GBP וכו'",
   "original_amount": total_amount,
+  "category": "הקטגוריה הראשית של הקבלה כולה לפי סוג הספק (למשל: תחבורה ודלק / מסעדות ואירוח / מוצרי מזון ומכולת)",
   "items": [
     {
       "item_name": "שם הפריט בעברית",
@@ -382,6 +396,7 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
           vat_amount:        { type: 'NUMBER' },
           currency:          { type: 'STRING' },
           original_amount:   { type: 'NUMBER' },
+          category:          { type: 'STRING' },
           items: {
             type: 'ARRAY',
             items: {
