@@ -9,8 +9,11 @@ export default function ShekelSign({ size = 18, color = 'currentColor', style, .
       aria-hidden="true"
       style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: size, height: size, fontSize: Math.round(size * 0.98), lineHeight: 1,
-        fontWeight: 700, color, fontFamily: 'var(--font-main)', flexShrink: 0, ...style,
+        // Render the ₪ glyph a bit larger than the nominal icon box so it reads
+        // clearly as a shekel sign (the ₪ glyph is dense at small sizes). The box
+        // stays size×size so surrounding layout is unaffected.
+        width: size, height: size, fontSize: Math.round(size * 1.2), lineHeight: 1,
+        fontWeight: 600, color, fontFamily: 'var(--font-main)', flexShrink: 0, ...style,
       }}
       {...rest}
     >

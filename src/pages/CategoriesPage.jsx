@@ -262,7 +262,7 @@ export default function CategoriesPage() {
           </button>
           <button onClick={() => { setAddingTo({ parentId: null, level: 1 }); setNewName('') }}
             style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 18px', background:'var(--accent)', color:'white', border:'none', borderRadius:'var(--r-btn)', fontSize:'15px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)' }}>
-            <Plus size={16} /> להוסיף קטגוריה
+            <Plus size={16} /> הוספת קטגוריה
           </button>
         </div>
       </div>

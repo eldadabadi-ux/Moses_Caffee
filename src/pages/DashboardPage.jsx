@@ -30,8 +30,15 @@ function KpiCard({ label, value, sub, icon: Icon, color, trend }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-mute)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</span>
-        {Icon && <div style={{ width: 34, height: 34, borderRadius: '8px', background: color + '18', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon size={17} color={color} />
+        {Icon && <div style={{
+          width: 34, height: 34, borderRadius: '8px', flexShrink: 0,
+          // color-mix works with both CSS-variable colors (var(--ok)/var(--accent))
+          // and hex, so EVERY KPI icon gets the same framed background + border.
+          background: `color-mix(in srgb, ${color} 14%, transparent)`,
+          border: `1px solid color-mix(in srgb, ${color} 32%, transparent)`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <Icon size={18} color={color} />
         </div>}
       </div>
       <div style={{ fontSize: isMobile ? '26px' : '30px', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.02em', lineHeight: 1 }}>{value}</div>
