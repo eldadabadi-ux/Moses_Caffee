@@ -234,7 +234,6 @@ function MobileHeader({ onMenu }) {
 }
 
 // ── App shell ─────────────────────────────────────────────────────────────────
-const SIDEBAR_W = 250
 
 function AppShell() {
   const { user, signOut, loading } = useAuth()
@@ -279,8 +278,10 @@ function AppShell() {
   const bottomPad = isMobile ? 'calc(70px + env(safe-area-inset-bottom))' : 0
   const desktopSidebar = !isMobile && sidebarOpen
 
+  // The sidebar is a fixed OVERLAY (it floats above the content), so the page
+  // content never reflows/moves when the sidebar opens or closes.
   return (
-    <div style={{ minHeight: '100dvh', background: 'var(--bg)', paddingInlineStart: desktopSidebar ? SIDEBAR_W : 0, transition: 'padding-inline-start 200ms ease' }}>
+    <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
       {/* Desktop: fixed sidebar (right, RTL), collapsible. Mobile: slim header + drawer. */}
       {desktopSidebar && <Sidebar onSignOut={handleSignOut} onCollapse={toggleSidebar} />}
       {/* Desktop: floating "open" button when the sidebar is collapsed */}

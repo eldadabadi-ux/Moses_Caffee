@@ -87,8 +87,11 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
       position: 'fixed', top: 0, right: 0, height: '100dvh', width: W, zIndex: 200,
       background: 'var(--panel)', borderLeft: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-main)',
-      boxShadow: drawer ? '-8px 0 30px rgba(0,0,0,0.18)' : 'none',
-      animation: drawer ? 'slideInRight 240ms cubic-bezier(0.16,1,0.3,1) both' : 'none',
+      // The sidebar floats above the page content (it never pushes it), so both
+      // the desktop panel and the mobile drawer get a shadow + slide-in to read
+      // clearly as an overlay.
+      boxShadow: '-8px 0 30px rgba(0,0,0,0.18)',
+      animation: 'slideInRight 240ms cubic-bezier(0.16,1,0.3,1) both',
     }} dir="rtl">
 
       {/* Header: logo + name (+ close on mobile) */}
