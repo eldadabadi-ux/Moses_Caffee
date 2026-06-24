@@ -57,33 +57,23 @@ const NAV = [
   },
 ]
 
-// Expanded sections persist across navigations (and the mobile drawer
-// re-mounting) so switching tabs never collapses the sections you opened.
-const OPEN_KEY = 'moses_sidebar_open_sections'
-function loadOpenSections() {
-  try { return JSON.parse(localStorage.getItem(OPEN_KEY) || '{}') || {} } catch { return {} }
-}
-
 export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut, onCollapse }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { settings } = useSettings()
   const activeSection = NAV.find(s => s.to === location.pathname)?.id
-  const [open, setOpen] = useState(loadOpenSections)
+  // Accordion: exactly ONE section is open at a time. Opening one closes the
+  // others — never two sections expanded together.
+  const [openId, setOpenId] = useState(activeSection || null)
 
-  // Persist on every change.
-  useEffect(() => { try { localStorage.setItem(OPEN_KEY, JSON.stringify(open)) } catch {} }, [open])
-  // Auto-open the section for the current route — ADDITIVELY (never collapses
-  // the others), so the previous tab's sub-items stay visible.
-  useEffect(() => {
-    if (activeSection) setOpen(p => (p[activeSection] ? p : { ...p, [activeSection]: true }))
-  }, [activeSection])
+  // Navigating to a tab opens that section (and closes the previous one).
+  useEffect(() => { if (activeSection) setOpenId(activeSection) }, [activeSection])
 
-  function toggle(id) { setOpen(p => ({ ...p, [id]: !p[id] })) }
+  function toggle(id) { setOpenId(cur => (cur === id ? null : id)) }
 
   function goSection(s) {
     navigate(s.to)
-    setOpen(p => ({ ...p, [s.id]: true }))
+    setOpenId(s.id)
     window.scrollTo({ top: 0, behavior: 'smooth' })
     onNavigate?.()
   }
@@ -131,7 +121,7 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
       <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 8px' }}>
         {NAV.map(s => {
           const isActive = location.pathname === s.to
-          const isOpen = !!open[s.id]
+          const isOpen = openId === s.id
           const Icon = s.icon
           return (
             <div key={s.id} style={{ marginBottom: 4 }}>
