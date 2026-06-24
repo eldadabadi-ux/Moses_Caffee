@@ -31,7 +31,7 @@ function Kpi({ label, value, sub }) {
   return (
     <div style={{ flex: '1 1 90px', minWidth: 0, background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 11px' }}>
       <div style={{ fontSize: 11, color: 'var(--text-mute)', fontWeight: 600, whiteSpace: 'nowrap' }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', lineHeight: 1.15, marginTop: 2 }}>{value}</div>
+      <div style={{ fontFamily: 'var(--font-main)', fontSize: 18, fontWeight: 700, color: 'var(--text)', lineHeight: 1.15, marginTop: 2 }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--text-mute)', marginTop: 1 }}>{sub}</div>}
     </div>
   )
@@ -57,7 +57,7 @@ export default function CategoryInsightPanel({ node, path, flatItems, onJumpVend
 
   if (!node) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--text-mute)', padding: '48px 20px', height: '100%' }}>
+      <div style={{ fontFamily: 'var(--font-main)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--text-mute)', padding: '48px 20px', height: '100%' }}>
         <Layers size={40} style={{ opacity: 0.25, marginBottom: 12 }} />
         <p style={{ fontWeight: 600, color: 'var(--text)', fontSize: 15, margin: 0 }}>בחר קטגוריה</p>
         <p style={{ fontSize: 13, marginTop: 6 }}>לחיצה על קטגוריה תציג כאן ניתוח הוצאות, התפלגות, והשוואת ספקים.</p>
@@ -69,14 +69,14 @@ export default function CategoryInsightPanel({ node, path, flatItems, onJumpVend
   const subEmpty = childrenBreakdown(scoped, path || []).dim === null
 
   return (
-    <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div dir="rtl" style={{ fontFamily: 'var(--font-main)', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header */}
       <div>
         <div style={{ fontSize: 11.5, color: 'var(--text-mute)', marginBottom: 3 }}>
           {crumbs.length > 1 ? crumbs.slice(0, -1).join(' › ') + ' › ' : ''}
           <span style={{ background: 'var(--accent-bg)', color: 'var(--accent)', borderRadius: 999, padding: '1px 8px', fontWeight: 600 }}>{LEVEL_LABEL[node.level] || 'קטגוריה'}</span>
         </div>
-        <h2 style={{ margin: 0, fontSize: 21, fontWeight: 800, color: 'var(--text)' }}>{node.name}</h2>
+        <h2 style={{ margin: 0, fontFamily: 'var(--font-main)', fontSize: 21, fontWeight: 700, color: 'var(--text)' }}>{node.name}</h2>
       </div>
 
       {/* Range */}
