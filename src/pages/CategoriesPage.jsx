@@ -10,7 +10,7 @@ import { normalizeCategoryName, categoryKey } from '../lib/categoryNormalize'
 import { flattenItems } from '../lib/itemAggregation'
 import { nodePath } from '../lib/categoryStats'
 import toast from 'react-hot-toast'
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Tag, X, Check, RefreshCw } from 'lucide-react'
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Tag, X, Check, RefreshCw, PieChart } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import Modal from '../components/ui/Modal'
@@ -34,6 +34,7 @@ export default function CategoriesPage() {
 
   // ── Analytics (insight panel) ────────────────────────────────────────────────
   const [selectedNode, setSelectedNode] = useState(null)
+  const [panelOpen, setPanelOpen]       = useState(false)   // mobile: insight modal visibility
   const [anaReceipts, setAnaReceipts]   = useState(() => getCached('cat-analytics') || [])
   const [isMobile, setIsMobile]         = useState(() => window.innerWidth < 768)
   const flatItems = useMemo(() => flattenItems(anaReceipts), [anaReceipts])
@@ -313,11 +314,14 @@ export default function CategoriesPage() {
     const isEditing    = editId === cat.id
     const isAddingChild = addingTo?.parentId === cat.id
     const isSelected   = selectedNode?.id === cat.id
-    // Clicking ANYWHERE on the row selects it (opens the insight panel) and
-    // toggles its children — so expanding no longer depends on the tiny chevron.
+    // Open the analysis for this node — modal on mobile, side panel on desktop.
+    const openInsights = () => { setSelectedNode(cat); if (isMobile) setPanelOpen(true) }
+    // Clicking the row DRILLS (expands/collapses its children) — it does NOT pop
+    // the graph, so the user can keep navigating sub-categories. The chart button
+    // opens the analysis; a leaf row (nothing to drill) opens it on click.
     const handleRowClick = () => {
-      setSelectedNode(cat)
       if (hasChildren) setExpanded(p => ({ ...p, [cat.id]: !p[cat.id] }))
+      else openInsights()
     }
 
     return (
@@ -358,7 +362,12 @@ export default function CategoriesPage() {
           )}
 
           {!isEditing && (
-            <div style={{ display:'flex', gap:'2px', flexShrink:0, opacity:0.7 }}>
+            <div style={{ display:'flex', gap:'2px', flexShrink:0, opacity:0.85 }}>
+              <button onClick={e => { e.stopPropagation(); openInsights() }} title="הצג ניתוח / גרף"
+                style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'var(--accent)', borderRadius:'6px', display:'flex', alignItems:'center' }}
+                onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
+                <PieChart size={14} />
+              </button>
               {depth < 2 && (
                 <button onClick={e => { e.stopPropagation(); setAddingTo({ parentId: cat.id, level: depth + 2 }); setExpanded(p => ({ ...p, [cat.id]: true })) }}
                   title="הוסף תת-קטגוריה"
@@ -472,7 +481,7 @@ export default function CategoriesPage() {
 
       {/* Mobile: insight panel as a bottom sheet */}
       {isMobile && (
-        <Modal isOpen={!!selectedNode} onClose={() => setSelectedNode(null)} title="ניתוח קטגוריה" size="lg">
+        <Modal isOpen={panelOpen} onClose={() => setPanelOpen(false)} title="ניתוח קטגוריה" size="lg">
           <CategoryInsightPanel node={selectedNode} path={selectedNode ? nodePath(categories, selectedNode) : []} flatItems={flatItems} onJumpVendor={jumpVendor} onJumpReceipts={jumpReceipts} />
         </Modal>
       )}
