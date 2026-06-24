@@ -7,6 +7,7 @@ import { useSettings } from '../hooks/useSettings'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { normalizeCategoryName, categoryKey } from '../lib/categoryNormalize'
 import { archiveReceipts } from '../lib/archive'
+import ImageViewer from '../components/ImageViewer'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload } from '../lib/imageUtils'
 import { isPdf, pdfToImages } from '../lib/pdfUtils'
@@ -1612,14 +1613,8 @@ export default function ReceiptsPage() {
         </div>
       </Modal>
 
-      {/* ── Lightbox ──────────────────────────────────────────────────────────────── */}
-      {lightboxUrl && createPortal(
-        <div onClick={() => setLightboxUrl(null)} style={{ position:'fixed', inset:0, zIndex:99999, background:'rgba(0,0,0,0.9)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'zoom-out' }}>
-          <img src={lightboxUrl} alt="קבלה" style={{ maxWidth:'95vw', maxHeight:'90dvh', objectFit:'contain', borderRadius:'10px', pointerEvents:'none' }} />
-          <button onClick={() => setLightboxUrl(null)} style={{ position:'absolute', top:'16px', left:'16px', background:'rgba(255,255,255,0.15)', border:'none', borderRadius:'50%', width:'40px', height:'40px', color:'white', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', touchAction:'manipulation' }}><X size={18} /></button>
-        </div>,
-        document.body
-      )}
+      {/* ── Receipt image viewer (floating + zoomable) ──────────────────────────── */}
+      {lightboxUrl && <ImageViewer src={lightboxUrl} alt="קבלה" onClose={() => setLightboxUrl(null)} />}
 
       {/* ── Export dialog ─────────────────────────────────────────────────────────── */}
       {showExport && (
