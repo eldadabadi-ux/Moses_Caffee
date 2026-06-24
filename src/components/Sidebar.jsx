@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useSettings } from '../hooks/useSettings'
 import {
@@ -57,12 +57,27 @@ const NAV = [
   },
 ]
 
+// Expanded sections persist across navigations (and the mobile drawer
+// re-mounting) so switching tabs never collapses the sections you opened.
+const OPEN_KEY = 'moses_sidebar_open_sections'
+function loadOpenSections() {
+  try { return JSON.parse(localStorage.getItem(OPEN_KEY) || '{}') || {} } catch { return {} }
+}
+
 export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut, onCollapse }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { settings } = useSettings()
   const activeSection = NAV.find(s => s.to === location.pathname)?.id
-  const [open, setOpen] = useState(() => ({ [activeSection || 'receipts']: true }))
+  const [open, setOpen] = useState(loadOpenSections)
+
+  // Persist on every change.
+  useEffect(() => { try { localStorage.setItem(OPEN_KEY, JSON.stringify(open)) } catch {} }, [open])
+  // Auto-open the section for the current route — ADDITIVELY (never collapses
+  // the others), so the previous tab's sub-items stay visible.
+  useEffect(() => {
+    if (activeSection) setOpen(p => (p[activeSection] ? p : { ...p, [activeSection]: true }))
+  }, [activeSection])
 
   function toggle(id) { setOpen(p => ({ ...p, [id]: !p[id] })) }
 
