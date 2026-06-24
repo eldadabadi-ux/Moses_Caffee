@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useTenant } from '../hooks/useTenant'
@@ -6,10 +7,14 @@ import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { recategorizeAll } from '../lib/recategorize'
 import { classifyReceipt } from '../../functions/api/_lib/classifyReceipt'
 import { normalizeCategoryName, categoryKey } from '../lib/categoryNormalize'
+import { flattenItems } from '../lib/itemAggregation'
+import { nodePath } from '../lib/categoryStats'
 import toast from 'react-hot-toast'
 import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Tag, X, Check, RefreshCw } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import Modal from '../components/ui/Modal'
+import CategoryInsightPanel from '../components/CategoryInsightPanel'
 
 export default function CategoriesPage() {
   const { user } = useAuth()
@@ -25,8 +30,36 @@ export default function CategoriesPage() {
   const [saving, setSaving]         = useState(false)
   const [recatBusy, setRecatBusy]   = useState(false)
   const recatTimer = useRef(null)
+  const navigate = useNavigate()
+
+  // ── Analytics (insight panel) ────────────────────────────────────────────────
+  const [selectedNode, setSelectedNode] = useState(null)
+  const [anaReceipts, setAnaReceipts]   = useState(() => getCached('cat-analytics') || [])
+  const [isMobile, setIsMobile]         = useState(() => window.innerWidth < 768)
+  const flatItems = useMemo(() => flattenItems(anaReceipts), [anaReceipts])
+
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth < 768)
+    window.addEventListener('resize', h)
+    return () => window.removeEventListener('resize', h)
+  }, [])
+
+  // Receipts for the per-category analytics — ALL receipts incl. archived, to
+  // match the dashboard (archived still count in stats).
+  async function loadAnalytics() {
+    try {
+      const { data } = await supabase.from('receipts')
+        .select('id, vendor_name, amount, receipt_date, category_text, category_id, items, archived_at')
+        .eq('user_id', user.id)
+      if (data) { setAnaReceipts(data); setCached('cat-analytics', data) }
+    } catch (e) { console.warn('[categories] analytics load:', e?.message) }
+  }
+
+  const jumpVendor   = (name) => navigate('/suppliers?focus=' + encodeURIComponent(name))
+  const jumpReceipts = (name) => navigate('/receipts?q=' + encodeURIComponent(name))
 
   useEffect(() => { if (user) load() }, [user])  // eslint-disable-line
+  useEffect(() => { if (user) loadAnalytics() }, [user])  // eslint-disable-line
   useEffect(() => () => clearTimeout(recatTimer.current), [])
 
   // Sidebar-triggered actions
@@ -279,20 +312,31 @@ export default function CategoriesPage() {
     const isExpanded   = expanded[cat.id] === true   // collapsed unless explicitly opened
     const isEditing    = editId === cat.id
     const isAddingChild = addingTo?.parentId === cat.id
+    const isSelected   = selectedNode?.id === cat.id
+    // Clicking ANYWHERE on the row selects it (opens the insight panel) and
+    // toggles its children — so expanding no longer depends on the tiny chevron.
+    const handleRowClick = () => {
+      setSelectedNode(cat)
+      if (hasChildren) setExpanded(p => ({ ...p, [cat.id]: !p[cat.id] }))
+    }
 
     return (
       <div>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '8px',
-          padding: `9px 16px 9px ${16 + depth * 24}px`,
-          borderBottom: '1px solid var(--border)',
-          background: depth === 0 ? 'var(--panel)' : depth === 1 ? 'var(--panel-2)' : 'rgba(0,0,0,0.02)',
-        }}>
+        <div onClick={isEditing ? undefined : handleRowClick}
+          role={isEditing ? undefined : 'button'} tabIndex={isEditing ? undefined : 0}
+          onKeyDown={isEditing ? undefined : (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleRowClick() } })}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
+            padding: `9px 16px 9px ${16 + depth * 24}px`,
+            borderBottom: '1px solid var(--border)',
+            cursor: isEditing ? 'default' : 'pointer',
+            background: isSelected ? 'var(--accent-bg)' : depth === 0 ? 'var(--panel)' : depth === 1 ? 'var(--panel-2)' : 'rgba(0,0,0,0.02)',
+            boxShadow: isSelected ? 'inset 3px 0 0 var(--accent)' : 'none',
+          }}>
           {hasChildren || depth < 2 ? (
-            <button onClick={() => hasChildren ? setExpanded(p => ({ ...p, [cat.id]: !p[cat.id] })) : null}
-              style={{ background:'none', border:'none', cursor: hasChildren ? 'pointer' : 'default', color:'var(--text-mute)', padding:'2px', display:'flex', alignItems:'center', flexShrink:0 }}>
+            <span style={{ color:'var(--text-mute)', padding:'2px', display:'flex', alignItems:'center', flexShrink:0 }}>
               {hasChildren ? isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} /> : <span style={{ width:17, display:'inline-block' }} />}
-            </button>
+            </span>
           ) : <span style={{ width:21, display:'inline-block' }} />}
 
           <Tag size={12} style={{ color: depth === 0 ? 'var(--accent)' : depth === 1 ? '#7c3aed' : '#059669', flexShrink:0 }} />
@@ -300,34 +344,35 @@ export default function CategoriesPage() {
           {isEditing ? (
             <>
               <input autoFocus value={editName} onChange={e => setEditName(e.target.value)}
+                onClick={e => e.stopPropagation()}
                 onKeyDown={e => { if (e.key === 'Enter') updateCategory(cat.id); if (e.key === 'Escape') { setEditId(null); setEditName('') } }}
                 style={{ ...FS_INLINE, flex:1, maxWidth:'260px' }} dir="auto" />
-              <button onClick={() => updateCategory(cat.id)} disabled={saving} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--ok)', display:'flex', padding:'2px' }}><Check size={15} /></button>
-              <button onClick={() => { setEditId(null); setEditName('') }} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', display:'flex', padding:'2px' }}><X size={14} /></button>
+              <button onClick={e => { e.stopPropagation(); updateCategory(cat.id) }} disabled={saving} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--ok)', display:'flex', padding:'2px' }}><Check size={15} /></button>
+              <button onClick={e => { e.stopPropagation(); setEditId(null); setEditName('') }} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', display:'flex', padding:'2px' }}><X size={14} /></button>
             </>
           ) : (
             <>
-              <span style={{ flex:1, fontSize: depth === 0 ? '17px' : '16px', fontWeight: depth === 0 ? 600 : 500, color:'var(--text)' }}>{cat.name}</span>
-              {children.length > 0 && <span style={{ fontSize:'11px', color:'var(--text-mute)', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:'999px', padding:'1px 8px' }}>{children.length} תתי-קטגוריות</span>}
+              <span style={{ flex:1, minWidth:0, fontSize: depth === 0 ? '17px' : '16px', fontWeight: depth === 0 ? 600 : 500, color: isSelected ? 'var(--accent)' : 'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{cat.name}</span>
+              {children.length > 0 && <span style={{ fontSize:'11px', color:'var(--text-mute)', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:'999px', padding:'1px 8px', flexShrink:0 }}>{children.length}</span>}
             </>
           )}
 
           {!isEditing && (
             <div style={{ display:'flex', gap:'2px', flexShrink:0, opacity:0.7 }}>
               {depth < 2 && (
-                <button onClick={() => { setAddingTo({ parentId: cat.id, level: depth + 2 }); setExpanded(p => ({ ...p, [cat.id]: true })) }}
+                <button onClick={e => { e.stopPropagation(); setAddingTo({ parentId: cat.id, level: depth + 2 }); setExpanded(p => ({ ...p, [cat.id]: true })) }}
                   title="הוסף תת-קטגוריה"
                   style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'var(--accent)', borderRadius:'6px', fontSize:'11px', display:'flex', alignItems:'center', gap:'3px' }}
                   onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
                   <Plus size={12} />
                 </button>
               )}
-              <button onClick={() => { setEditId(cat.id); setEditName(cat.name) }} title="עריכה"
+              <button onClick={e => { e.stopPropagation(); setEditId(cat.id); setEditName(cat.name) }} title="עריכה"
                 style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }}
                 onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}>
                 <Pencil size={12} />
               </button>
-              <button onClick={() => setDeleteId(cat.id)} title="מחיקה"
+              <button onClick={e => { e.stopPropagation(); setDeleteId(cat.id) }} title="מחיקה"
                 style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }}
                 onMouseEnter={e=>{e.currentTarget.style.background='#fef2f2';e.currentTarget.style.color='var(--danger)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}>
                 <Trash2 size={12} />
@@ -356,7 +401,7 @@ export default function CategoriesPage() {
   if (loading && categories.length === 0) return <LoadingSpinner />
 
   return (
-    <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap:'24px', maxWidth:'800px' }} dir="rtl">
+    <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap:'24px', maxWidth:'1300px' }} dir="rtl">
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'12px' }}>
         <div>
           <h1 style={{ fontSize:'26px', fontWeight:700, color:'var(--text)', margin:0 }}>קטגוריות הוצאות</h1>
@@ -399,7 +444,8 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      <div style={{ background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-hero)', boxShadow:'var(--shadow-card)', overflow:'hidden' }}>
+      <div style={{ display:'flex', gap:'20px', alignItems:'flex-start' }}>
+        <div style={{ flex:1, minWidth:0, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-hero)', boxShadow:'var(--shadow-card)', overflow:'hidden' }}>
         {l1.length === 0 ? (
           <div style={{ padding:'48px 24px', textAlign:'center' }}>
             <Tag size={32} style={{ color:'var(--text-mute)', margin:'0 auto 12px', display:'block' }} />
@@ -415,7 +461,21 @@ export default function CategoriesPage() {
             {l1.map(cat => <CategoryRow key={cat.id} cat={cat} depth={0} />)}
           </>
         )}
+        </div>
+        {/* Desktop: sticky insight panel beside the tree */}
+        {!isMobile && (
+          <aside style={{ width:400, flexShrink:0, position:'sticky', top:20, maxHeight:'calc(100dvh - 40px)', overflowY:'auto', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-hero)', boxShadow:'var(--shadow-card)', padding:'16px' }}>
+            <CategoryInsightPanel node={selectedNode} path={selectedNode ? nodePath(categories, selectedNode) : []} flatItems={flatItems} onJumpVendor={jumpVendor} onJumpReceipts={jumpReceipts} />
+          </aside>
+        )}
       </div>
+
+      {/* Mobile: insight panel as a bottom sheet */}
+      {isMobile && (
+        <Modal isOpen={!!selectedNode} onClose={() => setSelectedNode(null)} title="ניתוח קטגוריה" size="lg">
+          <CategoryInsightPanel node={selectedNode} path={selectedNode ? nodePath(categories, selectedNode) : []} flatItems={flatItems} onJumpVendor={jumpVendor} onJumpReceipts={jumpReceipts} />
+        </Modal>
+      )}
 
       <ConfirmDialog isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={deleteCategory}
         title="מחיקת קטגוריה" message="האם למחוק את הקטגוריה? תתי-קטגוריות יאבדו את הקישור." />

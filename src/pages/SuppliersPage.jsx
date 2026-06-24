@@ -40,6 +40,16 @@ export default function SuppliersPage() {
 
   useEffect(() => { loadAll() }, [loadAll])
 
+  // Pre-fill search when arriving via ?focus= (e.g. from the Categories panel)
+  useEffect(() => {
+    const f = new URLSearchParams(window.location.search).get('focus')
+    if (f) {
+      setSearch(f)
+      const u = new URL(window.location.href); u.searchParams.delete('focus')
+      window.history.replaceState({}, '', u.toString())
+    }
+  }, [])
+
   // Sidebar "הוסף ספק" action
   useEffect(() => {
     const onAdd = () => setEdit({ name: '', phone: '', whatsapp: '', email: '', address: '', supplies: '', notes: '' })

@@ -304,7 +304,7 @@ function AppShell() {
       {/* Page content */}
       <main style={{
         padding: isMobile ? '16px 14px' : '24px 28px',
-        maxWidth: displayLocation.pathname === '/' ? '1100px' : '900px',
+        maxWidth: displayLocation.pathname === '/categories' ? '1320px' : displayLocation.pathname === '/' ? '1100px' : '900px',
         margin: '0 auto',
         paddingBottom: isMobile ? bottomPad : '32px',
       }}>

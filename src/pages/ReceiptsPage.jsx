@@ -525,6 +525,17 @@ export default function ReceiptsPage() {
     }
   }, [])
 
+  // ── Pre-fill search when arriving via ?q= (e.g. from the Categories panel) ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const q = params.get('q')
+    if (q) {
+      setSearch(q)
+      const u = new URL(window.location.href); u.searchParams.delete('q')
+      window.history.replaceState({}, '', u.toString())
+    }
+  }, [])
+
   // ── Auto-start scan when arriving via ?scan=1 (bottom-nav FAB / PWA shortcut) ──
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
