@@ -4,6 +4,7 @@
  * Called after the user changes the category tree.
  */
 import { supabase } from './supabase'
+import { normalizeCategoryName, categoryKey } from './categoryNormalize'
 
 export async function recategorizeAll() {
   // 1. Active receipts (id, vendor, items)
@@ -33,18 +34,21 @@ export async function recategorizeAll() {
   //    that doesn't exist yet — keeps the categories tree in full sync with what
   //    the receipts now use (so e.g. a new "תחבורה ודלק" shows in the Categories tab).
   const { data: cats } = await supabase.from('categories').select('id, name, level')
-  const l1Id = {}
-  ;(cats || []).filter(c => c.level === 1).forEach(c => { l1Id[c.name.trim().toLowerCase()] = c.id })
+  const l1Id = {}   // canonical key → id
+  ;(cats || []).filter(c => c.level === 1).forEach(c => { l1Id[categoryKey(c.name)] = c.id })
 
-  const needed = [...new Set(results.map(r => (r.category_l1 || '').trim()).filter(Boolean))]
-  const toCreate = needed.filter(n => !l1Id[n.toLowerCase()])
-  if (toCreate.length) {
+  // Canonical L1 names the classifier wants that don't exist yet (deduped by key,
+  // correct spelling) — so re-classification never creates a misspelled duplicate.
+  const neededByKey = new Map()
+  results.map(r => normalizeCategoryName(r.category_l1)).filter(Boolean)
+    .forEach(name => { if (!l1Id[categoryKey(name)] && !neededByKey.has(categoryKey(name))) neededByKey.set(categoryKey(name), name) })
+  if (neededByKey.size) {
     const baseOrder = (cats || []).filter(c => c.level === 1).length
     const uid = session.user?.id
     const { data: created } = await supabase.from('categories')
-      .insert(toCreate.map((name, i) => ({ user_id: uid, name, level: 1, parent_id: null, sort_order: baseOrder + i })))
+      .insert([...neededByKey.values()].map((name, i) => ({ user_id: uid, name, level: 1, parent_id: null, sort_order: baseOrder + i })))
       .select('id, name')
-    ;(created || []).forEach(c => { l1Id[c.name.trim().toLowerCase()] = c.id })
+    ;(created || []).forEach(c => { l1Id[categoryKey(c.name)] = c.id })
   }
 
   // 4. Apply updates per receipt
@@ -53,8 +57,8 @@ export async function recategorizeAll() {
     const result = results.find(x => x.id === r.id)
     if (!result || !result.category_l1) continue
 
-    const newText = result.category_l1
-    const newCatId = l1Id[newText.trim().toLowerCase()] || null
+    const newText = normalizeCategoryName(result.category_l1)
+    const newCatId = l1Id[categoryKey(newText)] || null
 
     // Merge item-level categories back into stored items (match by index, then name)
     let newItems = r.items
@@ -63,7 +67,7 @@ export async function recategorizeAll() {
         const m = result.items[i] && result.items[i].item_name === it.item_name
           ? result.items[i]
           : result.items.find(x => x.item_name === it.item_name)
-        return m ? { ...it, category_l1: m.category_l1, category_l2: m.category_l2 || '', category_l3: m.category_l3 || '' } : it
+        return m ? { ...it, category_l1: normalizeCategoryName(m.category_l1), category_l2: normalizeCategoryName(m.category_l2), category_l3: m.category_l3 || '' } : it
       })
     }
 

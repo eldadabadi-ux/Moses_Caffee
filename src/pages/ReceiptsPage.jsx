@@ -5,6 +5,8 @@ import { useAuth } from '../hooks/useAuth'
 import { useTenant } from '../hooks/useTenant'
 import { useSettings } from '../hooks/useSettings'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
+import { normalizeCategoryName, categoryKey } from '../lib/categoryNormalize'
+import { archiveReceipts } from '../lib/archive'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload } from '../lib/imageUtils'
 import { isPdf, pdfToImages } from '../lib/pdfUtils'
@@ -372,7 +374,7 @@ function CropModal({ src, onConfirm, onCancel }) {
 }
 
 // ── ExportDialog ──────────────────────────────────────────────────────────────
-function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 18, onClose }) {
+function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 18, onClose, onExported }) {
   const [opts, setOpts] = useState({ excel: true, pdf: true, images: true })
   const [busy, setBusy] = useState(false)
   const nImages = receipts.filter(r => r.receipt_image).length
@@ -404,6 +406,7 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 1
       }
       toast.success('הייצוא הושלם!')
       onClose()
+      onExported?.(receipts)   // offer to move the exported receipts to the archive
     } catch (err) {
       toast.error('שגיאה בייצוא: ' + (err?.message || ''))
     } finally {
@@ -478,6 +481,7 @@ export default function ReceiptsPage() {
   const [showCamera, setShowCamera]     = useState(false)
   const [cameraMulti, setCameraMulti]   = useState(false)     // multi-page capture mode
   const [showExport, setShowExport]     = useState(false)
+  const [archiveAfterExport, setArchiveAfterExport] = useState(null)  // ids pending "move to archive?" after export
   const [scanLoading, setScanLoading]   = useState(false)
   const [scanPhase, setScanPhase]       = useState('idle')   // 'idle'|'scanning'|'done'|'error' — drives the scan animation
   const [scanningImage, setScanningImage] = useState(null)   // first captured page, shown inside the animation
@@ -608,8 +612,30 @@ export default function ReceiptsPage() {
         await downloadFile({ blob, filename: `דוח_קבלות_${dateStr}.html` })
         toast.success('דוח PDF הורד — פתח והדפס / שמור כ-PDF')
       }
+      promptArchiveAfterExport(filtered)
     } catch (err) {
       toast.error('שגיאה בייצוא: ' + (err?.message || ''))
+    }
+  }
+
+  // After an export, offer to move the exported receipts to the archive so they
+  // stop cluttering the Receipts tab (they STILL count in the dashboard/stats).
+  function promptArchiveAfterExport(list) {
+    if (archiveView) return                    // already viewing the archive
+    const ids = (list || []).map(r => r.id).filter(Boolean)
+    if (ids.length) setArchiveAfterExport(ids)
+  }
+
+  async function confirmArchiveAfterExport() {
+    const ids = archiveAfterExport || []
+    setArchiveAfterExport(null)
+    if (!ids.length) return
+    try {
+      await archiveReceipts(ids)
+      setReceipts(prev => { const next = prev.filter(r => !ids.includes(r.id)); setCached('receipts', next); return next })
+      toast.success(`${ids.length} קבלות הועברו לארכיון`)
+    } catch (err) {
+      toast.error('שגיאה בהעברה לארכיון: ' + (err?.message || ''))
     }
   }
 
@@ -780,13 +806,15 @@ export default function ReceiptsPage() {
     const { data: existing } = await supabase
       .from('categories').select('id, name, parent_id, level').eq('user_id', user.id)
     const cats = existing || []
+    // Match on the CANONICAL key so we never create a misspelled / duplicate
+    // category (e.g. "מוצון ומכולת" resolves to the existing "מוצרי מזון ומכולת").
     const find = (name, level, parentId) => cats.find(c =>
       c.level === level &&
-      c.name.trim().toLowerCase() === String(name).trim().toLowerCase() &&
+      categoryKey(c.name) === categoryKey(name) &&
       (level === 1 || c.parent_id === parentId)
     )
     async function ensure(name, level, parentId) {
-      const nm = (name || '').trim()
+      const nm = normalizeCategoryName(name)
       if (!nm) return null
       let cat = find(nm, level, parentId)
       if (cat) return cat.id
@@ -864,7 +892,7 @@ export default function ReceiptsPage() {
         user_id: user.id, vendor_name: reviewVendor,
         receipt_date: reviewDate || new Date().toISOString().slice(0, 10),
         amount: totalAmt, currency: 'ILS',
-        category_id, category_text: reviewCategory,
+        category_id, category_text: normalizeCategoryName(reviewCategory) || 'שונות',
         items: storedItems,
         receipt_image: finalImage || null, ai_extracted: true,
         // Exact VAT breakdown is stored inside ai_summary too — this works even
@@ -902,8 +930,8 @@ export default function ReceiptsPage() {
       .filter(it => (it.item_name || '').trim() || it.price > 0)
     // Resolve the chosen category to an L1 id — creating the category if it's new,
     // so the dashboard (which resolves by category_id) reflects the change.
-    const catName = (form.category_text || '').trim() || 'שונות'
-    let category_id = categories.find(c => c.level === 1 && (c.name || '').trim() === catName)?.id ?? null
+    const catName = normalizeCategoryName(form.category_text) || 'שונות'
+    let category_id = categories.find(c => c.level === 1 && categoryKey(c.name) === categoryKey(catName))?.id ?? null
     if (!category_id) {
       try {
         const { data: created } = await supabase.from('categories')
@@ -1573,8 +1601,15 @@ export default function ReceiptsPage() {
 
       {/* ── Export dialog ─────────────────────────────────────────────────────────── */}
       {showExport && (
-        <ExportDialog receipts={filtered} totalAmount={totalAmount} filterFrom={filterFrom} filterTo={filterTo} vatRate={vatRate} onClose={() => setShowExport(false)} />
+        <ExportDialog receipts={filtered} totalAmount={totalAmount} filterFrom={filterFrom} filterTo={filterTo} vatRate={vatRate}
+          onClose={() => setShowExport(false)} onExported={promptArchiveAfterExport} />
       )}
+
+      {/* ── Move exported receipts to archive? ────────────────────────────────────── */}
+      <ConfirmDialog isOpen={!!archiveAfterExport} onClose={() => setArchiveAfterExport(null)} onConfirm={confirmArchiveAfterExport}
+        title="העברה לארכיון"
+        message={`הייצוא הושלם. להעביר את ${archiveAfterExport?.length || 0} הקבלות שיוצאו לארכיון? הן יוסרו מלשונית הקבלות אך ימשיכו להיכלל בדשבורד ובסטטיסטיקות.`}
+        confirmText="העבר לארכיון" variant="primary" />
 
       {/* ── Archive (soft delete) — recoverable ──────────────────────────────────── */}
       <ConfirmDialog isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={archiveReceipt}

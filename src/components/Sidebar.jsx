@@ -4,7 +4,7 @@ import { useSettings } from '../hooks/useSettings'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store,
+  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive,
 } from 'lucide-react'
 
 // Navigation tree — every section + its options.
@@ -38,6 +38,10 @@ const NAV = [
     children: [
       { label: 'הוסף ספק', icon: Plus, action: 'suppliers-add' },
     ],
+  },
+  {
+    id: 'archive', label: 'ארכיון', icon: Archive, to: '/archive',
+    children: [],
   },
   {
     id: 'settings', label: 'הגדרות', icon: Settings, to: '/settings',
@@ -124,10 +128,12 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
                   <Icon size={19} />
                   {s.label}
                 </button>
-                <button onClick={() => toggle(s.id)} aria-label="הרחב"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mute)', padding: '11px 10px', display: 'flex' }}>
-                  <ChevronDown size={16} style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 160ms' }} />
-                </button>
+                {s.children.length > 0 && (
+                  <button onClick={() => toggle(s.id)} aria-label="הרחב"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mute)', padding: '11px 10px', display: 'flex' }}>
+                    <ChevronDown size={16} style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 160ms' }} />
+                  </button>
+                )}
               </div>
               {/* Children */}
               {isOpen && (
