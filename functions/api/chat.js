@@ -192,7 +192,7 @@ function buildReceiptsBlock(receipts, categories, suppliers) {
     return `- ${c1.name}${l2.length ? ': ' + l2.map(x => x.name).join(', ') : ''}`
   }).join('\n') || '(אין קטגוריות מוגדרות)'
 
-  return `=== נתוני בית הקפה (${now.toLocaleString('he-IL')}) ===
+  return `=== נתוני בית הקפה (${now.toLocaleDateString('he-IL')}) ===
 החודש הנוכחי: ${HE_MONTHS[m0]} ${y0}. החודש הבא: ${HE_MONTHS[nextMonthIdx]}.
 
 [סיכום]
@@ -267,7 +267,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   const showWithVat = userSettings?.show_with_vat !== false
   const bizName     = userSettings?.business_name || 'בית הקפה'
 
-  const systemPrompt = `אתה "העוזר החכם" של בית הקפה של משה — מערכת לניהול קבלות והוצאות.
+  // STABLE prefix — identical request-to-request within a conversation, so it can
+  // be prompt-cached (instructions + business settings + the big data block). Must
+  // contain NO per-request values (no timestamp, no current screen).
+  const stableSystem = `אתה "העוזר החכם" של בית הקפה של משה — מערכת לניהול קבלות והוצאות.
 הטון שלך: חברי, ענייני ומקצועי. השב תמיד בעברית, בניסוח קצר וברור.
 
 יש לך גישה מלאה לכל נתוני העסק: קבלות, ספקים, מוצרים, קטגוריות והוצאות. אתה יכול:
@@ -286,9 +289,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
 [הגדרות מוגדרות במערכת]
 שם העסק: ${bizName} · שיעור מע"מ: ${vatRate}% · תצוגת מחירים: ${showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
 
-מסך נוכחי: ${ctx.screen || 'לא ידוע'}${ctx.path ? ` (${ctx.path})` : ''}
-
 ${dataBlock}`
+
+  // VOLATILE suffix — tiny, changes per request (current screen). NOT cached.
+  const volatileSystem = `מסך נוכחי: ${ctx.screen || 'לא ידוע'}${ctx.path ? ` (${ctx.path})` : ''}`
 
   // ── Call Anthropic Claude ──────────────────────────────────────────────────
   try {
@@ -296,7 +300,13 @@ ${dataBlock}`
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: CLAUDE_MODEL, max_tokens: MAX_TOKENS, system: systemPrompt,
+        model: CLAUDE_MODEL, max_tokens: MAX_TOKENS,
+        // The stable block is prompt-cached (written once, then read at ~10% on
+        // every following message in the ~5-min window); the volatile block isn't.
+        system: [
+          { type: 'text', text: stableSystem, cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: volatileSystem },
+        ],
         messages: messages.map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
       }),
     })
@@ -306,6 +316,9 @@ ${dataBlock}`
       return Response.json({ error: 'בקשת ה-AI נכשלה', detail: err.slice(0, 200) }, { status: 502, headers: CORS })
     }
     const data = await res.json()
+    // Cache visibility: cache_read_input_tokens > 0 from the 2nd message onward
+    // means the data block was served from cache (~10% price) instead of full price.
+    if (data?.usage) console.log('[chat] usage:', JSON.stringify(data.usage))
     const reply = data?.content?.[0]?.text || ''
     return Response.json({ reply }, { headers: CORS })
   } catch (err) {
