@@ -159,6 +159,11 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
 
   if (!result) { const e = new Error('AI processing failed'); e.code = 'AI_FAILED'; e.detail = lastError?.message || 'all models unavailable'; throw e }
 
+  // ── Cross-check the total against the sum of line items ───────────────────
+  // On dense delivery notes / invoices the model often misreads the grand total
+  // (e.g. grabs one line). If the items clearly sum to more, trust the items.
+  result = reconcileTotalFromItems(result, rate)
+
   // ── Normalize VAT breakdown ───────────────────────────────────────────────
   result = reconcileVat(result, rate)
   result._model = usedModel
@@ -197,6 +202,31 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
  *  1. If the receipt explicitly listed a base + VAT, trust those.
  *  2. Otherwise derive base + VAT from the total using the user's vatRate.
  */
+/**
+ * Cross-check the stated total against the sum of the line items. On multi-item
+ * delivery notes / invoices the model frequently misreads the grand total (often
+ * grabbing a single line). When the items clearly sum to MORE than the stated
+ * total — or no total was read — trust the items. Line "סה"כ" amounts on Israeli
+ * B2B delivery notes are net (pre-VAT), so we treat the sum as the base and add
+ * VAT. Only triggers on a clear discrepancy, so correct simple receipts are
+ * untouched. Sets _total_from_items for transparency.
+ */
+export function reconcileTotalFromItems(result, vatRate) {
+  const items = Array.isArray(result.items) ? result.items : []
+  if (items.length < 2) return result
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
+  const itemsSum = r2(items.reduce((s, it) => s + (parseFloat(it.price) || 0), 0))
+  const stated = Number(result.total_amount) || 0
+  if (itemsSum <= 0) return result
+  if (stated <= 0 || itemsSum > stated * 1.1) {
+    const factor = 1 + (Number(vatRate) || 0) / 100
+    const before = itemsSum
+    const total  = r2(before * factor)
+    return { ...result, amount_before_vat: before, vat_amount: r2(total - before), total_amount: total, _total_from_items: true }
+  }
+  return result
+}
+
 export function reconcileVat(result, vatRate) {
   const factor = 1 + vatRate / 100
   let total  = Number(result.total_amount) || 0
@@ -256,11 +286,12 @@ ${multiPageNote}
 - אם לא מופיע תאריך ברור — החזר ""
 
 ### סכום סופי (total_amount):
-- זהו **הסכום הגבוה ביותר** בקבלה — הסכום לתשלום **כולל מע"מ**
-- חפש: "סה"כ לתשלום", "סה"כ", "total", "לתשלום", "לחיוב", "סכום כולל מע"מ"
-- **אם יש כמה סכומים** — קח תמיד את **הגדול ביותר** (זה הסופי עם מע"מ)
-- אם מופיע "₪" או "ש"ח" ליד מספר — זה כנראה הסכום
-- **לעולם אל תחזיר 0** אם יש מספר כלשהו בקבלה
+- זהו הסכום הסופי לתשלום **כולל מע"מ** (בדרך כלל הגדול ביותר).
+- חפש: "סה"כ לתשלום", "סה"כ", "total", "לתשלום", "לחיוב", "סכום כולל מע"מ".
+- **⚠️ קבלה / תעודת משלוח / חשבונית עם טבלת פריטים (הרבה שורות):** הסכום הכולל = **סכום עמודת ה"סה"כ" של כל השורות יחד**. אל תחזיר סכום של שורה בודדת או של חלק מהשורות — חבר את **כל** השורות. אם יש 18 שורות, הסכום הכולל הוא סכום כל ה-18.
+- אם הסכום המודפס נראה **קטן** מסכום השורות — טעית; העדף את **סכום השורות**.
+- בתעודות משלוח/חשבוניות B2B סכומי השורות הם בדרך כלל **לפני מע"מ**, והמע"מ מתווסף בתחתית. במקרה כזה: amount_before_vat = סכום השורות, ו-total = סכום השורות + מע"מ.
+- אם מופיע "₪" או "ש"ח" ליד מספר — זה כנראה סכום. **לעולם אל תחזיר 0** אם יש מספרים בקבלה.
 
 ### פירוט מע"מ (amount_before_vat + vat_amount):
 חשוב מאוד — קבלות עסקיות בישראל בדרך כלל מציגות בנפרד:
@@ -277,7 +308,10 @@ ${multiPageNote}
 - אחרת החזר את **קוד המטבע הבינלאומי (ISO 4217)**, למשל "USD", "EUR", "GBP", "JPY".
 - **כל הסכומים בקבלה (total, items, מע"מ) הם במטבע הזה** — אל תמיר לשקלים, החזר את הערכים המקוריים במטבע המקור. ההמרה לשקלים תתבצע בנפרד.
 
-### פריטים (items):
+### פריטים (items) — דיוק מוחלט (חשוב מאוד!):
+- **חלץ כל שורה בטבלה, אחת אחר השנייה — אל תדלג על אף שורה ואל תמציא שורות.** בתעודת משלוח/חשבונית עם 10–30 שורות חובה להחזיר את **כולן**, לפי הסדר.
+- **דייק בשם כל מוצר** — העתק את הטקסט המדויק של שם הפריט מהשורה. **אל תחליף מוצר אחד באחר** (למשל חלב ≠ גבינה, קוטג' ≠ שמנת, יוגורט ≠ מעדן). אם אינך בטוח — העתק כפי שכתוב בדיוק.
+- בטבלה בעברית (RTL) התאם נכון את העמודות לכל שורה: **שם פריט · כמות · מחיר ליחידה · סה"כ לשורה**. אל תבלבל בין "מחיר ליחידה" ל-"סה"כ לשורה".
 - רשום כל שורת מוצר בנפרד עם **כל** עמודות השורה כפי שמופיעות בקבלה (כולל אגורות, ללא עיגול):
   - **item_name** = שם המוצר.
   - **quantity** = הכמות שנרכשה (מספר). למשל 3, 4, 2.77, 16. אם אין כמות — החזר 1.
@@ -419,7 +453,8 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
         required: ['vendor_name', 'total_amount', 'items'],
       },
       temperature: 0.05,   // Very low — deterministic extraction
-      thinkingConfig: { thinkingBudget: 0 },  // Disable thinking → fast + reliable
+      maxOutputTokens: 8192,                   // room for many line items (dense delivery notes)
+      thinkingConfig: { thinkingBudget: -1 },  // dynamic thinking → accurate on dense tables (cheap on simple receipts)
     },
   }
 
