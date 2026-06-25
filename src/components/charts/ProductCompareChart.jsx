@@ -4,41 +4,64 @@ import * as d3 from 'd3'
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 const trunc = (s, n = 10) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s)
 
+// Wrap a Hebrew name onto up to `maxLines` lines, each ≤ maxChars; the last line
+// is …-truncated only if it still overflows. Keeps full names readable instead
+// of cutting them off.
+function wrapLabel(name, maxChars, maxLines = 2) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return ['']
+  const lines = []
+  let cur = ''
+  for (let i = 0; i < words.length; i++) {
+    const tryLine = cur ? cur + ' ' + words[i] : words[i]
+    if (tryLine.length <= maxChars || !cur) { cur = tryLine }
+    else {
+      lines.push(cur)
+      if (lines.length === maxLines - 1) { cur = words.slice(i).join(' '); break }
+      cur = words[i]
+    }
+  }
+  lines.push(cur)
+  const last = lines.length - 1
+  if (lines[last].length > maxChars) lines[last] = lines[last].slice(0, maxChars - 1) + '…'
+  return lines
+}
+
 // Decide how to render the X labels so (Hebrew) product names never overlap the
-// bars or each other. Measures REAL label widths via canvas, then picks:
-//   flat   — names sit horizontally under each bar (fits)
+// bars or each other:
+//   flat   — names sit horizontally under each bar (wrapped to ≤2 lines)
 //   angled — names rotated just enough to fit within each band
 //   numbers— bars get 1,2,3… and a numbered legend lists the full names below
 function computeLayout(products, w) {
   const n = Math.max(products.length, 1)
   const isNarrow = w < 520
-  const fs = isNarrow ? 10 : 11
-  const maxChars = isNarrow ? 14 : 18
+  const fs = isNarrow ? 12 : 13.5
   const side = { left: 50, right: 12 }
   const innerW = Math.max(w - side.left - side.right, 60)
   const bandW = innerW / n
+  // chars that fit on ONE line under a band at this font size
+  const maxChars = Math.max(8, Math.floor(bandW / (fs * 0.56)))
+  const longest = Math.max(0, ...products.map(p => (p.name || '').length))
 
-  let labelW = 12
-  try {
-    const ctx = document.createElement('canvas').getContext('2d')
-    ctx.font = `${fs}px Assistant, Heebo, system-ui, sans-serif`
-    labelW = Math.max(12, ...products.map(p => ctx.measureText(trunc(p.name || '', maxChars)).width))
-  } catch { /* SSR / no canvas */ }
-
-  let mode = 'angled', ANG = 36, bottom = 56
-  if (labelW < bandW * 0.9) {
-    // Names fit horizontally under their bar → keep them flat.
-    mode = 'flat'; ANG = 0; bottom = fs + 22
+  let mode, ANG = 0, bottom
+  if (n <= 6 && maxChars >= 8) {
+    // Few products → wide bands → show full names flat, wrapped to ≤2 lines.
+    mode = 'flat'
+    bottom = (longest > maxChars ? fs * 2 + 6 : fs) + 16
   } else if (isNarrow) {
-    // Mobile: never rotate (angled Hebrew names still crowd the bars). Use
-    // numbers under the bars + a legend — guaranteed not to overlap.
     mode = 'numbers'; bottom = fs + 18
   } else {
+    let labelW = 12
+    try {
+      const ctx = document.createElement('canvas').getContext('2d')
+      ctx.font = `${fs}px Assistant, Heebo, system-ui, sans-serif`
+      labelW = Math.max(12, ...products.map(p => ctx.measureText(trunc(p.name || '', maxChars + 4)).width))
+    } catch { /* SSR / no canvas */ }
     const need = Math.acos(Math.min(1, (bandW * 0.95) / labelW)) * 180 / Math.PI
     if (need > 56) { mode = 'numbers'; bottom = fs + 18 }
     else { mode = 'angled'; ANG = Math.max(34, Math.min(56, Math.round(need))); bottom = Math.round(Math.sin(ANG * Math.PI / 180) * labelW + fs + 14) }
   }
-  bottom = Math.min(170, Math.max(34, bottom))
+  bottom = Math.min(190, Math.max(34, bottom))
   return { mode, ANG, fs, maxChars, PLOT_H: 200, margin: { top: 18, right: side.right, bottom, left: side.left } }
 }
 
@@ -87,7 +110,7 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
       .call(gg => {
         gg.select('.domain').remove()
         gg.selectAll('.tick line').attr('stroke', 'var(--border)').attr('stroke-dasharray', '3,3')
-        gg.selectAll('.tick text').attr('fill', 'var(--text-mute)').attr('font-size', '10px').attr('font-family', 'var(--font-main)').attr('dx', '-4')
+        gg.selectAll('.tick text').attr('fill', 'var(--text-mute)').attr('font-size', '11.5px').attr('font-family', 'var(--font-main)').attr('dx', '-4')
       })
 
     // X axis labels — rendered manually, CENTERED under each bar group (band).
@@ -104,9 +127,10 @@ export default function ProductCompareChart({ products = [], labelA, labelB, col
           .text(String(items.length - i))
       } else if (mode === 'flat') {
         const t = axisG.append('text')
-          .attr('x', tx).attr('y', fs + 9).attr('text-anchor', 'middle')
-          .attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-family', 'var(--font-main)')
-          .text(trunc(d.name, maxChars))
+          .attr('x', tx).attr('y', fs + 8).attr('text-anchor', 'middle')
+          .attr('fill', 'var(--text)').attr('font-size', `${fs}px`).attr('font-weight', 500).attr('font-family', 'var(--font-main)')
+        wrapLabel(d.name, maxChars, 2).forEach((ln, li) =>
+          t.append('tspan').attr('x', tx).attr('dy', li === 0 ? 0 : fs + 2).text(ln))
         t.append('title').text(d.name)
       } else { // angled — pivot at the band centre, hang down-left
         const t = axisG.append('text')
