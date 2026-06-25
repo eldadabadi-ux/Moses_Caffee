@@ -6,7 +6,7 @@ import { useTenant } from '../hooks/useTenant'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { recategorizeAll } from '../lib/recategorize'
 import { classifyReceipt } from '../../functions/api/_lib/classifyReceipt'
-import { normalizeCategoryName, categoryKey } from '../lib/categoryNormalize'
+import { normalizeCategoryName, categoryKey, cleanCategoryName } from '../lib/categoryNormalize'
 import { flattenItems } from '../lib/itemAggregation'
 import { nodePath } from '../lib/categoryStats'
 import toast from 'react-hot-toast'
@@ -37,7 +37,30 @@ export default function CategoriesPage() {
   const [panelOpen, setPanelOpen]       = useState(false)   // mobile: insight modal visibility
   const [anaReceipts, setAnaReceipts]   = useState(() => getCached('cat-analytics') || [])
   const [isMobile, setIsMobile]         = useState(() => window.innerWidth < 768)
-  const flatItems = useMemo(() => flattenItems(anaReceipts), [anaReceipts])
+  // Build the analytics items so their categories match the TREE exactly:
+  //  • transport receipts get the classifier's L1+L2 (so a parking receipt's
+  //    items carry "תחבורה ודלק" › "חניון" even if they were stored without it);
+  //  • L1 is canonicalised, L2/L3 lightly cleaned — same as the tree reconcile.
+  // Without this, clicking an L2 like "חניון" scoped to zero items → empty graph.
+  const flatItems = useMemo(() => {
+    const prepared = (anaReceipts || []).map(r => {
+      const hit = classifyReceipt(r)
+      if (hit) {
+        const base = (Array.isArray(r.items) && r.items.length) ? r.items : [{ item_name: hit.l2, price: r.amount }]
+        return { ...r, category_text: hit.l1, items: base.map(it => ({
+          ...it, category_l1: hit.l1, category_l2: cleanCategoryName(hit.l2), category_l3: cleanCategoryName(it.category_l3 || ''),
+        })) }
+      }
+      const items = Array.isArray(r.items) ? r.items.map(it => ({
+        ...it,
+        category_l1: normalizeCategoryName(it.category_l1 || r.category_text || ''),
+        category_l2: cleanCategoryName(it.category_l2 || ''),
+        category_l3: cleanCategoryName(it.category_l3 || ''),
+      })) : r.items
+      return { ...r, category_text: normalizeCategoryName(r.category_text || ''), items }
+    })
+    return flattenItems(prepared)
+  }, [anaReceipts])
 
   useEffect(() => {
     const h = () => setIsMobile(window.innerWidth < 768)
@@ -103,9 +126,8 @@ export default function CategoriesPage() {
 
   // Full sync + cleanup — keeps the category tree perfect: correct Hebrew
   // spelling, NO duplicates, and a category + sub-category for every receipt.
-  //  Pass 0 normalises spelling and MERGES duplicates (a garbled "מוצון ומכולת"
-  //  is merged into "מוצרי מזון ומכולת" and its receipts reassigned).
-  //  Pass 1/2 then create whatever category / sub-category is still missing.
+  //  L1 names use the canonical map (מכולת == מוצרי מזון ומכולת); L2/L3 use a
+  //  light clean only (so a sub "דלק" is NOT remapped to its parent "תחבורה ודלק").
   async function syncMissingCategories() {
     try {
       const [{ data: recs }, { data: cats }] = await Promise.all([
@@ -115,6 +137,9 @@ export default function CategoriesPage() {
       const all = (cats || []).slice()
       let changed = false
 
+      const keyOf   = (level, name) => level === 1 ? categoryKey(name) : cleanCategoryName(name).toLowerCase()
+      const canonOf = (level, name) => level === 1 ? normalizeCategoryName(name) : cleanCategoryName(name)
+
       // ── Pass 0 — normalise spelling + merge duplicates (top-down L1->L3) ──
       const childrenOf = (pid, level) => all.filter(c => !c._gone && (c.parent_id || null) === (pid || null) && c.level === level)
       async function mergeInto(dup, survivor) {
@@ -122,7 +147,7 @@ export default function CategoriesPage() {
         if (childLevel <= 3) {
           const survKids = childrenOf(survivor.id, childLevel)
           for (const dk of childrenOf(dup.id, childLevel)) {
-            const match = survKids.find(sk => categoryKey(sk.name) === categoryKey(dk.name))
+            const match = survKids.find(sk => keyOf(childLevel, sk.name) === keyOf(childLevel, dk.name))
             if (match) { await mergeInto(dk, match) }
             else {
               await supabase.from('categories').update({ parent_id: survivor.id }).eq('id', dk.id)
@@ -130,7 +155,6 @@ export default function CategoriesPage() {
             }
           }
         }
-        // Receipts referencing the dup L1 -> survivor (by id and by stored name).
         await supabase.from('receipts').update({ category_id: survivor.id, category_text: survivor.name }).eq('category_id', dup.id)
         await supabase.from('receipts').update({ category_id: survivor.id, category_text: survivor.name }).eq('category_text', dup.name)
         await supabase.from('categories').delete().eq('id', dup.id)
@@ -140,16 +164,23 @@ export default function CategoriesPage() {
         const parentIds = level === 1 ? [null]
           : [...new Set(all.filter(c => !c._gone && c.level === level - 1).map(c => c.id))]
         for (const pid of parentIds) {
+          const parent = pid ? all.find(c => c.id === pid) : null
           const sibs = all.filter(c => !c._gone && c.level === level && (c.parent_id || null) === (pid || null))
           const groups = new Map()
           for (const c of sibs) {
-            const k = categoryKey(c.name)
+            const k = keyOf(level, c.name)
             if (!groups.has(k)) groups.set(k, [])
             groups.get(k).push(c)
           }
           for (const rows of groups.values()) {
-            const canon = normalizeCategoryName(rows[0].name)
+            const canon = canonOf(level, rows[0].name)
             let survivor = rows.find(r => (r.name || '').trim() === canon) || rows[0]
+            // Remove a degenerate sub whose name equals its parent (artifact of the
+            // old normalisation, e.g. "תחבורה ודלק" under "תחבורה ודלק"), if childless.
+            if (level > 1 && parent && keyOf(level, survivor.name) === categoryKey(parent.name) && childrenOf(survivor.id, level + 1).length === 0) {
+              for (const r of rows) { await supabase.from('categories').delete().eq('id', r.id); r._gone = true; changed = true }
+              continue
+            }
             if ((survivor.name || '').trim() !== canon) {   // fix the spelling on the survivor
               await supabase.from('categories').update({ name: canon }).eq('id', survivor.id)
               if (level === 1) await supabase.from('receipts').update({ category_text: canon }).eq('category_text', survivor.name)
@@ -166,18 +197,18 @@ export default function CategoriesPage() {
       const reindex = () => {
         l1ByKey.clear(); l2ByKey.clear()
         live().forEach(c => {
-          if (c.level === 1) l1ByKey.set(categoryKey(c.name), c)
-          else if (c.level === 2) l2ByKey.set((c.parent_id) + '|' + categoryKey(c.name), c)
+          if (c.level === 1) l1ByKey.set(keyOf(1, c.name), c)
+          else if (c.level === 2) l2ByKey.set(c.parent_id + '|' + keyOf(2, c.name), c)
         })
       }
       reindex()
 
       const needL1 = new Map()   // key -> canonical name
       const needL2 = []          // { l1key, l2name }
-      const addL1 = n => { const name = normalizeCategoryName(n); if (name) needL1.set(categoryKey(name), name) }
+      const addL1 = n => { const name = canonOf(1, n); if (name) needL1.set(keyOf(1, name), name) }
       const addL2 = (a, b) => {
-        const l1 = normalizeCategoryName(a), l2 = normalizeCategoryName(b)
-        if (l1 && l2) { needL1.set(categoryKey(l1), l1); needL2.push({ l1key: categoryKey(l1), l2name: l2 }) }
+        const l1 = canonOf(1, a), l2 = canonOf(2, b)
+        if (l1 && l2 && keyOf(2, l2) !== keyOf(1, l1)) { needL1.set(keyOf(1, l1), l1); needL2.push({ l1key: keyOf(1, l1), l2name: l2 }) }
       }
       for (const r of (recs || [])) {
         addL1(r.category_text)
@@ -207,7 +238,7 @@ export default function CategoriesPage() {
       const seenL2 = new Set(), missL2 = []
       for (const { l1key, l2name } of needL2) {
         const p = l1ByKey.get(l1key); if (!p) continue
-        const key = p.id + '|' + categoryKey(l2name)
+        const key = p.id + '|' + keyOf(2, l2name)
         if (l2ByKey.has(key) || seenL2.has(key)) continue
         seenL2.add(key); missL2.push({ parent_id: p.id, name: l2name })
       }

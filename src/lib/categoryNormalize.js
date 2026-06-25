@@ -97,8 +97,9 @@ const CANON_MAP = {
 }
 
 /** Clean a raw category name: trim, collapse inner whitespace, strip stray
- *  edge punctuation. Returns '' for empty. */
-function clean(name) {
+ *  edge punctuation. Returns '' for empty. Does NOT apply the L1 canon map — use
+ *  for L2/L3 sub-category names (a sub "דלק" must NOT become its parent). */
+export function cleanCategoryName(name) {
   return String(name || '')
     .replace(/[‎‏ ]/g, ' ')   // strip bidi marks / nbsp
     .trim()
@@ -109,7 +110,7 @@ function clean(name) {
 
 /** Canonical category name (correct spelling, de-duplicated concept). */
 export function normalizeCategoryName(name) {
-  const s = clean(name)
+  const s = cleanCategoryName(name)
   if (!s) return s
   return CANON_MAP[s.toLowerCase()] || s
 }
