@@ -29,9 +29,9 @@ function wrapLabel(name, maxChars, maxLines = 2) {
 
 // Decide how to render the X labels so (Hebrew) product names never overlap the
 // bars or each other:
-//   flat   — names sit horizontally under each bar (wrapped to ≤2 lines)
-//   angled — names rotated just enough to fit within each band
-//   numbers— bars get 1,2,3… and a numbered legend lists the full names below
+//   flat   — few products: full names sit horizontally under each bar (≤2 lines)
+//   numbers— many products: bars get 1,2,3… and a legend lists full names below
+// (No angled mode — rotated Hebrew labels climbed over the bars on multi-select.)
 function computeLayout(products, w) {
   const n = Math.max(products.length, 1)
   const isNarrow = w < 520
@@ -43,26 +43,13 @@ function computeLayout(products, w) {
   const maxChars = Math.max(8, Math.floor(bandW / (fs * 0.56)))
   const longest = Math.max(0, ...products.map(p => (p.name || '').length))
 
-  let mode, ANG = 0, bottom
-  if (n <= 6 && maxChars >= 8) {
-    // Few products → wide bands → show full names flat, wrapped to ≤2 lines.
-    mode = 'flat'
-    bottom = (longest > maxChars ? fs * 2 + 6 : fs) + 16
-  } else if (isNarrow) {
-    mode = 'numbers'; bottom = fs + 18
-  } else {
-    let labelW = 12
-    try {
-      const ctx = document.createElement('canvas').getContext('2d')
-      ctx.font = `${fs}px Assistant, Heebo, system-ui, sans-serif`
-      labelW = Math.max(12, ...products.map(p => ctx.measureText(trunc(p.name || '', maxChars + 4)).width))
-    } catch { /* SSR / no canvas */ }
-    const need = Math.acos(Math.min(1, (bandW * 0.95) / labelW)) * 180 / Math.PI
-    if (need > 56) { mode = 'numbers'; bottom = fs + 18 }
-    else { mode = 'angled'; ANG = Math.max(34, Math.min(56, Math.round(need))); bottom = Math.round(Math.sin(ANG * Math.PI / 180) * labelW + fs + 14) }
+  // Flat only when bands are wide enough for readable horizontal names; otherwise
+  // numbered bars + legend (guaranteed never to overlap, scales to any count).
+  if (n <= 6 && maxChars >= 9) {
+    const bottom = (longest > maxChars ? fs * 2 + 6 : fs) + 16
+    return { mode: 'flat', ANG: 0, fs, maxChars, PLOT_H: 200, margin: { top: 18, right: side.right, bottom, left: side.left } }
   }
-  bottom = Math.min(190, Math.max(34, bottom))
-  return { mode, ANG, fs, maxChars, PLOT_H: 200, margin: { top: 18, right: side.right, bottom, left: side.left } }
+  return { mode: 'numbers', ANG: 0, fs, maxChars, PLOT_H: 200, margin: { top: 18, right: side.right, bottom: fs + 18, left: side.left } }
 }
 
 /**
