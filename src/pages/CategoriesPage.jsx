@@ -347,12 +347,13 @@ export default function CategoriesPage() {
     const isSelected   = selectedNode?.id === cat.id
     // Open the analysis for this node — modal on mobile, side panel on desktop.
     const openInsights = () => { setSelectedNode(cat); if (isMobile) setPanelOpen(true) }
-    // Clicking the row DRILLS (expands/collapses its children) — it does NOT pop
-    // the graph, so the user can keep navigating sub-categories. The chart button
-    // opens the analysis; a leaf row (nothing to drill) opens it on click.
     const handleRowClick = () => {
       if (hasChildren) setExpanded(p => ({ ...p, [cat.id]: !p[cat.id] }))
-      else openInsights()
+      // Desktop: the side panel is always visible — live-update it to the clicked
+      // node so the graph FOLLOWS your selection (not stuck on the old category).
+      // Mobile: only drill (the chart button pops the modal); a leaf opens on click.
+      if (!isMobile) setSelectedNode(cat)
+      else if (!hasChildren) openInsights()
     }
 
     return (

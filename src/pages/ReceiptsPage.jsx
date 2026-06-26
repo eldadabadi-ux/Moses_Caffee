@@ -575,19 +575,22 @@ export default function ReceiptsPage() {
   }
 
   const filtered = useMemo(() => (archiveView ? archived : receipts).filter(r => {
-    const q = search.toLowerCase()
-    // Match vendor, receipt category, AND item-level categories / product names —
-    // so a search (or a jump from the Categories panel) by any category level or
-    // product reliably finds the receipt even when the receipt's own category_text
-    // differs from its items' categories.
-    const matchSearch = !q
-      || r.vendor_name?.toLowerCase().includes(q)
-      || r.category_text?.toLowerCase().includes(q)
-      || (Array.isArray(r.items) && r.items.some(it =>
-          (it.item_name || '').toLowerCase().includes(q) ||
-          (it.category_l1 || '').toLowerCase().includes(q) ||
-          (it.category_l2 || '').toLowerCase().includes(q) ||
-          (it.category_l3 || '').toLowerCase().includes(q)))
+    const q = search.toLowerCase().trim()
+    const inc = (t) => (t || '').toLowerCase().includes(q)
+    // Short queries (1–2 chars) match the VENDOR NAME only, so a query like "לי"
+    // finds "לי-אור" without dragging in every food receipt whose products happen
+    // to contain "לי". Longer queries (≥3) also search the category + the
+    // item-level categories / product names (so the Categories-panel jump and
+    // product lookups still work).
+    let matchSearch = !q
+    if (q) {
+      matchSearch = inc(r.vendor_name)
+      if (!matchSearch && q.length >= 3) {
+        matchSearch = inc(r.category_text)
+          || (Array.isArray(r.items) && r.items.some(it =>
+              inc(it.item_name) || inc(it.category_l1) || inc(it.category_l2) || inc(it.category_l3)))
+      }
+    }
     const date = r.receipt_date || ''
     return matchSearch && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
   }), [archiveView, archived, receipts, search, filterFrom, filterTo])
