@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { downloadFile } from '../lib/downloadFile'
+import { isMobileDevice } from '../lib/isMobileDevice'
 import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip } from '../lib/receiptExport'
 import Modal from './ui/Modal'
 import toast from 'react-hot-toast'
@@ -29,7 +30,8 @@ export default function MonthlyExportPrompt() {
   const prev = prevMonth()
 
   useEffect(() => {
-    if (!user) return
+    // The export prompt downloads files — desktop website only, never on a phone.
+    if (!user || isMobileDevice()) return
     // Reminder day for THIS month, based on the user's chosen timing.
     const now = new Date()
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()

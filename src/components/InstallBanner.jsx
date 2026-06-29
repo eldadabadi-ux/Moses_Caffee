@@ -11,10 +11,9 @@ export default function InstallBanner() {
     try { return localStorage.getItem(KEY) === '1' } catch { return false }
   })
 
-  // Show only on mobile, when not already installed, and not dismissed.
-  const isMobile = window.innerWidth < 768
-  if (isStandalone || dismissed || !isMobile) return null
-  if (!canInstall && !isIOS) return null  // nothing actionable to show
+  // Show when not already installed and not dismissed — on desktop AND mobile.
+  if (isStandalone || dismissed) return null
+  if (!canInstall && !isIOS) return null  // nothing actionable to show (no prompt captured)
 
   function close() {
     try { localStorage.setItem(KEY, '1') } catch {}
@@ -29,7 +28,7 @@ export default function InstallBanner() {
     }}>
       <Smartphone size={22} style={{ color: 'var(--accent)', flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text)' }}>התקן את האפליקציה למסך הבית</div>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text)' }}>התקן את האפליקציה</div>
         {isIOS && !canInstall && (
           <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
             שיתוף <Share size={15} style={{ color: 'var(--accent)' }} /> ← "הוסף למסך הבית"

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useAuth } from '../hooks/useAuth'
 import { saveBackupToFolder, downloadBackup } from '../lib/backup'
 import { hasDir } from '../lib/saveFolder'
+import { isMobileDevice } from '../lib/isMobileDevice'
 import toast from 'react-hot-toast'
 
 const LAST_KEY = 'moses_last_backup'   // YYYY-MM-DD of the last successful backup
@@ -20,7 +21,8 @@ export default function DailyBackup() {
   const ran = useRef(false)
 
   useEffect(() => {
-    if (!user) return
+    // Backups download/save files — only on the desktop website, never on a phone.
+    if (!user || isMobileDevice()) return
     let timer
 
     async function runIfDue() {

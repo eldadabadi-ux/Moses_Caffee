@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom'
 import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import { useInstall } from '../hooks/useInstall'
+import { isMobileDevice } from '../lib/isMobileDevice'
 import { rescanAllReceipts } from '../lib/rescanReceipts'
 import { downloadBackup, restoreFromObject, readBackupFile } from '../lib/backup'
 import ShekelSign from '../components/icons/ShekelSign'
@@ -212,7 +213,7 @@ export default function SettingsPage() {
         <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
           <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <Smartphone size={17} color="var(--accent)" />
-            <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>התקנת האפליקציה בטלפון</span>
+            <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text)' }}>התקנת האפליקציה</span>
           </div>
           <div style={{ padding: 20 }}>
             {canInstall ? (
@@ -504,7 +505,9 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Backup & restore Card */}
+      {/* Backup & restore Card — file backups are a DESKTOP-website feature only
+          (the data is always safe in the cloud); a phone never downloads JSON). */}
+      {!isMobileDevice() && (
       <div id="set-backup" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
         <div style={{ padding: '15px 20px', borderBottom: '1px solid var(--border)', background: 'var(--panel-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Database size={17} color="var(--accent)" />
@@ -540,6 +543,7 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Account security Card */}
       <div id="set-account" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
