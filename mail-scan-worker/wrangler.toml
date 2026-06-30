@@ -1,0 +1,13 @@
+# Scheduled Worker — pings /api/mail/cron every 30 min so connected mailboxes are
+# scanned automatically. Deploy from this dir:  npx wrangler deploy
+# Secrets to set:  npx wrangler secret put CRON_SECRET   (must match the Pages CRON_SECRET)
+# Optional var CRON_TARGET overrides the default Pages URL.
+name = "moses-mail-scan"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[triggers]
+crons = ["*/30 * * * *"]
+
+[vars]
+CRON_TARGET = "https://moses-caffee.pages.dev/api/mail/cron"
