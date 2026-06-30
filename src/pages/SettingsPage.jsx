@@ -9,6 +9,7 @@ import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import { useInstall } from '../hooks/useInstall'
 import { isMobileDevice } from '../lib/isMobileDevice'
+import MailConnectCard from '../components/MailConnectCard'
 import { rescanAllReceipts } from '../lib/rescanReceipts'
 import { downloadBackup, restoreFromObject, readBackupFile } from '../lib/backup'
 import ShekelSign from '../components/icons/ShekelSign'
@@ -260,6 +261,9 @@ export default function SettingsPage() {
           <Check size={17} color="var(--ok)" /> האפליקציה מותקנת ופועלת במצב אפליקציה ✓
         </div>
       )}
+
+      {/* Connect mailbox → auto-import receipts from email */}
+      <MailConnectCard />
 
       {/* Logo + Business name Card */}
       <div id="set-logo" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>

@@ -976,13 +976,15 @@ export default function ReceiptsPage() {
     const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
 
     if (editId) {
-      let { error } = await supabase.from('receipts').update({ ...payload, ...vatCols }).eq('id', editId)
+      // Editing a pending (email-imported) receipt also APPROVES it → status 'ready'.
+      const approve = receipts.find(r => r.id === editId)?.status === 'pending' ? { status: 'ready' } : {}
+      let { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, ...approve }).eq('id', editId)
       if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').update(payload).eq('id', editId))
+        ;({ error } = await supabase.from('receipts').update({ ...payload, ...approve }).eq('id', editId))
       }
       if (error) { toast.error('שגיאה בעדכון'); return }
-      toast.success('קבלה עודכנה')
-      setReceipts(prev => prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols } : r))
+      toast.success(approve.status ? 'הקבלה אושרה ונשמרה' : 'קבלה עודכנה')
+      setReceipts(prev => prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols, ...approve } : r))
     } else {
       let resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols }).select().single()
       if (resp.error && /amount_before_vat|vat_amount|vat_rate/.test(resp.error.message || '')) {
@@ -993,6 +995,14 @@ export default function ReceiptsPage() {
       setReceipts(prev => [resp.data, ...prev])
     }
     setShowModal(false); setEditId(null); resetForm()
+  }
+
+  // Approve a pending (email-imported) receipt → status 'ready'.
+  async function approveReceipt(id) {
+    const { error } = await supabase.from('receipts').update({ status: 'ready' }).eq('id', id)
+    if (error) { toast.error('שגיאה באישור'); return }
+    setReceipts(prev => { const next = prev.map(r => r.id === id ? { ...r, status: 'ready' } : r); setCached('receipts', next); return next })
+    toast.success('הקבלה אושרה')
   }
 
   // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
@@ -1295,6 +1305,9 @@ export default function ReceiptsPage() {
                 <div style={{ display:'flex', alignItems:'baseline', gap:'6px', flexWrap:'wrap' }}>
                   <span style={{ fontWeight:600, fontSize: isMobile ? '16px' : '17px', color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth: isMobile ? '150px' : 'none' }}>{r.vendor_name || '—'}</span>
                   {r.ai_extracted && <Badge variant="info" showDot={false} style={{ fontSize:'12px' }}>AI</Badge>}
+                  {r.status === 'pending' && (
+                    <span title="קבלה שנקלטה מהמייל — בדוק ואשר" style={{ fontSize:'11px', fontWeight:700, color:'var(--warn)', background:'var(--warn-tint-1)', border:'1px solid var(--warn-tint-border)', borderRadius:6, padding:'1px 7px', whiteSpace:'nowrap' }}>📩 ממתין לאישור</span>
+                  )}
                   {r.ai_summary?.is_fx_estimate && (
                     <span title={`הומר לשקלים לפי השער היציג של ${r.ai_summary.currency} (בנק ישראל, ${fmtDate(r.ai_summary.fx_date)}) — הערכה בלבד`}
                       style={{ fontSize:'11px', fontWeight:700, color:'var(--warn)', background:'var(--warn-tint-1)', border:'1px solid var(--warn-tint-border)', borderRadius:6, padding:'1px 6px', whiteSpace:'nowrap' }}>
@@ -1324,6 +1337,9 @@ export default function ReceiptsPage() {
                   </>
                 ) : (
                   <>
+                    {r.status === 'pending' && (
+                      <button onClick={() => approveReceipt(r.id)} title="אשר קבלה" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--ok)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--accent-bg)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><CheckCircle2 size={16} /></button>
+                    )}
                     <button onClick={() => openEdit(r)} title="עריכה" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Pencil size={14} /></button>
                     <button onClick={() => setDeleteId(r.id)} title="העבר לארכיון" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='var(--accent-bg)';e.currentTarget.style.color='var(--accent)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><Archive size={14} /></button>
                   </>
