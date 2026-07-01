@@ -5,7 +5,7 @@
  * the on-demand /api/mail/scan, so no secrets are duplicated.
  */
 import { getSupabaseUrl } from '../_lib/extractReceipt.js'
-import { scanConnection } from '../_lib/gmailScan.js'
+import { scanConnection } from '../_lib/mailScan.js'
 
 export async function onRequest({ request, env }) {
   const secret = request.headers.get('x-cron-secret') || new URL(request.url).searchParams.get('secret')
