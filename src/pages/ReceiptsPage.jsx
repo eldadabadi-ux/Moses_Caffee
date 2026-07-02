@@ -1018,13 +1018,16 @@ export default function ReceiptsPage() {
       if (!blob) return null
       let dataUrl = null
       if (/\.pdf$/i.test(r.storage_path)) {
+        // pdf.js first-page render — already a compressed JPEG data URL (same as
+        // camera PDF uploads). NOTE: no fetch(dataUrl) here — CSP connect-src
+        // blocks data: URLs, which silently killed the previous version.
         const pages = await pdfToImages(blob, { maxPages: 1 })
         dataUrl = pages[0] || null
+      } else {
+        // Image file: camera-profile compression straight from the blob.
+        const file = new File([blob], 'receipt.jpg', { type: blob.type || 'image/jpeg' })
+        try { ({ dataUrl } = await compressImage(file)) } catch {}
       }
-      // Compress to the same size profile as camera scans (also shrinks PDF renders)
-      const srcBlob = dataUrl ? await fetch(dataUrl).then(x => x.blob()) : blob
-      const file = new File([srcBlob], 'receipt.jpg', { type: srcBlob.type || 'image/jpeg' })
-      try { ({ dataUrl } = await compressImage(file)) } catch { /* keep uncompressed render */ }
       if (!dataUrl) return null
       const { error } = await supabase.from('receipts').update({ receipt_image: dataUrl }).eq('id', r.id)
       if (!error) setReceipts(prev => { const next = prev.map(x => x.id === r.id ? { ...x, receipt_image: dataUrl } : x); setCached('receipts', next); return next })
