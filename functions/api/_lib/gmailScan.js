@@ -15,8 +15,8 @@ const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me'
 const RECEIPT_QUERY = 'has:attachment (invoice OR receipt OR קבלה OR חשבונית OR חשבון OR תשלום OR הזמנה OR "מס עסקה" OR "תעודת משלוח")'
 const RECEIPT_MIME = /^(application\/pdf|image\/(jpe?g|png|webp|heic|heif))$/i
 const MAX_LIST    = 15   // candidate messages to list
-const MAX_EXAMINE = 10   // messages to fetch per call (subrequest guard)
-const MAX_INGEST  = 4    // receipts to OCR per call (subrequest guard)
+const MAX_EXAMINE = 8    // messages to fetch per call (subrequest guard)
+const MAX_INGEST  = 2    // receipts to OCR per call (subrequest + duration guard)
 
 const b64urlToB64 = s => String(s || '').replace(/-/g, '+').replace(/_/g, '/')
 

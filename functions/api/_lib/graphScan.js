@@ -13,8 +13,8 @@ const GRAPH = 'https://graph.microsoft.com/v1.0'
 const RECEIPT_MIME = /^(application\/pdf|image\/(jpe?g|png|webp|heic|heif))$/i
 const KW = /(invoice|receipt|קבלה|חשבונית|חשבון|תשלום|הזמנה|תעודת משלוח)/i
 const MAX_LIST    = 15
-const MAX_EXAMINE = 10
-const MAX_INGEST  = 4
+const MAX_EXAMINE = 8
+const MAX_INGEST  = 2
 
 // Microsoft rotates refresh tokens on each use → persist the new one.
 async function refresh(conn, env, db) {
