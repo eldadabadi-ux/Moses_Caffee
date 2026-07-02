@@ -650,6 +650,13 @@ export default function ReceiptsPage() {
   }, [filtered, vatRate])
   const totalAmount = totals.paid
 
+  // Banner data — MUST stay above any early return (rules of hooks).
+  // Summary invoices awaiting reconciliation (or with a mismatch):
+  const reconcileOpen = useMemo(() => openIssues(receipts).length, [receipts])
+  const [hideReconcileBanner, setHideReconcileBanner] = useState(false)
+  // Documents still pending approval (email imports) → approve-all strip:
+  const pendingCount = useMemo(() => receipts.filter(r => r.status === 'pending').length, [receipts])
+
   // Quick one-click exports (Excel only / PDF only) using the filtered list.
   async function quickExport(kind) {
     if (filtered.length === 0) { toast.error('אין קבלות לייצוא'); return }
@@ -1293,11 +1300,6 @@ export default function ReceiptsPage() {
   if (loading && receipts.length === 0) return <LoadingSpinner />
 
   const hasActiveFilter = search || filterFrom || filterTo || docFilter !== 'all'
-  // Summary invoices awaiting reconciliation (or with a mismatch) → banner
-  const reconcileOpen = useMemo(() => openIssues(receipts).length, [receipts])
-  const [hideReconcileBanner, setHideReconcileBanner] = useState(false)
-  // Documents still pending approval (email imports) → approve-all strip
-  const pendingCount = useMemo(() => receipts.filter(r => r.status === 'pending').length, [receipts])
 
   return (
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap: isMobile ? '14px' : '20px' }} dir="rtl">
