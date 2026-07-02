@@ -20,13 +20,13 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
     if (s[0]?.vat_rate > 0) vatRate = Number(s[0].vat_rate)
   } catch {}
 
-  let imported = 0, errors = 0
+  let imported = 0, errors = 0, more = false
   for (const conn of conns) {
-    try { imported += (await scanConnection(conn, env, { vatRate })).imported }
+    try { const r = await scanConnection(conn, env, { vatRate }); imported += r.imported; if (r.more) more = true }
     catch (err) {
       errors++
       await fetch(`${url}/rest/v1/mail_connections?id=eq.${conn.id}`, { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: err?.code === 'AUTH' ? 'error' : conn.status, last_error: (err?.message || '').slice(0, 200) }) })
     }
   }
-  return Response.json({ ok: true, imported, errors })
+  return Response.json({ ok: true, imported, more, errors })
 })

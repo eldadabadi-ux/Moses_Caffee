@@ -52,9 +52,16 @@ export default function MailConnectCard() {
   }
   async function scanNow() {
     setScanning(true)
+    let total = 0
     try {
-      const r = await authFetch('/api/mail/scan', 'POST')
-      toast.success(r.imported > 0 ? `נמצאו ${r.imported} קבלות חדשות — ממתינות לאישור` : 'לא נמצאו קבלות חדשות')
+      // Each call processes a small batch (Cloudflare subrequest limit); loop
+      // until the mailbox backlog is drained, up to a safe number of rounds.
+      for (let i = 0; i < 12; i++) {
+        const r = await authFetch('/api/mail/scan', 'POST')
+        total += r.imported || 0
+        if (!r.more) break
+      }
+      toast.success(total > 0 ? `נמצאו ${total} קבלות חדשות — ממתינות לאישור` : 'לא נמצאו קבלות חדשות')
       await refresh()
     } catch (e) { toast.error(e.message) } finally { setScanning(false) }
   }
