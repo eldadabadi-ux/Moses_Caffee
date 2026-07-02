@@ -13,6 +13,7 @@ import MultiSelect from '../components/MultiSelect'
 import ProductCompareChart from '../components/charts/ProductCompareChart'
 import ShekelSign from '../components/icons/ShekelSign'
 import { flattenItems, vendorComposition } from '../lib/itemAggregation'
+import { isExpenseDoc } from '../lib/docTypes'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
@@ -112,22 +113,44 @@ export default function DashboardPage() {
         setLoading(true)
       }
       try {
-        // Current year (include items for drill-down)
-        const { data: recs } = await supabase
+        // Current year (include items for drill-down). doc_type is selected so
+        // summary invoices (חשבונית מרכזת) can be EXCLUDED from all totals —
+        // they aggregate delivery notes that are already counted. Pre-migration
+        // the column doesn't exist → retry without it.
+        let { data: recs, error: recsErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, items')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, items, doc_type')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year}-01-01`)
           .lte('receipt_date', `${year}-12-31`)
           .order('receipt_date')
+        if (recsErr) {
+          ;({ data: recs } = await supabase
+            .from('receipts')
+            .select('id, amount, receipt_date, category_id, category_text, vendor_name, items')
+            .eq('user_id', user.id)
+            .gte('receipt_date', `${year}-01-01`)
+            .lte('receipt_date', `${year}-12-31`)
+            .order('receipt_date'))
+        }
+        recs = (recs || []).filter(isExpenseDoc)
 
         // Previous year (for YoY)
-        const { data: prevRecs } = await supabase
+        let { data: prevRecs, error: prevErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, doc_type')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year - 1}-01-01`)
           .lte('receipt_date', `${year - 1}-12-31`)
+        if (prevErr) {
+          ;({ data: prevRecs } = await supabase
+            .from('receipts')
+            .select('id, amount, receipt_date, category_id, category_text, vendor_name')
+            .eq('user_id', user.id)
+            .gte('receipt_date', `${year - 1}-01-01`)
+            .lte('receipt_date', `${year - 1}-12-31`))
+        }
+        prevRecs = (prevRecs || []).filter(isExpenseDoc)
 
         // Categories
         const { data: cats } = await supabase

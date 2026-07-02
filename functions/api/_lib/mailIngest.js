@@ -97,6 +97,11 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
     // Exact VAT breakdown lives in ai_summary too — works even when the dedicated
     // VAT columns don't exist yet (same graceful pattern as ReceiptsPage).
     ai_summary: { vendor: result.vendor_name || '', total, before_vat: before, vat_amount: vat, vat_rate: vatRate, model: result._model || 'gemini', source: 'email',
+      // Doc classification mirrored here so it survives even before the
+      // supabase_doctype.sql migration adds the dedicated columns.
+      doc_type: result.doc_type || 'receipt',
+      ...(result.doc_number ? { doc_number: result.doc_number } : {}),
+      ...(result.doc_refs?.length ? { doc_refs: result.doc_refs } : {}),
       ...(fx ? { currency: result.currency, fx_rate: fx.rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
     source: 'email',
     status: 'pending',
@@ -104,12 +109,28 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
     source_meta: meta,
   }
   const vatCols = { amount_before_vat: before, vat_amount: vat, vat_rate: vatRate }
+  const docCols = { doc_type: result.doc_type || 'receipt', doc_number: result.doc_number || null }
+  // Two-stage graceful fallback: strip doc columns first (supabase_doctype.sql
+  // not run), then VAT columns (vat migration not run). ai_summary keeps both.
   try {
-    await db.insert('receipts', { ...row, ...vatCols })
+    await db.insert('receipts', { ...row, ...vatCols, ...docCols })
   } catch (e) {
-    // Graceful fallback if the VAT migration hasn't run yet (ai_summary keeps the values)
-    if (e?.code === 'DB' && /amount_before_vat|vat_amount|vat_rate/.test(e.message || '')) await db.insert('receipts', row)
-    else throw e
+    if (e?.code !== 'DB') throw e
+    if (/doc_type|doc_number/.test(e.message || '')) {
+      try {
+        await db.insert('receipts', { ...row, ...vatCols })
+      } catch (e2) {
+        if (e2?.code === 'DB' && /amount_before_vat|vat_amount|vat_rate/.test(e2.message || '')) await db.insert('receipts', row)
+        else throw e2
+      }
+    } else if (/amount_before_vat|vat_amount|vat_rate/.test(e.message || '')) {
+      try {
+        await db.insert('receipts', { ...row, ...docCols })
+      } catch (e2) {
+        if (e2?.code === 'DB' && /doc_type|doc_number/.test(e2.message || '')) await db.insert('receipts', row)
+        else throw e2
+      }
+    } else throw e
   }
   return true
 }

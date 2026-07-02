@@ -18,8 +18,9 @@ import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
   CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
-  Archive, RotateCcw, AlertTriangle, FileText,
+  Archive, RotateCcw, AlertTriangle, FileText, ListChecks,
 } from 'lucide-react'
+import { DOC_TYPES, docTypeOf, docTypeLabel, isExpenseDoc, DOC_COL_RE } from '../lib/docTypes'
 import { deleteReceiptFile, signedReceiptUrl } from '../lib/storage'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
@@ -493,6 +494,13 @@ export default function ReceiptsPage() {
   const [reviewBeforeVat, setReviewBeforeVat] = useState('')  // amount before vat
   const [reviewVatAmount, setReviewVatAmount] = useState('')  // vat amount
   const [reviewItems, setReviewItems]   = useState([])
+  const [reviewDocType, setReviewDocType] = useState('receipt')   // receipt | delivery_note | summary_invoice
+  const [reviewDocNumber, setReviewDocNumber] = useState('')      // printed doc number (if detected)
+  const [reviewDocRefs, setReviewDocRefs] = useState([])          // summary invoice: itemized delivery-note refs
+  const [docFilter, setDocFilter]       = useState('all')         // list filter by doc type
+  const [selectMode, setSelectMode]     = useState(false)         // bulk classification mode
+  const [selectedIds, setSelectedIds]   = useState(() => new Set())
+  const [bulkBusy, setBulkBusy]         = useState(false)
   const [reviewCurrency, setReviewCurrency] = useState('ILS') // detected receipt currency
   const [reviewFx, setReviewFx]         = useState(null)      // { rate, date, source, currency } for foreign receipts
   const [reviewPages, setReviewPages]   = useState([])        // all page images of a multi-page receipt
@@ -501,7 +509,7 @@ export default function ReceiptsPage() {
   const [reviewImage, setReviewImage]   = useState(null)
   const [approving, setApproving]       = useState(false)
   const [cropSrc, setCropSrc]           = useState(null)
-  const [form, setForm]                 = useState({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[] })
+  const [form, setForm]                 = useState({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt' })
   const vatRate = settings?.vatRate ?? 18
   const [imagePreview, setImagePreview] = useState(null)
 
@@ -592,8 +600,9 @@ export default function ReceiptsPage() {
       }
     }
     const date = r.receipt_date || ''
-    return matchSearch && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
-  }), [archiveView, archived, receipts, search, filterFrom, filterTo])
+    const matchDoc = docFilter === 'all' || docTypeOf(r) === docFilter
+    return matchSearch && matchDoc && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
+  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter])
 
   // Existing top-level (L1) category names — used to flag AI-proposed NEW
   // categories in the scan review + drive the category autocomplete.
@@ -617,11 +626,20 @@ export default function ReceiptsPage() {
   }
 
   // Three totals: paid (with VAT), before VAT, and the VAT itself.
-  const totals = useMemo(() => ({
-    paid:   filtered.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
-    before: filtered.reduce((s, r) => s + amtBefore(r), 0),
-    vat:    filtered.reduce((s, r) => s + amtVat(r), 0),
-  }), [filtered, vatRate])
+  // Summary invoices (חשבונית מרכזת) aggregate delivery notes that are already
+  // counted — they stay visible in the list but are EXCLUDED from the sums.
+  const totals = useMemo(() => {
+    const expense = filtered.filter(isExpenseDoc)
+    const excluded = filtered.filter(r => !isExpenseDoc(r))
+    return {
+      paid:   expense.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+      before: expense.reduce((s, r) => s + amtBefore(r), 0),
+      vat:    expense.reduce((s, r) => s + amtVat(r), 0),
+      count:  expense.length,
+      excludedCount: excluded.length,
+      excludedSum: excluded.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0),
+    }
+  }, [filtered, vatRate])
   const totalAmount = totals.paid
 
   // Quick one-click exports (Excel only / PDF only) using the filtered list.
@@ -811,6 +829,9 @@ export default function ReceiptsPage() {
       setReviewVatAmount(vat ? String(vat) : '')
       setReviewItems(items)
       setReviewCategory(result.category || items[0]?.category_l1 || 'שונות')
+      setReviewDocType(['delivery_note', 'summary_invoice'].includes(result.doc_type) ? result.doc_type : 'receipt')
+      setReviewDocNumber(result.doc_number || '')
+      setReviewDocRefs(Array.isArray(result.doc_refs) ? result.doc_refs : [])
       setReviewCurrency(result.currency || 'ILS')
       setReviewFx(result.fx || null)   // foreign-currency receipts: { rate, date, source, currency }
       setReviewPages(pages)
@@ -925,17 +946,30 @@ export default function ReceiptsPage() {
         // when the dedicated columns don't exist yet (no migration required).
         ai_summary: { vendor: reviewVendor, total: totalAmt, before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate, model: 'gemini-2.5-flash',
           pages: pages.length, ...(extraPages.length ? { extra_pages: extraPages } : {}),
+          // Doc classification mirrored here so it survives even before the
+          // supabase_doctype.sql migration adds the dedicated columns.
+          doc_type: reviewDocType,
+          ...(reviewDocNumber ? { doc_number: reviewDocNumber } : {}),
+          ...(reviewDocRefs?.length ? { doc_refs: reviewDocRefs } : {}),
           ...(fx ? { currency: reviewCurrency, fx_rate: rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
       }
-      let { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate })
-      // Graceful fallback if VAT migration hasn't run yet — ai_summary keeps the values
+      const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
+      const docCols = { doc_type: reviewDocType, doc_number: reviewDocNumber || null }
+      let { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols })
+      // Graceful fallbacks while a migration hasn't run yet — ai_summary keeps the values
+      if (error && /doc_type|doc_number/.test(error.message || '')) {
+        ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols }))
+      }
       if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
         ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null }))
       }
       if (error) throw error
-      toast.success(fx ? `קבלה נשמרה! (הומרה לשקלים לפי שער יציג)` : 'קבלה נשמרה!')
+      toast.success(reviewDocType === 'delivery_note' ? 'תעודת משלוח נשמרה!'
+        : reviewDocType === 'summary_invoice' ? 'חשבונית מרכזת נשמרה! (לא נספרת בהוצאות)'
+        : fx ? `קבלה נשמרה! (הומרה לשקלים לפי שער יציג)` : 'קבלה נשמרה!')
       setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
       setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null)
+      setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([])
       loadData()
     } catch (err) {
       toast.error('שגיאה בשמירה: ' + (err?.message || ''))
@@ -974,21 +1008,31 @@ export default function ReceiptsPage() {
       items: cleanItems.length ? cleanItems : null,
     }
     const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
+    const docType = DOC_TYPES.some(t => t.value === form.doc_type) ? form.doc_type : 'receipt'
 
     if (editId) {
+      const prevRow = receipts.find(r => r.id === editId)
       // Editing a pending (email-imported) receipt also APPROVES it → status 'ready'.
-      const approve = receipts.find(r => r.id === editId)?.status === 'pending' ? { status: 'ready' } : {}
-      let { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, ...approve }).eq('id', editId)
+      const approve = prevRow?.status === 'pending' ? { status: 'ready' } : {}
+      // Pre-migration fallback keeps the classification in the ai_summary mirror.
+      const aiMirror = { ai_summary: { ...(prevRow?.ai_summary || {}), doc_type: docType } }
+      let { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, doc_type: docType, ...approve }).eq('id', editId)
+      if (error && /doc_type/.test(error.message || '')) {
+        ;({ error } = await supabase.from('receipts').update({ ...payload, ...vatCols, ...aiMirror, ...approve }).eq('id', editId))
+      }
       if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').update({ ...payload, ...approve }).eq('id', editId))
+        ;({ error } = await supabase.from('receipts').update({ ...payload, ...aiMirror, ...approve }).eq('id', editId))
       }
       if (error) { toast.error('שגיאה בעדכון'); return }
       toast.success(approve.status ? 'הקבלה אושרה ונשמרה' : 'קבלה עודכנה')
-      setReceipts(prev => prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols, ...approve } : r))
+      setReceipts(prev => { const next = prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols, doc_type: docType, ...approve } : r); setCached('receipts', next); return next })
     } else {
-      let resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols }).select().single()
+      let resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, doc_type: docType }).select().single()
+      if (resp.error && /doc_type/.test(resp.error.message || '')) {
+        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, ai_summary: { doc_type: docType } }).select().single()
+      }
       if (resp.error && /amount_before_vat|vat_amount|vat_rate/.test(resp.error.message || '')) {
-        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null }).select().single()
+        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ai_summary: { doc_type: docType } }).select().single()
       }
       if (resp.error) { toast.error('שגיאה בשמירה'); return }
       toast.success('קבלה נשמרה')
@@ -1003,6 +1047,28 @@ export default function ReceiptsPage() {
     if (error) { toast.error('שגיאה באישור'); return }
     setReceipts(prev => { const next = prev.map(r => r.id === id ? { ...r, status: 'ready' } : r); setCached('receipts', next); return next })
     toast.success('הקבלה אושרה')
+  }
+
+  // ── Bulk classification (select mode) ───────────────────────────────────────
+  function toggleSelected(id) {
+    setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
+  }
+  async function bulkSetDocType(docType) {
+    const ids = [...selectedIds]
+    if (!ids.length || bulkBusy) return
+    setBulkBusy(true)
+    try {
+      const { error } = await supabase.from('receipts').update({ doc_type: docType }).in('id', ids)
+      if (error) {
+        if (DOC_COL_RE.test(error.message || '')) { toast.error('נדרש עדכון בסיס נתונים — יש להריץ את supabase_doctype.sql ב-Supabase', { duration: 7000 }); return }
+        throw error
+      }
+      setReceipts(prev => { const next = prev.map(r => selectedIds.has(r.id) ? { ...r, doc_type: docType } : r); setCached('receipts', next); return next })
+      toast.success(`${ids.length} מסמכים סומנו כ"${docTypeLabel(docType)}"`)
+      setSelectedIds(new Set()); setSelectMode(false)
+    } catch (err) {
+      toast.error('שגיאה בעדכון: ' + (err?.message || ''))
+    } finally { setBulkBusy(false) }
   }
 
   // ── Inbound-receipt preview hydration ─────────────────────────────────────
@@ -1114,7 +1180,7 @@ export default function ReceiptsPage() {
   }
 
   function resetForm() {
-    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[] })
+    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt' })
     setImagePreview(null)
   }
 
@@ -1132,6 +1198,7 @@ export default function ReceiptsPage() {
       receipt_date: r.receipt_date||new Date().toISOString().slice(0,10), receipt_image: r.receipt_image||'',
       amount_before_vat: before, vat_amount: vat,
       items: Array.isArray(r.items) ? r.items.map(it => ({ ...it })) : [],
+      doc_type: docTypeOf(r),
     })
     setImagePreview(r.receipt_image||null)
     setShowModal(true)
@@ -1195,7 +1262,7 @@ export default function ReceiptsPage() {
 
   if (loading && receipts.length === 0) return <LoadingSpinner />
 
-  const hasActiveFilter = search || filterFrom || filterTo
+  const hasActiveFilter = search || filterFrom || filterTo || docFilter !== 'all'
 
   return (
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap: isMobile ? '14px' : '20px' }} dir="rtl">
@@ -1258,6 +1325,13 @@ export default function ReceiptsPage() {
             style={{ display:'flex', alignItems:'center', gap:'6px', height:36, padding: isMobile ? '0 10px' : '0 14px', background: archiveView ? 'var(--accent-bg)' : 'var(--panel)', border:`1px solid ${archiveView ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--r-btn)', cursor:'pointer', color: archiveView ? 'var(--accent)' : 'var(--text-mute)', fontFamily:'var(--font-main)', fontSize:'13px', fontWeight:600, flexShrink:0, whiteSpace:'nowrap' }}>
             <Archive size={16} />{!isMobile && (archiveView ? 'הצג קבלות' : 'ארכיון')}
           </button>
+          {/* Bulk-classification mode toggle — mark several rows as delivery notes at once */}
+          {!archiveView && (
+            <button onClick={() => { setSelectMode(m => !m); setSelectedIds(new Set()) }} title="בחירה מרובה — סימון סוג מסמך"
+              style={{ display:'flex', alignItems:'center', gap:'6px', height:36, padding: isMobile ? '0 10px' : '0 14px', background: selectMode ? 'var(--accent-bg)' : 'var(--panel)', border:`1px solid ${selectMode ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--r-btn)', cursor:'pointer', color: selectMode ? 'var(--accent)' : 'var(--text-mute)', fontFamily:'var(--font-main)', fontSize:'13px', fontWeight:600, flexShrink:0, whiteSpace:'nowrap' }}>
+              <ListChecks size={16} />{!isMobile && (selectMode ? 'בטל בחירה' : 'בחירה')}
+            </button>
+          )}
           {/* On mobile: toggle button for date filters */}
           {isMobile && (
             <button
@@ -1279,11 +1353,23 @@ export default function ReceiptsPage() {
             <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>עד:</span>
             <DateInput value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ flex:'1 1 130px', maxWidth:'180px', height:'36px', fontSize:'13px' }} clearable />
             {hasActiveFilter && (
-              <button onClick={() => { setSearch(''); setFilterFrom(''); setFilterTo(''); setShowFilters(false) }}
+              <button onClick={() => { setSearch(''); setFilterFrom(''); setFilterTo(''); setDocFilter('all'); setShowFilters(false) }}
                 style={{ padding:'6px 12px', background:'none', border:'1px solid var(--border)', borderRadius:'6px', fontSize:'12px', color:'var(--text-mute)', cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
                 נקה הכל
               </button>
             )}
+          </div>
+        )}
+
+        {/* Document-type filter chips */}
+        {(!isMobile || showFilters) && !archiveView && (
+          <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+            {[{ value:'all', label:'הכל', icon:'' }, ...DOC_TYPES].map(t => (
+              <button key={t.value} onClick={() => setDocFilter(t.value)}
+                style={{ padding:'5px 12px', borderRadius:'999px', border:`1px solid ${docFilter === t.value ? 'var(--accent)' : 'var(--border)'}`, background: docFilter === t.value ? 'var(--accent-bg)' : 'var(--panel)', color: docFilter === t.value ? 'var(--accent)' : 'var(--text-mute)', fontSize:'12.5px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+                {t.icon ? `${t.icon} ` : ''}{t.label}
+              </button>
+            ))}
           </div>
         )}
       </div>
@@ -1293,8 +1379,13 @@ export default function ReceiptsPage() {
         <div style={{ display:'flex', alignItems:'stretch', gap:'10px', flexWrap:'wrap' }}>
           {/* Total paid (with VAT) — primary */}
           <div style={{ display:'flex', flexDirection:'column', gap:'2px', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 16px' : '12px 20px', boxShadow:'var(--shadow-card)' }}>
-            <span style={{ fontSize:'11px', color:'var(--text-mute)', fontWeight:600 }}>סה"כ לתשלום ({filtered.length} קבלות)</span>
+            <span style={{ fontSize:'11px', color:'var(--text-mute)', fontWeight:600 }}>סה"כ לתשלום ({totals.count} מסמכים)</span>
             <span style={{ fontSize: isMobile ? '20px' : '22px', fontWeight:800, color:'var(--ok)', lineHeight:1.1 }}>{fmtILS(totals.paid)}</span>
+            {totals.excludedCount > 0 && (
+              <span title="חשבונית מרכזת מסכמת תעודות משלוח שכבר נספרו — לכן אינה נכללת בסכום" style={{ fontSize:'11px', color:'var(--text-mute)' }}>
+                לא כולל {totals.excludedCount} חשבוניות מרכזות ({fmtILS(totals.excludedSum)})
+              </span>
+            )}
           </div>
           {/* VAT breakdown */}
           <div style={{ display:'flex', gap: isMobile ? '14px' : '20px', alignItems:'center', background:'var(--panel-2)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '10px 16px' : '12px 20px' }}>
@@ -1339,15 +1430,22 @@ export default function ReceiptsPage() {
         </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
-          {filtered.map(r => (
-            <div key={r.id} style={{ background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', padding: isMobile ? '12px 14px' : '14px 16px', display:'flex', alignItems:'center', gap:isMobile ? '10px' : '12px', boxShadow:'var(--shadow-card)', minHeight:'64px' }}>
+          {filtered.map(r => { const selecting = selectMode && !archiveView; const isSel = selectedIds.has(r.id); return (
+            <div key={r.id} onClick={selecting ? () => toggleSelected(r.id) : undefined}
+              style={{ background: isSel ? 'var(--accent-bg)' : 'var(--panel)', border:`1px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`, borderRadius:'var(--r-card)', padding: isMobile ? '12px 14px' : '14px 16px', display:'flex', alignItems:'center', gap:isMobile ? '10px' : '12px', boxShadow:'var(--shadow-card)', minHeight:'64px', cursor: selecting ? 'pointer' : 'default' }}>
+              {/* Select-mode checkbox */}
+              {selecting && (
+                <div style={{ width:22, height:22, borderRadius:6, border:`2px solid ${isSel ? 'var(--accent)' : 'var(--border)'}`, background: isSel ? 'var(--accent)' : 'var(--panel)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                  {isSel && <CheckCircle2 size={14} color="white" />}
+                </div>
+              )}
               {/* Thumbnail */}
               {r.receipt_image ? (
-                <button onClick={() => setLightboxUrl(r.receipt_image)} style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border)', background:'var(--panel-2)', flexShrink:0, cursor:'pointer', padding:0 }}>
+                <button onClick={selecting ? undefined : () => setLightboxUrl(r.receipt_image)} style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border)', background:'var(--panel-2)', flexShrink:0, cursor:'pointer', padding:0 }}>
                   <img src={r.receipt_image} alt="קבלה" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
                 </button>
               ) : r.storage_path ? (
-                <button onClick={() => openStoredFile(r)} title="פתח את הקובץ המקורי מהמייל"
+                <button onClick={selecting ? undefined : () => openStoredFile(r)} title="פתח את הקובץ המקורי מהמייל"
                   style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', border:'1px solid var(--accent)', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer', padding:0 }}>
                   <FileText size={17} style={{ color:'var(--accent)' }} />
                 </button>
@@ -1369,6 +1467,18 @@ export default function ReceiptsPage() {
                     <span title={`הומר לשקלים לפי השער היציג של ${r.ai_summary.currency} (בנק ישראל, ${fmtDate(r.ai_summary.fx_date)}) — הערכה בלבד`}
                       style={{ fontSize:'11px', fontWeight:700, color:'var(--warn)', background:'var(--warn-tint-1)', border:'1px solid var(--warn-tint-border)', borderRadius:6, padding:'1px 6px', whiteSpace:'nowrap' }}>
                       {(CUR_SYMBOL[r.ai_summary.currency] || r.ai_summary.currency)}→₪ *
+                    </span>
+                  )}
+                  {docTypeOf(r) === 'delivery_note' && (
+                    <span title="תעודת משלוח — נספרת בהוצאות ותושווה לחשבונית המרכזת של הספק"
+                      style={{ fontSize:'11px', fontWeight:700, color:'var(--accent)', background:'var(--accent-bg)', border:'1px solid var(--accent)', borderRadius:6, padding:'1px 7px', whiteSpace:'nowrap' }}>
+                      🚚 תעודת משלוח{r.doc_number ? ` ${r.doc_number}` : ''}
+                    </span>
+                  )}
+                  {docTypeOf(r) === 'summary_invoice' && (
+                    <span title="חשבונית מרכזת — מסכמת תעודות משלוח שכבר נספרו, לכן אינה נספרת בהוצאות"
+                      style={{ fontSize:'11px', fontWeight:700, color:'#7c3aed', background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:6, padding:'1px 7px', whiteSpace:'nowrap' }}>
+                      📑 חשבונית מרכזת
                     </span>
                   )}
                 </div>
@@ -1404,8 +1514,8 @@ export default function ReceiptsPage() {
                     לפני מע"מ {fmtILS(amtBefore(r))}
                   </span>
                 </div>
-                {/* Action buttons — archive view shows restore + permanent delete */}
-                {archiveView ? (
+                {/* Action buttons — hidden in select mode; archive view shows restore + permanent delete */}
+                {selecting ? null : archiveView ? (
                   <>
                     <button onClick={() => restoreReceipt(r.id)} title="שחזר" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='var(--accent-bg)';e.currentTarget.style.color='var(--accent)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><RotateCcw size={15} /></button>
                     <button onClick={() => { setPermText(''); setPermDeleteId(r.id) }} title="מחק לצמיתות" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--danger)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='#fef2f2'}} onMouseLeave={e=>{e.currentTarget.style.background='none'}}><Trash2 size={15} /></button>
@@ -1421,7 +1531,24 @@ export default function ReceiptsPage() {
                 )}
               </div>
             </div>
+          )})}
+        </div>
+      )}
+
+      {/* ── Bulk-classification action bar (select mode) ─────────────────────── */}
+      {selectMode && !archiveView && (
+        <div style={{ position:'fixed', bottom: isMobile ? 84 : 24, left:'50%', transform:'translateX(-50%)', zIndex:60, display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap', justifyContent:'center', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'14px', padding:'10px 14px', boxShadow:'0 8px 30px rgba(0,0,0,0.18)', maxWidth:'94vw' }} dir="rtl">
+          <span style={{ fontSize:'13px', fontWeight:700, color:'var(--text)', whiteSpace:'nowrap' }}>{selectedIds.size} נבחרו</span>
+          {DOC_TYPES.map(t => (
+            <button key={t.value} onClick={() => bulkSetDocType(t.value)} disabled={bulkBusy || selectedIds.size === 0}
+              style={{ padding:'8px 12px', borderRadius:'9px', border:'1px solid var(--border)', background: (bulkBusy || selectedIds.size === 0) ? 'var(--panel-2)' : 'var(--accent-bg)', color: (bulkBusy || selectedIds.size === 0) ? 'var(--text-mute)' : 'var(--accent)', fontSize:'12.5px', fontWeight:700, cursor:(bulkBusy || selectedIds.size === 0)?'default':'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+              {t.icon} סמן כ{t.label}
+            </button>
           ))}
+          <button onClick={() => { setSelectMode(false); setSelectedIds(new Set()) }} disabled={bulkBusy}
+            style={{ padding:'8px 12px', borderRadius:'9px', border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-dim)', fontSize:'12.5px', cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+            ביטול
+          </button>
         </div>
       )}
 
@@ -1485,6 +1612,29 @@ export default function ReceiptsPage() {
                 הסכומים הם ב-{reviewCurrency} — נא להזין/לתקן את הערך בשקלים ידנית לפני שמירה.
               </div>
             )}
+            {/* Document type — detected by the AI, user can override */}
+            <div>
+              <label style={LS}>סוג מסמך</label>
+              <div style={{ display:'flex', gap:'6px' }}>
+                {DOC_TYPES.map(t => (
+                  <button key={t.value} type="button" onClick={() => setReviewDocType(t.value)}
+                    style={{ flex:1, padding:'10px 6px', borderRadius:'10px', border:`1.5px solid ${reviewDocType === t.value ? 'var(--accent)' : 'var(--border)'}`, background: reviewDocType === t.value ? 'var(--accent-bg)' : 'var(--panel)', color: reviewDocType === t.value ? 'var(--accent)' : 'var(--text-mute)', fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+                    {t.icon} {t.label}
+                  </button>
+                ))}
+              </div>
+              {reviewDocType === 'summary_invoice' && (
+                <div style={{ marginTop:8, background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:'10px', padding:'9px 12px', fontSize:'12.5px', color:'var(--text)', lineHeight:1.6 }}>
+                  📑 <strong>חשבונית מרכזת</strong> לא נספרת בהוצאות (כדי שלא ייספר כפול עם תעודות המשלוח) — היא תושווה לתעודות המשלוח של הספק בעמוד ההתאמות.
+                  {reviewDocRefs?.length > 0 && <> זוהו בה <strong>{reviewDocRefs.length} תעודות משלוח</strong> מפורטות.</>}
+                </div>
+              )}
+              {reviewDocType === 'delivery_note' && (
+                <div style={{ marginTop:8, fontSize:'12px', color:'var(--text-mute)' }}>
+                  🚚 תעודת משלוח נספרת בהוצאות, ובסוף החודש תושווה לחשבונית המרכזת של הספק.
+                </div>
+              )}
+            </div>
             <div style={formGrid}>
               <div>
                 <label style={LS}>ספק</label>
@@ -1644,6 +1794,20 @@ export default function ReceiptsPage() {
               <label style={LS}>מע"מ (₪)</label>
               <input type="number" value={form.vat_amount} onChange={e => setVatField(e.target.value)} style={FS} dir="ltr" placeholder="אוטומטי" />
             </div>
+          </div>
+
+          {/* Document type */}
+          <div>
+            <label style={LS}>סוג מסמך</label>
+            <select value={form.doc_type || 'receipt'} onChange={e => setForm(p => ({ ...p, doc_type: e.target.value }))}
+              style={{ ...FS, cursor:'pointer' }} dir="rtl">
+              {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
+            </select>
+            {form.doc_type === 'summary_invoice' && (
+              <div style={{ marginTop:5, fontSize:'12px', color:'var(--text-mute)', lineHeight:1.5 }}>
+                📑 חשבונית מרכזת לא נספרת בהוצאות — היא תושווה לתעודות המשלוח של הספק.
+              </div>
+            )}
           </div>
 
           {/* Line items — fully editable */}

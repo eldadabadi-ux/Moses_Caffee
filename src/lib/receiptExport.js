@@ -2,9 +2,12 @@
  * receiptExport — reusable builders for the accountant exports.
  * Used by the export dialog, the quick Excel/PDF buttons, and the monthly prompt.
  */
+import { docTypeOf, docTypeLabel, isExpenseDoc } from './docTypes'
 
 const fmtDate = d => d ? d.split('-').reverse().join('.') : ''
 const il = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}`
+// Doc-type display for exports — regular receipts stay blank (the common case).
+const docCell = r => { const t = docTypeOf(r); return t === 'receipt' ? '' : docTypeLabel(t) }
 
 // VAT breakdown for one receipt — prefers exact scanned values (column or
 // ai_summary), else computes from total + rate.
@@ -25,18 +28,24 @@ export function vatAmount(r, defaultRate = 18) {
 // ── Excel (RTL, styled, full VAT breakdown) ───────────────────────────────────
 export async function buildExcelBlob(receipts, vatRate = 18) {
   const XLSXs = (await import('xlsx-js-style')).default
-  const sumBefore = receipts.reduce((s, r) => s + vatBefore(r, vatRate), 0)
-  const sumVat    = receipts.reduce((s, r) => s + vatAmount(r, vatRate), 0)
-  const sumTotal  = receipts.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+  // Summary invoices (חשבונית מרכזת) are listed (official tax documents) but
+  // EXCLUDED from the totals — their delivery notes are already summed.
+  const expense  = receipts.filter(isExpenseDoc)
+  const excluded = receipts.filter(r => !isExpenseDoc(r))
+  const sumBefore = expense.reduce((s, r) => s + vatBefore(r, vatRate), 0)
+  const sumVat    = expense.reduce((s, r) => s + vatAmount(r, vatRate), 0)
+  const sumTotal  = expense.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+  const excludedSum = excluded.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
   const rows = [
-    ['תאריך', 'ספק', 'קטגוריה', 'לפני מע"מ (₪)', 'מע"מ (₪)', 'סה"כ כולל מע"מ (₪)'],
+    ['תאריך', 'ספק', 'סוג מסמך', 'קטגוריה', 'לפני מע"מ (₪)', 'מע"מ (₪)', 'סה"כ כולל מע"מ (₪)'],
     ...receipts.map(r => [
-      fmtDate(r.receipt_date), r.vendor_name || '', r.category_text || '',
+      fmtDate(r.receipt_date), r.vendor_name || '', docCell(r), r.category_text || '',
       Math.round(vatBefore(r, vatRate) * 100) / 100,
       Math.round(vatAmount(r, vatRate) * 100) / 100,
       parseFloat(r.amount || 0),
     ]),
-    ['', '', 'סה"כ', Math.round(sumBefore*100)/100, Math.round(sumVat*100)/100, Math.round(sumTotal*100)/100],
+    ['', '', '', 'סה"כ', Math.round(sumBefore*100)/100, Math.round(sumVat*100)/100, Math.round(sumTotal*100)/100],
+    ...(excluded.length ? [['', '', '', `מתוכן חשבוניות מרכזות (${excluded.length}) — לא נכללות בסה"כ`, '', '', Math.round(excludedSum*100)/100]] : []),
   ]
   const thin = { style: 'thin', color: { rgb: 'CCCCCC' } }
   const border = { top: thin, bottom: thin, left: thin, right: thin }
@@ -46,7 +55,7 @@ export async function buildExcelBlob(receipts, vatRate = 18) {
     for (let C = range.s.c; C <= range.e.c; C++) {
       const addr = XLSXs.utils.encode_cell({ r: R, c: C })
       if (!ws[addr]) ws[addr] = { v: '', t: 's' }
-      const isHeader = R === 0, isTotal = R === range.e.r
+      const isHeader = R === 0, isTotal = R > receipts.length
       ws[addr].s = {
         font:      { bold: isHeader || isTotal, name: 'Arial', sz: 11 },
         fill:      isHeader ? { patternType: 'solid', fgColor: { rgb: 'E8E8E8' } } : { patternType: 'none' },
@@ -55,7 +64,7 @@ export async function buildExcelBlob(receipts, vatRate = 18) {
       }
     }
   }
-  ws['!cols']  = [{ wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 15 }, { wch: 13 }, { wch: 17 }]
+  ws['!cols']  = [{ wch: 14 }, { wch: 22 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 13 }, { wch: 17 }]
   ws['!views'] = [{ rightToLeft: true }]
   const wb = XLSXs.utils.book_new()
   XLSXs.utils.book_append_sheet(wb, ws, 'קבלות')
@@ -69,10 +78,14 @@ export function buildPdfHtml(receipts, { filterFrom, filterTo, vatRate = 18, tit
   const fmt = d => d ? new Date(d).toLocaleDateString('he-IL', { day:'numeric', month:'long', year:'numeric' }) : ''
   const period = (filterFrom || filterTo) ? `${fmt(filterFrom) || '...'} — ${fmt(filterTo) || '...'}` : 'כל הזמנים'
   const sorted = [...receipts].sort((a,b) => (a.receipt_date||'').localeCompare(b.receipt_date||''))
-  const sumBefore = sorted.reduce((s,r)=>s+vatBefore(r, vatRate),0)
-  const sumVat    = sorted.reduce((s,r)=>s+vatAmount(r, vatRate),0)
-  const sumTotal  = sorted.reduce((s,r)=>s+(parseFloat(r.amount)||0),0)
-  const trs = sorted.map(r => `<tr><td>${r.receipt_date ? new Date(r.receipt_date).toLocaleDateString('he-IL') : '—'}</td><td>${esc(r.vendor_name)||'—'}</td><td>${esc(r.category_text||'')}</td><td>${il(vatBefore(r, vatRate))}</td><td style="color:#92400e">${il(vatAmount(r, vatRate))}</td><td style="font-weight:700;color:#059669">${il(r.amount)}</td></tr>`).join('')
+  // Totals exclude summary invoices (their delivery notes are already counted)
+  const expense  = sorted.filter(isExpenseDoc)
+  const excluded = sorted.filter(r => !isExpenseDoc(r))
+  const sumBefore = expense.reduce((s,r)=>s+vatBefore(r, vatRate),0)
+  const sumVat    = expense.reduce((s,r)=>s+vatAmount(r, vatRate),0)
+  const sumTotal  = expense.reduce((s,r)=>s+(parseFloat(r.amount)||0),0)
+  const excludedSum = excluded.reduce((s,r)=>s+(parseFloat(r.amount)||0),0)
+  const trs = sorted.map(r => `<tr><td>${r.receipt_date ? new Date(r.receipt_date).toLocaleDateString('he-IL') : '—'}</td><td>${esc(r.vendor_name)||'—'}</td><td>${esc(docCell(r))}</td><td>${esc(r.category_text||'')}</td><td>${il(vatBefore(r, vatRate))}</td><td style="color:#92400e">${il(vatAmount(r, vatRate))}</td><td style="font-weight:700;color:#059669">${il(r.amount)}</td></tr>`).join('')
   return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>${esc(title)}</title>
 <style>@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Heebo',Arial,sans-serif;direction:rtl;color:#1e293b;padding:32px;font-size:15px;}
@@ -85,10 +98,10 @@ tbody tr{border-bottom:1px solid #f1f5f9;}tbody tr:nth-child(even){background:#f
 tfoot tr{background:#f1f5f9;border-top:2px solid #e2e8f0;}tfoot td{padding:12px;font-weight:700;}
 td{padding:10px 12px;color:#334155;}@media print{body{padding:0;}}</style></head><body>
 <h1>${esc(title)}</h1><div class="subtitle">${period}</div>
-<div class="total-banner">סה"כ כולל מע"מ: <span>${il(sumTotal)}</span> · מתוכו מע"מ: ${il(sumVat)} · לפני מע"מ: ${il(sumBefore)} (${receipts.length} קבלות)</div>
-<table><thead><tr><th>תאריך</th><th>ספק</th><th>קטגוריה</th><th>לפני מע"מ</th><th>מע"מ</th><th>סה"כ</th></tr></thead>
+<div class="total-banner">סה"כ כולל מע"מ: <span>${il(sumTotal)}</span> · מתוכו מע"מ: ${il(sumVat)} · לפני מע"מ: ${il(sumBefore)} (${expense.length} מסמכים)${excluded.length ? ` · לא כולל ${excluded.length} חשבוניות מרכזות (${il(excludedSum)})` : ''}</div>
+<table><thead><tr><th>תאריך</th><th>ספק</th><th>סוג מסמך</th><th>קטגוריה</th><th>לפני מע"מ</th><th>מע"מ</th><th>סה"כ</th></tr></thead>
 <tbody>${trs}</tbody>
-<tfoot><tr><td colspan="3">סה"כ</td><td>${il(sumBefore)}</td><td style="color:#92400e">${il(sumVat)}</td><td style="color:#059669">${il(sumTotal)}</td></tr></tfoot></table>
+<tfoot><tr><td colspan="4">סה"כ${excluded.length ? ' (ללא חשבוניות מרכזות)' : ''}</td><td>${il(sumBefore)}</td><td style="color:#92400e">${il(sumVat)}</td><td style="color:#059669">${il(sumTotal)}</td></tr></tfoot></table>
 <div style="color:#94a3b8;font-size:13px;margin-top:32px;border-top:1px solid #e2e8f0;padding-top:12px;">הופק ב-${new Date().toLocaleDateString('he-IL',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
 <script>window.onload=()=>{window.print();}<\/script></body></html>`
 }

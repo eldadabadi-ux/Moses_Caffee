@@ -168,6 +168,12 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
   result = reconcileVat(result, rate)
   result._model = usedModel
 
+  // ── Document classification (unknown → regular receipt) ──────────────────
+  result.doc_type = ['delivery_note', 'summary_invoice'].includes(result.doc_type) ? result.doc_type : 'receipt'
+  result.doc_number = String(result.doc_number || '').trim() || null
+  result.doc_refs = result.doc_type === 'summary_invoice' && Array.isArray(result.doc_refs)
+    ? result.doc_refs.filter(x => x && (Number(x.amount) > 0 || x.note_number)) : []
+
   // ── Deterministic category safety net ─────────────────────────────────────
   // Forces fuel/transport receipts to "תחבורה ודלק" regardless of what the
   // model said, and sets the receipt-level `category` (instead of the UI having
@@ -285,6 +291,24 @@ ${multiPageNote}
   - שנה דו-ספרתית: 26 → 2026, 25 → 2025 (הוסף 2000).
 - אם לא מופיע תאריך ברור — החזר ""
 
+### סוג המסמך (doc_type) — חובה!
+זהה את סוג המסמך לפי הכותרת והתוכן והחזר אחד משלושה ערכים:
+- **"delivery_note"** — תעודת משלוח: כותרת "תעודת משלוח" / "ת. משלוח" / "תעודה". מפרטת מוצרים וכמויות שסופקו, לרוב **ללא** דרישת תשלום וללא פירוט מע"מ. נפוצה אצל ספקים במהלך החודש.
+- **"summary_invoice"** — חשבונית מרכזת: כותרת "חשבונית מרכזת" / "חשבונית ריכוז" / "ריכוז תעודות משלוח" / חשבונית חודשית שמרכזת כמה תעודות משלוח. לרוב מכילה **טבלה של מספרי תעודות משלוח** עם תאריך וסכום לכל תעודה (בלי פירוט מוצרים).
+- **"receipt"** — כל השאר: קבלה, חשבונית מס, חשבונית מס/קבלה על עסקה בודדת.
+אם אינך בטוח — החזר "receipt".
+
+### מספר מסמך (doc_number):
+- מספר תעודת המשלוח / החשבונית כפי שמודפס: "תעודה מס'", "מס' תעודה", "חשבונית מס'", "מס' מסמך", "מספר".
+- החזר את המספר בלבד (ספרות). אם אין מספר ברור — החזר "".
+
+### הפניות לתעודות משלוח (doc_refs) — רק בחשבונית מרכזת:
+- אם המסמך הוא חשבונית מרכזת שמפרטת את תעודות המשלוח שהיא מרכזת — החזר doc_refs: שורה לכל תעודה עם:
+  - **note_number** = מספר תעודת המשלוח כפי שמופיע בחשבונית.
+  - **note_date** = תאריך התעודה בפורמט YYYY-MM-DD (אם מופיע, אחרת "").
+  - **amount** = סכום התעודה כפי שמופיע בחשבונית (כולל אגורות, ללא עיגול).
+- אם אין פירוט תעודות (או שהמסמך אינו חשבונית מרכזת) — החזר doc_refs: [].
+
 ### סכום סופי (total_amount):
 - זהו הסכום הסופי לתשלום **כולל מע"מ** (בדרך כלל הגדול ביותר).
 - חפש: "סה"כ לתשלום", "סה"כ", "total", "לתשלום", "לחיוב", "סכום כולל מע"מ".
@@ -370,6 +394,9 @@ ${multiPageNote}
 {
   "vendor_name": "שם הספק",
   "receipt_date": "YYYY-MM-DD או ריק",
+  "doc_type": "receipt או delivery_note או summary_invoice",
+  "doc_number": "מספר התעודה/החשבונית או ריק",
+  "doc_refs": [ { "note_number": "מס' תעודת משלוח", "note_date": "YYYY-MM-DD או ריק", "amount": סכום התעודה } ],
   "total_amount": מספר כולל מע"מ (לא 0 אם יש מספרים בקבלה),
   "amount_before_vat": מספר לפני מע"מ (0 אם לא מופיע בקבלה),
   "vat_amount": סכום המע"מ (0 אם לא מופיע בקבלה),
@@ -431,6 +458,20 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
           currency:          { type: 'STRING' },
           original_amount:   { type: 'NUMBER' },
           category:          { type: 'STRING' },
+          doc_type:          { type: 'STRING', enum: ['receipt', 'delivery_note', 'summary_invoice'] },
+          doc_number:        { type: 'STRING' },
+          doc_refs: {
+            type: 'ARRAY',
+            items: {
+              type: 'OBJECT',
+              properties: {
+                note_number: { type: 'STRING' },
+                note_date:   { type: 'STRING' },
+                amount:      { type: 'NUMBER' },
+              },
+              required: ['amount'],
+            },
+          },
           items: {
             type: 'ARRAY',
             items: {

@@ -4,6 +4,7 @@
  */
 import { supabase } from './supabase'
 import { flattenItems, vendorComposition } from './itemAggregation'
+import { isExpenseDoc } from './docTypes'
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
@@ -37,7 +38,9 @@ export function deriveVendorStats(receipts) {
   const now = new Date()
   const curY = now.getFullYear()
   const curYM = `${curY}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const active = (receipts || []).filter(r => !r.archived_at)
+  // Summary invoices (חשבונית מרכזת) are excluded — they aggregate delivery
+  // notes that are already counted, so including them would double the spend.
+  const active = (receipts || []).filter(r => !r.archived_at && isExpenseDoc(r))
   const flat = flattenItems(active)
 
   const map = {}
