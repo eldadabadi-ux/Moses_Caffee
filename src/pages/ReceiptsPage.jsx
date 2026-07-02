@@ -1391,6 +1391,11 @@ export default function ReceiptsPage() {
                         style={{ fontSize:'13px', fontWeight:600, color:'var(--text-dim)', whiteSpace:'nowrap' }}>
                         ≈ {fmtILS(parseFloat(r.amount) || 0)} *
                       </span>
+                      {r.ai_summary.fx_rate > 0 && (
+                        <span style={{ fontSize:'11.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
+                          1{CUR_SYMBOL[r.ai_summary.currency] || ` ${r.ai_summary.currency}`} = ₪{Number(r.ai_summary.fx_rate) >= 1 ? Number(r.ai_summary.fx_rate).toFixed(2) : Number(r.ai_summary.fx_rate).toFixed(4)}
+                        </span>
+                      )}
                     </>
                   ) : (
                     <span style={{ fontSize: isMobile ? '18px' : '19px', fontWeight:700, color:'var(--ok)', whiteSpace:'nowrap' }}>{fmtILS(parseFloat(r.amount) || 0)}</span>
