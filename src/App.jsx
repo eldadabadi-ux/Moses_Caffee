@@ -28,6 +28,7 @@ const SettingsPage    = lazy(() => import('./pages/SettingsPage'))
 const SuppliersPage   = lazy(() => import('./pages/SuppliersPage'))
 const ArchivePage     = lazy(() => import('./pages/ArchivePage'))
 const AdminPage       = lazy(() => import('./pages/AdminPage'))
+const ReconciliationPage = lazy(() => import('./pages/ReconciliationPage'))
 
 // Reactive mobile detection
 function useIsMobile() {
@@ -264,7 +265,7 @@ function AppShell() {
     import('./pages/DashboardPage'); import('./pages/ReceiptsPage')
     import('./pages/CategoriesPage'); import('./pages/SuppliersPage')
     import('./pages/SettingsPage'); import('./pages/AdminPage')
-    import('./pages/ArchivePage')
+    import('./pages/ArchivePage'); import('./pages/ReconciliationPage')
   }, [])
 
   // Warm the data cache for the other tabs while on the home page, so the first
@@ -316,6 +317,7 @@ function AppShell() {
             <Route path="/dashboard"  element={<Navigate to="/" replace />} />
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/suppliers"  element={<SuppliersPage />} />
+            <Route path="/reconcile"  element={<ReconciliationPage />} />
             <Route path="/archive"    element={<ArchivePage />} />
             <Route path="/settings"   element={<SettingsPage />} />
             <Route path="/admin"      element={<AdminPage />} />

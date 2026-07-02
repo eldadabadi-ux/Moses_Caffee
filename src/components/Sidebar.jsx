@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useSettings } from '../hooks/useSettings'
+import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
@@ -40,6 +41,10 @@ const NAV = [
     ],
   },
   {
+    id: 'reconcile', label: 'התאמות', icon: ArrowLeftRight, to: '/reconcile',
+    children: [],
+  },
+  {
     id: 'archive', label: 'ארכיון', icon: Archive, to: '/archive',
     children: [],
   },
@@ -61,6 +66,7 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
   const navigate = useNavigate()
   const location = useLocation()
   const { settings } = useSettings()
+  const reconcileCount = useReconcileAlerts()
   const activeSection = NAV.find(s => s.to === location.pathname)?.id
   // Accordion: exactly ONE section is open at a time. Opening one closes the
   // others — never two sections expanded together.
@@ -132,6 +138,12 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
                     color: isActive ? 'var(--accent)' : 'var(--text)', fontSize: 16, fontWeight: isActive ? 700 : 600 }}>
                   <Icon size={19} />
                   {s.label}
+                  {s.id === 'reconcile' && reconcileCount > 0 && (
+                    <span title="חשבוניות מרכזות שממתינות להתאמה או עם פער"
+                      style={{ marginInlineStart: 'auto', background: 'var(--danger)', color: 'white', fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '1px 7px', minWidth: 18, textAlign: 'center', lineHeight: '16px' }}>
+                      {reconcileCount}
+                    </span>
+                  )}
                 </button>
                 {s.children.length > 0 && (
                   <button onClick={() => toggle(s.id)} aria-label="הרחב"

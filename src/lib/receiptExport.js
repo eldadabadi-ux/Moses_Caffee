@@ -3,6 +3,7 @@
  * Used by the export dialog, the quick Excel/PDF buttons, and the monthly prompt.
  */
 import { docTypeOf, docTypeLabel, isExpenseDoc } from './docTypes'
+import { matchInvoice, findCandidates, normalizeVendor, docNumberOf, TOLERANCE } from './reconciliation'
 
 const fmtDate = d => d ? d.split('-').reverse().join('.') : ''
 const il = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}`
@@ -68,8 +69,164 @@ export async function buildExcelBlob(receipts, vatRate = 18) {
   ws['!views'] = [{ rightToLeft: true }]
   const wb = XLSXs.utils.book_new()
   XLSXs.utils.book_append_sheet(wb, ws, 'קבלות')
+  // Second worksheet: delivery-note ↔ summary-invoice reconciliation (התאמות),
+  // added automatically whenever the set contains classified documents.
+  const sections = buildReconciliationRows(receipts)
+  if (sections.length) appendReconciliationSheet(XLSXs, wb, sections)
   const buf = XLSXs.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true })
   return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+}
+
+// ── Reconciliation (התאמות) — per-supplier delivery notes vs summary invoice ──
+
+const reconStatusText = s => s.status === 'waiting' ? 'ממתין לחשבונית'
+  : s.status === 'mismatch' ? `⚠ פער של ${il(Math.abs(s.delta))}`
+  : s.status === 'rounding' ? `✓ תואם (הפרש עיגול ${il(Math.abs(s.delta))})`
+  : '✓ תואם'
+
+/**
+ * Pure data for the reconciliation document. One section per supplier:
+ * its delivery notes, the summary invoice (when arrived), totals and status.
+ * `month` ('YYYY-MM', optional) mirrors the ReconciliationPage view: invoices
+ * of that month + all still-open ones + suppliers waiting in that month.
+ */
+export function buildReconciliationRows(receipts, { month } = {}) {
+  const r2n = n => Math.round((Number(n) || 0) * 100) / 100
+  const active = (receipts || []).filter(r => !r.archived_at)
+  const open = r => !r.reconciliation || r.reconciliation.status === 'mismatch'
+  const invoices = active.filter(r => docTypeOf(r) === 'summary_invoice'
+    && (!month || (r.receipt_date || '').startsWith(month) || open(r)))
+  const sections = []
+  const usedVendors = new Set()
+
+  for (const inv of invoices) {
+    const snap = inv.reconciliation
+    let notes, status, delta, notesTotal
+    if (snap) {
+      notes = (snap.notes || []).map(n => ({ date: n.date || '', number: n.doc_number || '', amount: r2n(n.amount),
+        flag: n.ref_amount != null && Math.abs(n.diff) > TOLERANCE }))
+      status = snap.status; delta = r2n(snap.delta); notesTotal = r2n(snap.notes_total)
+    } else {
+      const linked = active.filter(r => r.matched_invoice_id === inv.id)
+      const res = matchInvoice(inv, linked.length ? linked : findCandidates(active, inv))
+      notes = res.notes.map(n => ({ date: n.date, number: n.doc_number, amount: n.amount,
+        flag: n.ref_amount != null && Math.abs(n.diff) > TOLERANCE }))
+      status = res.status; delta = res.delta; notesTotal = res.notesTotal
+    }
+    usedVendors.add(normalizeVendor(inv.vendor_name))
+    sections.push({
+      vendor: (inv.vendor_name || '').trim() || 'ספק לא ידוע', confirmed: !!snap, status, delta, notesTotal,
+      invoice: { date: inv.receipt_date || '', number: docNumberOf(inv), amount: r2n(inv.amount) },
+      notes,
+    })
+  }
+
+  // Suppliers with open delivery notes and no summary invoice yet
+  const waitMap = {}
+  active.forEach(r => {
+    if (docTypeOf(r) !== 'delivery_note' || r.matched_invoice_id) return
+    if (month && !(r.receipt_date || '').startsWith(month)) return
+    const key = normalizeVendor(r.vendor_name)
+    if (usedVendors.has(key)) return
+    if (!waitMap[key]) waitMap[key] = { vendor: (r.vendor_name || '').trim() || 'ספק לא ידוע', notes: [] }
+    waitMap[key].notes.push({ date: r.receipt_date || '', number: docNumberOf(r), amount: r2n(r.amount), flag: false })
+  })
+  for (const w of Object.values(waitMap)) {
+    w.notes.sort((a, b) => a.date.localeCompare(b.date))
+    sections.push({ vendor: w.vendor, confirmed: false, status: 'waiting', delta: null,
+      notesTotal: r2n(w.notes.reduce((s, n) => s + n.amount, 0)), invoice: null, notes: w.notes })
+  }
+  return sections
+}
+
+/** Adds an RTL-styled "התאמות" worksheet to an existing workbook. */
+export function appendReconciliationSheet(XLSXs, wb, sections) {
+  const rows = [['ספק', 'מסמך', 'תאריך', "מס' מסמך", 'סכום (₪)', 'סטטוס']]
+  const meta = ['header']
+  for (const s of sections) {
+    rows.push([s.vendor, '', '', '', '', reconStatusText(s) + (s.invoice && !s.confirmed && s.status !== 'waiting' ? ' · טרם אושר' : '')])
+    meta.push('vendor:' + s.status)
+    for (const n of s.notes) {
+      rows.push(['', 'תעודת משלוח', fmtDate(n.date), n.number || '', n.amount, n.flag ? '⚠ שונה מהחשבונית' : ''])
+      meta.push(n.flag ? 'note-flag' : 'note')
+    }
+    rows.push(['', 'סה"כ תעודות משלוח', '', '', s.notesTotal, ''])
+    meta.push('subtotal')
+    if (s.invoice) {
+      rows.push(['', 'חשבונית מרכזת', fmtDate(s.invoice.date), s.invoice.number || '', s.invoice.amount,
+        s.delta != null && Math.abs(s.delta) > 0.009 ? `הפרש: ${il(s.delta)}` : ''])
+      meta.push('invoice')
+    }
+    rows.push(['', '', '', '', '', ''])
+    meta.push('spacer')
+  }
+  const thin = { style: 'thin', color: { rgb: 'CCCCCC' } }
+  const border = { top: thin, bottom: thin, left: thin, right: thin }
+  const ws = XLSXs.utils.aoa_to_sheet(rows)
+  const range = XLSXs.utils.decode_range(ws['!ref'] || 'A1')
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    const kind = meta[R] || ''
+    if (kind === 'spacer') continue
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const addr = XLSXs.utils.encode_cell({ r: R, c: C })
+      if (!ws[addr]) ws[addr] = { v: '', t: 's' }
+      const isHeader = kind === 'header'
+      const isVendor = kind.startsWith('vendor')
+      const fill = isHeader ? { patternType: 'solid', fgColor: { rgb: 'E8E8E8' } }
+        : kind === 'vendor:matched' || kind === 'vendor:rounding' ? { patternType: 'solid', fgColor: { rgb: 'C6EFCE' } }
+        : kind === 'vendor:mismatch' || kind === 'note-flag' ? { patternType: 'solid', fgColor: { rgb: 'FFC7CE' } }
+        : kind === 'vendor:waiting' ? { patternType: 'solid', fgColor: { rgb: 'F2F2F2' } }
+        : { patternType: 'none' }
+      ws[addr].s = {
+        font: { bold: isHeader || isVendor || kind === 'subtotal' || kind === 'invoice', name: 'Arial', sz: 11 },
+        fill, border,
+        alignment: { horizontal: 'right', readingOrder: 2 },
+      }
+    }
+  }
+  ws['!cols']  = [{ wch: 24 }, { wch: 18 }, { wch: 12 }, { wch: 13 }, { wch: 14 }, { wch: 30 }]
+  ws['!views'] = [{ rightToLeft: true }]
+  XLSXs.utils.book_append_sheet(wb, ws, 'התאמות')
+}
+
+/** Standalone RTL print document (HTML → print → PDF) for the reconciliation. */
+export function buildReconciliationHtml(receipts, { month, periodLabel } = {}) {
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  const sections = buildReconciliationRows(receipts, { month })
+  const period = periodLabel || (month ? month.split('-').reverse().join('/') : 'כל הזמנים')
+  const stColor = s => s.status === 'mismatch' ? '#dc2626' : s.status === 'waiting' ? '#64748b' : '#059669'
+  const secHtml = sections.map(s => `
+<div class="sec">
+  <div class="sec-head"><span class="vendor">${esc(s.vendor)}</span><span class="status" style="color:${stColor(s)}">${esc(reconStatusText(s))}${s.invoice && !s.confirmed && s.status !== 'waiting' ? ' · טרם אושר' : ''}</span></div>
+  <table>
+    <thead><tr><th>מסמך</th><th>תאריך</th><th>מס'</th><th>סכום</th><th></th></tr></thead>
+    <tbody>
+      ${s.notes.map(n => `<tr><td>תעודת משלוח</td><td>${esc(fmtDate(n.date)) || '—'}</td><td>${esc(n.number) || '—'}</td><td>${il(n.amount)}</td><td>${n.flag ? '<span style="color:#dc2626">⚠ שונה מהחשבונית</span>' : ''}</td></tr>`).join('')}
+      <tr class="sub"><td colspan="3">סה"כ תעודות משלוח (${s.notes.length})</td><td>${il(s.notesTotal)}</td><td></td></tr>
+      ${s.invoice ? `<tr class="inv"><td>חשבונית מרכזת</td><td>${esc(fmtDate(s.invoice.date)) || '—'}</td><td>${esc(s.invoice.number) || '—'}</td><td>${il(s.invoice.amount)}</td><td>${s.delta != null && Math.abs(s.delta) > 0.009 ? `<span style="color:#dc2626">הפרש: ${il(s.delta)}</span>` : '<span style="color:#059669">✓</span>'}</td></tr>` : ''}
+    </tbody>
+  </table>
+</div>`).join('')
+  return `<!DOCTYPE html><html dir="rtl" lang="he"><head><meta charset="UTF-8"/><title>דוח התאמות — תעודות משלוח מול חשבוניות</title>
+<style>@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Heebo',Arial,sans-serif;direction:rtl;color:#1e293b;padding:32px;font-size:14px;}
+h1{font-size:23px;font-weight:700;margin-bottom:4px;}.subtitle{color:#64748b;font-size:14px;margin-bottom:22px;}
+.sec{margin-bottom:26px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;page-break-inside:avoid;}
+.sec-head{display:flex;justify-content:space-between;align-items:center;background:#f8fafc;padding:10px 14px;border-bottom:1px solid #e2e8f0;}
+.vendor{font-weight:700;font-size:16px;}.status{font-weight:700;font-size:13.5px;}
+table{width:100%;border-collapse:collapse;font-size:13.5px;}
+th{padding:8px 12px;text-align:right;font-weight:600;color:#64748b;font-size:12px;border-bottom:1px solid #f1f5f9;}
+td{padding:8px 12px;color:#334155;border-bottom:1px solid #f8fafc;}
+tr.sub td{background:#f8fafc;font-weight:700;border-top:1px solid #e2e8f0;}
+tr.inv td{background:#f5f3ff;font-weight:700;}
+@media print{body{padding:0;}}</style></head><body>
+<h1>דוח התאמות — תעודות משלוח מול חשבוניות מרכזות</h1>
+<div class="subtitle">תקופה: ${esc(period)} · הופק ב-${new Date().toLocaleDateString('he-IL',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+${sections.length ? secHtml : '<p style="color:#64748b">אין מסמכים להתאמה בתקופה זו.</p>'}
+<div style="color:#94a3b8;font-size:12.5px;margin-top:28px;border-top:1px solid #e2e8f0;padding-top:12px;">
+חשבונית מרכזת מסכמת את תעודות המשלוח של הספק ולכן אינה נספרת בהוצאות; ההוצאה נרשמת לפי תעודות המשלוח.
+</div>
+<script>window.onload=()=>{window.print();}<\/script></body></html>`
 }
 
 // ── PDF (HTML for print) ──────────────────────────────────────────────────────

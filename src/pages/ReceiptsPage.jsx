@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useTenant } from '../hooks/useTenant'
@@ -11,7 +12,7 @@ import ImageViewer from '../components/ImageViewer'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload } from '../lib/imageUtils'
 import { isPdf, pdfToImages } from '../lib/pdfUtils'
-import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip } from '../lib/receiptExport'
+import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip, buildReconciliationRows, buildReconciliationHtml } from '../lib/receiptExport'
 import ReceiptScanAnimation from '../components/ReceiptScanAnimation'
 import toast from 'react-hot-toast'
 import {
@@ -21,6 +22,7 @@ import {
   Archive, RotateCcw, AlertTriangle, FileText, ListChecks,
 } from 'lucide-react'
 import { DOC_TYPES, docTypeOf, docTypeLabel, isExpenseDoc, DOC_COL_RE } from '../lib/docTypes'
+import { openIssues } from '../lib/reconciliation'
 import { deleteReceiptFile, signedReceiptUrl } from '../lib/storage'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
@@ -393,11 +395,16 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 1
       const excelBlob  = opts.excel ? await buildExcelBlob(receipts, vatRate) : null
       const pdfFile    = opts.pdf   ? buildPdfBlob(receipts, { filterFrom, filterTo, vatRate }) : null
       const imagesBlob = (opts.images && nImages > 0) ? await buildImagesZip(receipts) : null
+      // Reconciliation document — included when the set has delivery notes /
+      // summary invoices (goes in the accountant folder next to the report).
+      const reconFile = buildReconciliationRows(receipts).length
+        ? new Blob([buildReconciliationHtml(receipts)], { type: 'text/html;charset=utf-8' }) : null
 
       if (useZip) {
         const blob = await combineZip([
           { name: 'קבלות.xlsx',         blob: excelBlob },
           { name: 'דוח_קבלות.html',     blob: pdfFile },
+          { name: 'דוח_התאמות.html',    blob: reconFile },
           { name: 'תמונות_קבלות.zip',   blob: imagesBlob },
         ])
         await downloadFile({ blob, filename: `קבלות_לרו"ח_${dateStr}.zip` })
@@ -463,6 +470,7 @@ export default function ReceiptsPage() {
   const { orgId } = useTenant()
   const { settings, displayAmount, toggleVatDisplay } = useSettings()
   const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const [receipts, setReceipts]         = useState(() => getCached('receipts') || [])
   const [categories, setCategories]     = useState([])
   const [loading, setLoading]           = useState(() => !hasCached('receipts'))
@@ -964,9 +972,21 @@ export default function ReceiptsPage() {
         ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null }))
       }
       if (error) throw error
-      toast.success(reviewDocType === 'delivery_note' ? 'תעודת משלוח נשמרה!'
-        : reviewDocType === 'summary_invoice' ? 'חשבונית מרכזת נשמרה! (לא נספרת בהוצאות)'
-        : fx ? `קבלה נשמרה! (הומרה לשקלים לפי שער יציג)` : 'קבלה נשמרה!')
+      if (reviewDocType === 'summary_invoice') {
+        window.dispatchEvent(new Event('reconcile-changed'))
+        toast((tt) => (
+          <span style={{ display:'flex', alignItems:'center', gap:10 }}>
+            📑 חשבונית מרכזת נשמרה
+            <button onClick={() => { toast.dismiss(tt.id); navigate('/reconcile') }}
+              style={{ padding:'6px 12px', borderRadius:8, border:'none', background:'var(--accent)', color:'white', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', fontSize:13, whiteSpace:'nowrap' }}>
+              פתח התאמות
+            </button>
+          </span>
+        ), { duration: 8000 })
+      } else {
+        toast.success(reviewDocType === 'delivery_note' ? 'תעודת משלוח נשמרה!'
+          : fx ? `קבלה נשמרה! (הומרה לשקלים לפי שער יציג)` : 'קבלה נשמרה!')
+      }
       setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
       setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null)
       setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([])
@@ -1263,6 +1283,9 @@ export default function ReceiptsPage() {
   if (loading && receipts.length === 0) return <LoadingSpinner />
 
   const hasActiveFilter = search || filterFrom || filterTo || docFilter !== 'all'
+  // Summary invoices awaiting reconciliation (or with a mismatch) → banner
+  const reconcileOpen = useMemo(() => openIssues(receipts).length, [receipts])
+  const [hideReconcileBanner, setHideReconcileBanner] = useState(false)
 
   return (
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap: isMobile ? '14px' : '20px' }} dir="rtl">
@@ -1312,6 +1335,23 @@ export default function ReceiptsPage() {
           </div>
         )}
       </div>
+
+      {/* ── Reconciliation alert banner ──────────────────────────────────────── */}
+      {!archiveView && reconcileOpen > 0 && !hideReconcileBanner && (
+        <div style={{ display:'flex', alignItems:'center', gap:10, background:'#f5f3ff', border:'1px solid #ddd6fe', borderRadius:'var(--r-card)', padding:'11px 14px' }}>
+          <span style={{ fontSize:17 }}>📑</span>
+          <span style={{ flex:1, fontSize:13.5, color:'var(--text)', lineHeight:1.5 }}>
+            יש <strong>{reconcileOpen}</strong> חשבוניות מרכזות שממתינות להתאמה מול תעודות המשלוח
+          </span>
+          <button onClick={() => navigate('/reconcile')}
+            style={{ padding:'7px 14px', borderRadius:9, border:'none', background:'#7c3aed', color:'white', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+            פתח התאמות
+          </button>
+          <button onClick={() => setHideReconcileBanner(true)} aria-label="סגור" style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', padding:4, display:'flex' }}>
+            <X size={15} />
+          </button>
+        </div>
+      )}
 
       {/* ── Search + filter row ─────────────────────────────────────────────── */}
       <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>

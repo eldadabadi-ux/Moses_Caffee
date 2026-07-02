@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { downloadFile } from '../lib/downloadFile'
 import { isMobileDevice } from '../lib/isMobileDevice'
-import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip } from '../lib/receiptExport'
+import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip, buildReconciliationRows, buildReconciliationHtml } from '../lib/receiptExport'
 import Modal from './ui/Modal'
 import toast from 'react-hot-toast'
 
@@ -84,11 +84,15 @@ export default function MonthlyExportPrompt() {
       const excelBlob  = await buildExcelBlob(receipts, vatRate)
       const pdfFile    = buildPdfBlob(receipts, { filterFrom: from, filterTo: to, vatRate, title: `דוח קבלות — ${prev.label}` })
       const imagesBlob = await buildImagesZip(receipts)
+      // Reconciliation document (delivery notes ↔ summary invoices), when relevant
+      const reconFile  = buildReconciliationRows(receipts).length
+        ? new Blob([buildReconciliationHtml(receipts, { periodLabel: prev.label })], { type: 'text/html;charset=utf-8' }) : null
 
       const zip = await combineZip([
-        { name: `${base}.xlsx`,       blob: excelBlob },
-        { name: `${base}_דוח.html`,   blob: pdfFile },
-        { name: `${base}_תמונות.zip`, blob: imagesBlob },
+        { name: `${base}.xlsx`,        blob: excelBlob },
+        { name: `${base}_דוח.html`,    blob: pdfFile },
+        { name: `${base}_התאמות.html`, blob: reconFile },
+        { name: `${base}_תמונות.zip`,  blob: imagesBlob },
       ])
       await downloadFile({ blob: zip, filename: `${base}.zip` })
 
