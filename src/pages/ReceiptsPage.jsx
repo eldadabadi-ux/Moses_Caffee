@@ -18,9 +18,9 @@ import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
   CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
-  Archive, RotateCcw, AlertTriangle,
+  Archive, RotateCcw, AlertTriangle, FileText,
 } from 'lucide-react'
-import { deleteReceiptFile } from '../lib/storage'
+import { deleteReceiptFile, signedReceiptUrl } from '../lib/storage'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -1005,6 +1005,15 @@ export default function ReceiptsPage() {
     toast.success('הקבלה אושרה')
   }
 
+  // Open the ORIGINAL stored file of an inbound (email) receipt — images in the
+  // lightbox, PDFs in a new tab — via a short-lived signed URL (private bucket).
+  async function openStoredFile(r) {
+    const url = await signedReceiptUrl(r.storage_path)
+    if (!url) { toast.error('הקובץ המקורי לא זמין'); return }
+    if ((r.storage_path || '').toLowerCase().endsWith('.pdf')) window.open(url, '_blank', 'noopener')
+    else setLightboxUrl(url)
+  }
+
   // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
   // from the archive view, behind a type-to-confirm step.
   async function archiveReceipt() {
@@ -1294,6 +1303,11 @@ export default function ReceiptsPage() {
                 <button onClick={() => setLightboxUrl(r.receipt_image)} style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border)', background:'var(--panel-2)', flexShrink:0, cursor:'pointer', padding:0 }}>
                   <img src={r.receipt_image} alt="קבלה" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
                 </button>
+              ) : r.storage_path ? (
+                <button onClick={() => openStoredFile(r)} title="פתח את הקובץ המקורי מהמייל"
+                  style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', border:'1px solid var(--accent)', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer', padding:0 }}>
+                  <FileText size={17} style={{ color:'var(--accent)' }} />
+                </button>
               ) : (
                 <div style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', background:'var(--panel-2)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
                   <Receipt size={16} style={{ color:'var(--text-mute)' }} />
@@ -1324,7 +1338,20 @@ export default function ReceiptsPage() {
               {/* Amount (paid, with VAT) + breakdown + actions */}
               <div style={{ display:'flex', alignItems:'center', gap: isMobile ? '4px' : '8px', flexShrink:0 }}>
                 <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:'1px' }}>
-                  <span style={{ fontSize: isMobile ? '18px' : '19px', fontWeight:700, color:'var(--ok)', whiteSpace:'nowrap' }}>{fmtILS(parseFloat(r.amount) || 0)}</span>
+                  {r.ai_summary?.is_fx_estimate ? (
+                    <>
+                      {/* Foreign-currency receipt: original amount on top, official-rate ILS estimate beneath */}
+                      <span style={{ fontSize: isMobile ? '18px' : '19px', fontWeight:700, color:'var(--ok)', whiteSpace:'nowrap' }}>
+                        {(CUR_SYMBOL[r.ai_summary.currency] || r.ai_summary.currency)}{Number(r.ai_summary.original_total || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                      <span title={`לפי השער היציג של בנק ישראל (${fmtDate(r.ai_summary.fx_date)}) — הערכה בלבד`}
+                        style={{ fontSize:'13px', fontWeight:600, color:'var(--text-dim)', whiteSpace:'nowrap' }}>
+                        ≈ {fmtILS(parseFloat(r.amount) || 0)} *
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: isMobile ? '18px' : '19px', fontWeight:700, color:'var(--ok)', whiteSpace:'nowrap' }}>{fmtILS(parseFloat(r.amount) || 0)}</span>
+                  )}
                   <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
                     לפני מע"מ {fmtILS(amtBefore(r))}
                   </span>

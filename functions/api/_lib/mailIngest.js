@@ -64,25 +64,46 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
   if (bytes) await db.uploadFile(storagePath, bytes, mimeType)
   const receiptImage = mimeType.startsWith('image/') ? `data:${mimeType};base64,${b64}` : null
 
+  // ── Foreign currency → ILS (official Bank-of-Israel rate, computed by
+  // extractReceipt). Mirrors the camera flow exactly: amounts stored in ILS so
+  // dashboards/exports stay consistent, originals kept in ai_summary + items.
+  const fx = result.fx || null
+  const r2 = n => Math.round((Number(n) || 0) * 100) / 100
+  const totalOrig  = result.total_amount || 0
+  const beforeOrig = result.amount_before_vat || 0
+  const vatOrig    = result.vat_amount || 0
+  const total  = fx ? (result.total_ils      ?? r2(totalOrig  * fx.rate)) : totalOrig
+  const before = fx ? (result.before_vat_ils ?? r2(beforeOrig * fx.rate)) : beforeOrig
+  const vat    = fx ? (result.vat_ils        ?? r2(vatOrig    * fx.rate)) : vatOrig
+  const items = (result.items || []).map(it => {
+    const { price_ils, unit_price_ils, ...rest } = it
+    if (!fx) return rest
+    const op  = parseFloat(rest.price) || 0
+    const oup = (rest.unit_price != null && rest.unit_price !== '') ? parseFloat(rest.unit_price) : null
+    return { ...rest, price: price_ils ?? r2(op * fx.rate), unit_price: oup != null ? (unit_price_ils ?? r2(oup * fx.rate)) : rest.unit_price,
+             orig_price: op, orig_unit_price: oup, currency: result.currency }
+  })
+
   const row = {
     user_id: conn.user_id, org_id: conn.org_id || null,
     vendor_name: result.vendor_name || 'ספק לא ידוע',
     receipt_date: result.receipt_date || new Date(fallbackDateMs || Date.now()).toISOString().slice(0, 10),
-    amount: result.total_amount || 0,
-    currency: result.currency || 'ILS',
+    amount: total,
+    currency: fx ? 'ILS' : (result.currency || 'ILS'),
     category_text: result.category || 'שונות',
-    items: result.items || null,
+    items: items.length ? items : null,
     receipt_image: receiptImage,
     ai_extracted: true,
     // Exact VAT breakdown lives in ai_summary too — works even when the dedicated
     // VAT columns don't exist yet (same graceful pattern as ReceiptsPage).
-    ai_summary: { vendor: result.vendor_name || '', total: result.total_amount || 0, before_vat: result.amount_before_vat || 0, vat_amount: result.vat_amount || 0, vat_rate: vatRate, model: result._model || 'gemini', source: 'email' },
+    ai_summary: { vendor: result.vendor_name || '', total, before_vat: before, vat_amount: vat, vat_rate: vatRate, model: result._model || 'gemini', source: 'email',
+      ...(fx ? { currency: result.currency, fx_rate: fx.rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
     source: 'email',
     status: 'pending',
     storage_path: bytes ? storagePath : null,
     source_meta: meta,
   }
-  const vatCols = { amount_before_vat: result.amount_before_vat || 0, vat_amount: result.vat_amount || 0, vat_rate: vatRate }
+  const vatCols = { amount_before_vat: before, vat_amount: vat, vat_rate: vatRate }
   try {
     await db.insert('receipts', { ...row, ...vatCols })
   } catch (e) {
