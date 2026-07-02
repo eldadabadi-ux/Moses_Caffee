@@ -43,7 +43,18 @@ export async function alreadyImported(db, messageId) {
 export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64, meta, fallbackDateMs }) {
   let result
   try { result = await extractReceipt({ images: [b64], mimeType, env, userId: conn.user_id, vatRate }) }
-  catch { return false }
+  catch (err) {
+    // A genuine OCR/quota/subrequest failure must NOT be silently swallowed —
+    // rethrow so the scanner aborts and the user sees the real reason (e.g. the
+    // Gemini quota is exhausted). Only "this attachment isn't a receipt" → false.
+    const m = String(err?.message || '')
+    if (err?.code === 'AI_FAILED' || err?.code === 'QUOTA' || /429|quota|too many subrequests/i.test(m + ' ' + String(err?.detail || ''))) {
+      const e = new Error(/429|quota/i.test(m + ' ' + String(err?.detail || '')) ? 'מכסת ה-OCR (Gemini) נגמרה — נסה שוב מאוחר יותר או הפעל חיוב על המפתח' : m || 'OCR failed')
+      e.code = 'OCR'
+      throw e
+    }
+    return false
+  }
   if (!result || !(result.total_amount > 0 || result.vendor_name)) return false
 
   const ext = mimeType.includes('pdf') ? 'pdf' : (mimeType.split('/')[1] || 'bin')

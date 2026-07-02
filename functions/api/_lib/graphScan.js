@@ -61,7 +61,7 @@ export async function scanGraph(conn, env, { vatRate = 18 } = {}) {
         }
         ingested++
       }
-    } catch { /* skip this message */ }
+    } catch (e) { if (e?.code === 'OCR') throw e /* else skip this message */ }
     if (ms > maxMs) maxMs = ms
   }
   if (msgs.length > examined && more === false && msgs.length >= MAX_LIST) more = true

@@ -80,7 +80,7 @@ export async function scanGmail(conn, env, { vatRate = 18 } = {}) {
         try {
           const a = await gget(`/messages/${id}/attachments/${att.attachmentId}`, token)
           if (a.data && await ingestReceipt({ db, env, conn, vatRate, mimeType: att.mimeType, b64: b64urlToB64(a.data), meta, fallbackDateMs: internalDate })) imported++
-        } catch { /* skip this attachment */ }
+        } catch (e) { if (e?.code === 'OCR') throw e /* else skip this attachment */ }
       }
       ingested++
     }

@@ -59,7 +59,7 @@ export default function MailConnectCard() {
       for (let i = 0; i < 15; i++) {
         const r = await authFetch('/api/mail/scan', 'POST')
         total += r.imported || 0
-        if (r.error) lastError = r.error
+        if (r.error) { lastError = r.error; break }   // stop on error (e.g. OCR quota) — don't hammer the API
         if (!r.more) break
       }
       if (lastError && total === 0) toast.error(`שגיאה בסריקה: ${lastError}`)
