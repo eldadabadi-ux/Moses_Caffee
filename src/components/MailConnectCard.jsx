@@ -52,18 +52,24 @@ export default function MailConnectCard() {
   }
   async function scanNow() {
     setScanning(true)
-    let total = 0, lastError = null
+    let total = 0, lastError = null, examined = 0, since = 0
     try {
       // Each call processes a small batch (Cloudflare subrequest limit); loop
       // until the mailbox backlog is drained, up to a safe number of rounds.
       for (let i = 0; i < 15; i++) {
         const r = await authFetch('/api/mail/scan', 'POST')
         total += r.imported || 0
+        examined += r.scanned || 0
+        if (!since && r.since) since = r.since
         if (r.error) { lastError = r.error; break }   // stop on error (e.g. OCR quota) — don't hammer the API
         if (!r.more) break
       }
       if (lastError && total === 0) toast.error(`שגיאה בסריקה: ${lastError}`)
-      else toast.success(total > 0 ? `נמצאו ${total} קבלות חדשות — ממתינות לאישור` : 'לא נמצאו קבלות חדשות')
+      else if (total > 0) toast.success(`נמצאו ${total} קבלות חדשות — ממתינות לאישור`)
+      else {
+        const sinceTxt = since > 0 ? new Date(since).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) : '30 יום אחורה'
+        toast(`לא נמצאו קבלות חדשות (נבדקו ${examined} הודעות, מ-${sinceTxt})`, { icon: 'ℹ️', duration: 6000 })
+      }
       await refresh()
     } catch (e) { toast.error(e.message) } finally { setScanning(false) }
   }

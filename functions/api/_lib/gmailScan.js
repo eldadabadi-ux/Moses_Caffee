@@ -74,13 +74,14 @@ export async function scanGmail(conn, env, { vatRate = 18 } = {}) {
     try { msg = await gget(`/messages/${id}?format=full`, token) } catch { continue }
     const internalDate = Number(msg.internalDate) || 0
     const atts = collectAttachments(msg.payload)
+    console.warn(`[gmailScan] "${headerOf(msg, 'subject')}" — ${atts.length} eligible attachment(s)`)
     if (atts.length) {
       const meta = { from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'), message_id: id, provider: 'gmail' }
       for (const att of atts) {
         try {
           const a = await gget(`/messages/${id}/attachments/${att.attachmentId}`, token)
           if (a.data && await ingestReceipt({ db, env, conn, vatRate, mimeType: att.mimeType, b64: b64urlToB64(a.data), meta, fallbackDateMs: internalDate })) imported++
-        } catch (e) { if (e?.code === 'OCR') throw e /* else skip this attachment */ }
+        } catch (e) { if (e?.code === 'OCR' || e?.code === 'DB') throw e /* else skip this attachment */ }
       }
       ingested++
     }

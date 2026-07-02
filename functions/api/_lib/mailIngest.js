@@ -17,7 +17,7 @@ export function makeDb(env) {
     },
     async insert(table, row) {
       const r = await fetch(`${url}/rest/v1/${table}`, { method: 'POST', headers: { ...h, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(row) })
-      if (!r.ok) throw new Error(`insert ${table} ${r.status}: ${(await r.text()).slice(0, 160)}`)
+      if (!r.ok) { const e = new Error(`insert ${table} ${r.status}: ${(await r.text()).slice(0, 160)}`); e.code = 'DB'; throw e }
     },
     async uploadFile(path, bytes, mime) {
       const r = await fetch(`${url}/storage/v1/object/receipts/${path}`, { method: 'POST', headers: { ...h, 'Content-Type': mime, 'x-upsert': 'true' }, body: bytes })
@@ -55,6 +55,7 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
     }
     return false
   }
+  console.warn(`[mailIngest] OCR result: vendor="${result?.vendor_name || ''}" total=${result?.total_amount || 0} (${meta?.subject || ''})`)
   if (!result || !(result.total_amount > 0 || result.vendor_name)) return false
 
   const ext = mimeType.includes('pdf') ? 'pdf' : (mimeType.split('/')[1] || 'bin')
@@ -63,23 +64,31 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
   if (bytes) await db.uploadFile(storagePath, bytes, mimeType)
   const receiptImage = mimeType.startsWith('image/') ? `data:${mimeType};base64,${b64}` : null
 
-  await db.insert('receipts', {
+  const row = {
     user_id: conn.user_id, org_id: conn.org_id || null,
     vendor_name: result.vendor_name || 'ספק לא ידוע',
     receipt_date: result.receipt_date || new Date(fallbackDateMs || Date.now()).toISOString().slice(0, 10),
     amount: result.total_amount || 0,
-    amount_before_vat: result.amount_before_vat || 0,
-    vat_amount: result.vat_amount || 0,
-    vat_rate: vatRate,
     currency: result.currency || 'ILS',
     category_text: result.category || 'שונות',
     items: result.items || null,
     receipt_image: receiptImage,
     ai_extracted: true,
+    // Exact VAT breakdown lives in ai_summary too — works even when the dedicated
+    // VAT columns don't exist yet (same graceful pattern as ReceiptsPage).
+    ai_summary: { vendor: result.vendor_name || '', total: result.total_amount || 0, before_vat: result.amount_before_vat || 0, vat_amount: result.vat_amount || 0, vat_rate: vatRate, model: result._model || 'gemini', source: 'email' },
     source: 'email',
     status: 'pending',
     storage_path: bytes ? storagePath : null,
     source_meta: meta,
-  })
+  }
+  const vatCols = { amount_before_vat: result.amount_before_vat || 0, vat_amount: result.vat_amount || 0, vat_rate: vatRate }
+  try {
+    await db.insert('receipts', { ...row, ...vatCols })
+  } catch (e) {
+    // Graceful fallback if the VAT migration hasn't run yet (ai_summary keeps the values)
+    if (e?.code === 'DB' && /amount_before_vat|vat_amount|vat_rate/.test(e.message || '')) await db.insert('receipts', row)
+    else throw e
+  }
   return true
 }

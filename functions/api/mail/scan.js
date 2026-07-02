@@ -28,11 +28,13 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
     if (s[0]?.vat_rate > 0) vatRate = Number(s[0].vat_rate)
   } catch {}
 
-  let imported = 0, errors = 0, more = false, lastError = null
+  let imported = 0, errors = 0, more = false, lastError = null, scanned = 0
+  const since = Number(conns[0]?.last_internal_date) || 0   // pre-scan watermark (diagnostics)
   for (const conn of conns) {
     try {
       const r = await scanConnection(conn, env, { vatRate })
       imported += r.imported
+      scanned += r.scanned || 0
       if (r.more) more = true
     } catch (err) {
       errors++
@@ -44,5 +46,5 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
       } catch {}
     }
   }
-  return Response.json({ ok: errors === 0, imported, more, errors, error: lastError })
+  return Response.json({ ok: errors === 0, imported, more, errors, error: lastError, scanned, since })
 })
