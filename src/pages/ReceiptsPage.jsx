@@ -1005,13 +1005,53 @@ export default function ReceiptsPage() {
     toast.success('הקבלה אושרה')
   }
 
-  // Open the ORIGINAL stored file of an inbound (email) receipt — images in the
-  // lightbox, PDFs in a new tab — via a short-lived signed URL (private bucket).
+  // ── Inbound-receipt preview hydration ─────────────────────────────────────
+  // Email receipts arrive with only the ORIGINAL file in the private bucket
+  // (PDFs have no inline image). Render it to a compressed preview image and
+  // save it on the row — from then on they behave EXACTLY like camera scans
+  // (thumbnail + floating zoomable viewer). One-time per receipt.
+  async function hydratePreview(r) {
+    try {
+      const url = await signedReceiptUrl(r.storage_path)
+      if (!url) return null
+      const blob = await fetch(url).then(x => (x.ok ? x.blob() : null))
+      if (!blob) return null
+      let dataUrl = null
+      if (/\.pdf$/i.test(r.storage_path)) {
+        const pages = await pdfToImages(blob, { maxPages: 1 })
+        dataUrl = pages[0] || null
+      }
+      // Compress to the same size profile as camera scans (also shrinks PDF renders)
+      const srcBlob = dataUrl ? await fetch(dataUrl).then(x => x.blob()) : blob
+      const file = new File([srcBlob], 'receipt.jpg', { type: srcBlob.type || 'image/jpeg' })
+      try { ({ dataUrl } = await compressImage(file)) } catch { /* keep uncompressed render */ }
+      if (!dataUrl) return null
+      const { error } = await supabase.from('receipts').update({ receipt_image: dataUrl }).eq('id', r.id)
+      if (!error) setReceipts(prev => { const next = prev.map(x => x.id === r.id ? { ...x, receipt_image: dataUrl } : x); setCached('receipts', next); return next })
+      return dataUrl
+    } catch { return null }
+  }
+
+  // Auto-hydrate a few at a time whenever un-previewed inbound receipts are visible.
+  const hydratingRef = useRef(new Set())
+  useEffect(() => {
+    if (archiveView) return
+    const todo = receipts.filter(r => !r.receipt_image && r.storage_path && !hydratingRef.current.has(r.id)).slice(0, 3)
+    if (!todo.length) return
+    todo.forEach(r => hydratingRef.current.add(r.id))
+    ;(async () => { for (const r of todo) await hydratePreview(r) })()
+  }, [receipts, archiveView])
+
+  // Click on a not-yet-hydrated inbound receipt: hydrate now, then open the
+  // floating viewer (fallback to the raw file in a new tab if rendering fails).
   async function openStoredFile(r) {
+    const t = toast.loading('טוען קבלה…')
+    const dataUrl = await hydratePreview(r)
+    toast.dismiss(t)
+    if (dataUrl) { setLightboxUrl(dataUrl); return }
     const url = await signedReceiptUrl(r.storage_path)
-    if (!url) { toast.error('הקובץ המקורי לא זמין'); return }
-    if ((r.storage_path || '').toLowerCase().endsWith('.pdf')) window.open(url, '_blank', 'noopener')
-    else setLightboxUrl(url)
+    if (url) window.open(url, '_blank', 'noopener')
+    else toast.error('הקובץ המקורי לא זמין')
   }
 
   // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
