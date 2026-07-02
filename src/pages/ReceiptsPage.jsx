@@ -1066,7 +1066,17 @@ export default function ReceiptsPage() {
     const { error } = await supabase.from('receipts').update({ status: 'ready' }).eq('id', id)
     if (error) { toast.error('שגיאה באישור'); return }
     setReceipts(prev => { const next = prev.map(r => r.id === id ? { ...r, status: 'ready' } : r); setCached('receipts', next); return next })
-    toast.success('הקבלה אושרה')
+    toast.success('המסמך אושר')
+  }
+
+  // Approve ALL pending documents in one click (email imports arrive in batches).
+  async function approveAllPending() {
+    const ids = receipts.filter(r => r.status === 'pending').map(r => r.id)
+    if (!ids.length) return
+    const { error } = await supabase.from('receipts').update({ status: 'ready' }).in('id', ids)
+    if (error) { toast.error('שגיאה באישור: ' + (error.message || '')); return }
+    setReceipts(prev => { const next = prev.map(r => r.status === 'pending' ? { ...r, status: 'ready' } : r); setCached('receipts', next); return next })
+    toast.success(`${ids.length} מסמכים אושרו ✓`)
   }
 
   // ── Bulk classification (select mode) ───────────────────────────────────────
@@ -1286,6 +1296,8 @@ export default function ReceiptsPage() {
   // Summary invoices awaiting reconciliation (or with a mismatch) → banner
   const reconcileOpen = useMemo(() => openIssues(receipts).length, [receipts])
   const [hideReconcileBanner, setHideReconcileBanner] = useState(false)
+  // Documents still pending approval (email imports) → approve-all strip
+  const pendingCount = useMemo(() => receipts.filter(r => r.status === 'pending').length, [receipts])
 
   return (
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap: isMobile ? '14px' : '20px' }} dir="rtl">
@@ -1335,6 +1347,20 @@ export default function ReceiptsPage() {
           </div>
         )}
       </div>
+
+      {/* ── Pending-approval strip — approve everything without opening the editor ── */}
+      {!archiveView && pendingCount > 0 && (
+        <div style={{ display:'flex', alignItems:'center', gap:10, background:'var(--warn-tint-1)', border:'1px solid var(--warn-tint-border)', borderRadius:'var(--r-card)', padding:'11px 14px' }}>
+          <span style={{ fontSize:17 }}>📩</span>
+          <span style={{ flex:1, fontSize:'13.5px', color:'var(--text)', lineHeight:1.5 }}>
+            <strong>{pendingCount}</strong> מסמכים מהמייל ממתינים לאישור — אפשר לאשר כל אחד בכפתור "אשר" שבשורה, או את כולם יחד
+          </span>
+          <button onClick={approveAllPending}
+            style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9, border:'none', background:'linear-gradient(135deg,#16a34a,#15803d)', color:'white', fontSize:'13px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap', boxShadow:'0 2px 8px rgba(22,163,74,0.35)' }}>
+            <CheckCircle2 size={14} /> אשר הכל ({pendingCount})
+          </button>
+        </div>
+      )}
 
       {/* ── Reconciliation alert banner ──────────────────────────────────────── */}
       {!archiveView && reconcileOpen > 0 && !hideReconcileBanner && (
@@ -1563,7 +1589,10 @@ export default function ReceiptsPage() {
                 ) : (
                   <>
                     {r.status === 'pending' && (
-                      <button onClick={() => approveReceipt(r.id)} title="אשר קבלה" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--ok)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--accent-bg)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><CheckCircle2 size={16} /></button>
+                      <button onClick={() => approveReceipt(r.id)} title="אשר את המסמך — יעבור מסטטוס 'ממתין' למאושר"
+                        style={{ display:'flex', alignItems:'center', gap:5, padding: isMobile ? '8px 11px' : '8px 14px', background:'linear-gradient(135deg,#16a34a,#15803d)', border:'none', borderRadius:9, cursor:'pointer', color:'white', fontWeight:700, fontSize:'12.5px', fontFamily:'var(--font-main)', whiteSpace:'nowrap', boxShadow:'0 2px 8px rgba(22,163,74,0.35)' }}>
+                        <CheckCircle2 size={14} /> אשר
+                      </button>
                     )}
                     <button onClick={() => openEdit(r)} title="עריכה" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Pencil size={14} /></button>
                     <button onClick={() => setDeleteId(r.id)} title="העבר לארכיון" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='var(--accent-bg)';e.currentTarget.style.color='var(--accent)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><Archive size={14} /></button>
