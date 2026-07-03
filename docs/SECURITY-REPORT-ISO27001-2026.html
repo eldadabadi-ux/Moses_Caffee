@@ -59,10 +59,10 @@
     <h1>דוח אבטחת מידע — ISO/IEC 27001:2022</h1>
     <div class="sub">אפליקציית Moses Caffee · מערכת ניהול קבלות</div>
     <div class="meta">
-      <div><b>1.73.0</b>גרסת מערכת</div>
+      <div><b>1.73.2</b>גרסת מערכת</div>
       <div><b>3 ביולי 2026</b>תאריך הדוח</div>
+      <div><b>✅ פעיל ומאומת</b>מצב</div>
       <div><b>פנימי / חסוי</b>סיווג</div>
-      <div><b>הערכת פער + יישום בקרות</b>סוג</div>
     </div>
   </div>
 
@@ -72,8 +72,10 @@
   <p>בוצעה הערכת אבטחה מקיפה (Gap Assessment) לאפליקציית ניהול הקבלות מול נספח A של תקן ISO/IEC 27001:2022,
   ולאחריה יושמו בקרות טכניות לסגירת הפערים המהותיים. המערכת נבנתה מלכתחילה עם בסיס אבטחה חזק — בידוד רב-דיירתי
   מלא ברמת מסד הנתונים, כותרות אבטחה מחמירות, הצפנת טוקנים ומחיקת GDPR — ולכן ההערכה התמקדה בהעמקת הבקרות.</p>
-  <p><strong>תוצאה כללית:</strong> רמת בשלות <strong>גבוהה</strong>. כל הממצאים בדרגת סיכון גבוהה טופלו בגרסה 1.73.0.
-  הסיכון המהותי היחיד שנותר פתוח מנוהל באמצעות תיעוד ובקרות ארגוניות (יציאת נתונים לספקי בינה מלאכותית — ראו §7).</p>
+  <p><strong>תוצאה כללית:</strong> רמת בשלות <strong>גבוהה</strong>. כל הממצאים בדרגת סיכון גבוהה טופלו, הופעלו
+  ואומתו חי בפרודקשן (v1.73.2). הסיכון המהותי היחיד שנותר פתוח מנוהל באמצעות תיעוד ובקרות ארגוניות (יציאת נתונים
+  לספקי בינה מלאכותית — ראו §7). כלל חמש חבילות הבקרה (S1.1–S1.5) פרוסות, ההגדרות הידניות בוצעו, וכל בקרה אומתה
+  בבדיקה חיה (ראו §9.1).</p>
   <div class="kpi">
     <div class="card"><div class="n">0</div><div class="l">ממצאים בסיכון גבוה (מ-2)</div></div>
     <div class="card"><div class="n">9</div><div class="l">בקרות Annex A שהודקו</div></div>
@@ -131,7 +133,7 @@
   CSP חזק (ללא unsafe-eval/inline-script) + HSTS preload + X-Frame-Options DENY · sourcemaps כבויים + הסרת
   console · מחיקת GDPR · דפי משפט + גילוי סב-מעבדים · אין סודות במאגר.</div>
 
-  <h2>5. בקרות שיושמו (v1.73.0)</h2>
+  <h2>5. בקרות שיושמו (v1.73.2 — פרוסות ומאומתות)</h2>
   <div class="ctrl"><h3>S1.1 — חיזוק בסיסי (Hygiene)</h3><div class="anx">A.8.24 · A.5.18 · A.8.28 · A.8.15 · A.8.3 · A.8.2</div>
     <p>השוואה קבועת-זמן ל-CRON_SECRET; <code>SUPERADMIN_EMAIL</code> כמשתנה סביבה; סניטציית שגיאות (פרטים בשרת
     בלבד); הסתרת נושאי מייל מהלוגים; <code>supabase_hardening_27001.sql</code> (org_id ל-suppliers, NOT NULL
@@ -200,21 +202,38 @@
     <li>בדיקות חדירה תקופתיות ובדיקת בידוד דיירים אוטומטית.</li>
   </ul>
 
-  <h2>9. נספח — פעולות הגדרה ידניות</h2>
+  <h2>9. נספח — פעולות הגדרה ידניות והפעלה</h2>
   <table>
     <thead><tr><th>#</th><th>פעולה</th><th>היכן</th><th>סטטוס</th></tr></thead>
     <tbody>
-      <tr><td>1</td><td>הרצת <code>supabase_hardening_27001.sql</code></td><td>Supabase SQL Editor</td><td><span class="badge b-warn">לביצוע (אחרי גיבוי)</span></td></tr>
-      <tr><td>2</td><td>הרצת <code>supabase_audit.sql</code></td><td>Supabase SQL Editor</td><td><span class="badge b-warn">לביצוע</span></td></tr>
-      <tr><td>3</td><td>יצירת KV וקישור כ-<code>RATE_LIMIT</code></td><td>Cloudflare Pages</td><td><span class="badge b-warn">לביצוע</span></td></tr>
-      <tr><td>4</td><td>הגדרת <code>SUPERADMIN_EMAIL</code></td><td>Cloudflare · Env</td><td><span class="badge b-warn">לביצוע</span></td></tr>
-      <tr><td>5</td><td>הפעלת MFA (TOTP)</td><td>Supabase · Authentication</td><td><span class="badge b-warn">לביצוע</span></td></tr>
+      <tr><td>0</td><td>גיבוי מסד נתונים (JSON + Supabase)</td><td>אפליקציה / Supabase</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
+      <tr><td>1</td><td>הרצת <code>supabase_hardening_27001.sql</code></td><td>Supabase SQL Editor</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
+      <tr><td>2</td><td>הרצת <code>supabase_audit.sql</code></td><td>Supabase SQL Editor</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
+      <tr><td>3</td><td>חיבור KV כ-<code>RATE_LIMIT</code></td><td><code>wrangler.toml</code> (IaC)</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
+      <tr><td>4</td><td>הגדרת <code>SUPERADMIN_EMAIL</code></td><td><code>wrangler.toml</code> (IaC)</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
+      <tr><td>5</td><td>הפעלת MFA (TOTP) + הרשמת הבעלים</td><td>Supabase · Auth + אפליקציה</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
     </tbody>
   </table>
-  <div class="strong-box">כל הבקרות תוכננו לנפילה חיננית: המערכת ממשיכה לתפקד גם לפני ביצוע הפעולות הידניות
-  (rate-limit ב-fail-open, audit ב-best-effort, hardening עם guards). ביצוע הפעולות מפעיל את ההגנה במלואה.</div>
+  <p><strong>הערת יישום (A.8.9):</strong> חיבור ה-KV ומשתנה <code>SUPERADMIN_EMAIL</code> הוגדרו כ<strong>תצורה-כקוד</strong>
+  ב-<code>wrangler.toml</code> — מגורסאים, ניתנים לביקורת, ומיושמים אוטומטית בכל פריסה. מיגרציית ה-hardening הפכה לעצמאית
+  לאחר שהתגלה שקובץ ההידוק האופציונלי לא הורץ בעבר על המסד החי.</p>
 
-  <div class="foot">הופק אוטומטית כחלק מתהליך ISO/IEC 27001:2022 · משקף את מצב המערכת בגרסה 1.73.0 · 3 ביולי 2026 · סיווג: פנימי/חסוי.</div>
+  <h3>9.1 אימות חי (Verification Evidence) — 3 ביולי 2026</h3>
+  <table>
+    <thead><tr><th>בקרה</th><th>בדיקה</th><th>תוצאה</th></tr></thead>
+    <tbody>
+      <tr><td>S1.1 hardening</td><td><code>count(*) WHERE org_id IS NULL</code></td><td><span class="badge b-ok">0 (הודק) ✅</span></td></tr>
+      <tr><td>S1.2 audit log</td><td>טעינת <code>/admin</code> → יומן ביקורת</td><td><span class="badge b-ok">"שרשרת תקינה" ✅</span></td></tr>
+      <tr><td>S1.3 rate limiting</td><td>34 קריאות ל-<code>/api/scan-receipt</code></td><td><span class="badge b-ok">429 אחרי 30/דק' ✅</span></td></tr>
+      <tr><td>S1.4 image storage</td><td>בדיקת שורת סריקה חדשה</td><td><span class="badge b-ok">storage_path + thumb 3.7KB ✅</span></td></tr>
+      <tr><td>S1.5 MFA</td><td>פענוח JWT לאחר הרשמת TOTP</td><td><span class="badge b-ok">aal2 · totp+password ✅</span></td></tr>
+    </tbody>
+  </table>
+  <div class="strong-box"><strong>תיקון תפעולי (v1.73.2):</strong> הפעלת 2FA מסובבת את הסשן, ולכן טאב פתוח עם טוקן ישן קיבל 401
+  בסריקה; נוסף רענון-טוקן אוטומטי + ניסיון-חוזר כך שהמצב מתקן את עצמו ללא כניסה מחדש. כל הבקרות בנויות לנפילה חיננית,
+  ולכן המערכת תפקדה ברציפות לאורך כל ההפעלה.</div>
+
+  <div class="foot">הופק אוטומטית כחלק מתהליך ISO/IEC 27001:2022 · משקף את מצב המערכת בגרסה 1.73.2 (לאחר יישום, הפעלה ואימות חי) · 3 ביולי 2026 · סיווג: פנימי/חסוי.</div>
 </div>
 </body>
 </html>
