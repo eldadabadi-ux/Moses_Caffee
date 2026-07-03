@@ -2,10 +2,31 @@
 -- supabase_hardening_27001.sql — ISO/IEC 27001:2022 hardening (S1.1)
 -- Controls: A.8.3 (tenant separation), A.8.2/A.9.2 (least privilege), A.8.7 (integrity)
 --
--- Run ONCE in Supabase → SQL Editor, AFTER supabase_org.sql + supabase_org_hardening.sql.
+-- Run ONCE in Supabase → SQL Editor, AFTER supabase_org.sql.
 -- Safe & idempotent (re-runnable). Take a DB backup first (Dashboard → Database → Backups).
--- Reuses the existing fill_org_id() trigger function and current_org_ids() helper.
+-- Self-contained: (re)creates the fill_org_id() trigger fn and current_org_ids()
+-- helper if they don't already exist, so it does NOT depend on the optional
+-- supabase_org_hardening.sql having been run.
 -- ============================================================================
+
+-- ── 0. Ensure the shared helpers exist (idempotent CREATE OR REPLACE) ────────
+-- current_org_ids(): orgs the current user belongs to (used by RLS policies).
+CREATE OR REPLACE FUNCTION current_org_ids()
+RETURNS SETOF uuid
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$ SELECT org_id FROM memberships WHERE user_id = auth.uid() $$;
+
+-- fill_org_id(): auto-fills org_id from the user's membership on insert.
+CREATE OR REPLACE FUNCTION fill_org_id()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NEW.org_id IS NULL THEN
+    NEW.org_id := (SELECT org_id FROM memberships WHERE user_id = NEW.user_id LIMIT 1);
+  END IF;
+  RETURN NEW;
+END $$;
 
 -- ── 1. suppliers → org-aware (A.8.3 multi-tenant separation) ────────────────
 -- Adds org_id, auto-fills it server-side (so the client can't create an org-less
