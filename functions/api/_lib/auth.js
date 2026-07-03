@@ -17,6 +17,17 @@ class AuthError extends Error {
   }
 }
 
+// Decode a JWT payload WITHOUT verifying the signature. Safe to read claims
+// (e.g. `aal`) ONLY after the token's authenticity was confirmed via
+// /auth/v1/user below — Supabase there validates the signature + expiry.
+function decodeJwtPayload(token) {
+  try {
+    const part = token.split('.')[1]
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/')
+    return JSON.parse(atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4)))
+  } catch { return {} }
+}
+
 export async function verifyJWT(request, env) {
   const auth = request.headers.get('Authorization') || request.headers.get('authorization')
   if (!auth) return null
@@ -36,7 +47,9 @@ export async function verifyJWT(request, env) {
   const u = await res.json()
   if (!u?.id) throw new AuthError('Empty user response', 401, 'invalid_token')
 
-  return { user_id: u.id, email: (u.email || '').toLowerCase() }
+  // aal ('aal1' | 'aal2') tells us whether the session completed MFA step-up.
+  const aal = decodeJwtPayload(accessToken).aal || 'aal1'
+  return { user_id: u.id, email: (u.email || '').toLowerCase(), aal }
 }
 
 export async function requireUser(request, env) {

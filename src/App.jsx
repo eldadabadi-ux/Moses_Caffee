@@ -14,6 +14,7 @@ import DailyBackup from './components/DailyBackup'
 import AIChatWidget from './components/AIChatWidget'
 import CookieConsent from './components/CookieConsent'
 import Sidebar from './components/Sidebar'
+import MfaGate from './components/MfaGate'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
 
 const LoginPage          = lazy(() => import('./pages/LoginPage'))
@@ -339,6 +340,10 @@ function AppShell() {
       <AIChatWidget />
 
       <UpdateBanner />
+
+      {/* MFA step-up gate — blocks the app until a 2FA code is entered, but only
+          for users who enrolled a factor (inert for everyone else). */}
+      <MfaGate />
     </div>
   )
 }

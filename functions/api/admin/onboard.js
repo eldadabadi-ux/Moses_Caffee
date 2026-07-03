@@ -34,6 +34,20 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   const url = sbUrl(context.env)
   const headers = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
 
+  // A.5.17 — require MFA (AAL2) for this privileged action WHEN the owner has a
+  // verified TOTP factor. (Before enrolling, aal1 is allowed so setup isn't
+  // locked out.) Once enrolled, an un-stepped-up session is rejected.
+  try {
+    const fRes = await fetch(`${url}/auth/v1/admin/users/${caller.user_id}`, { headers: { apikey: key, Authorization: `Bearer ${key}` } })
+    if (fRes.ok) {
+      const factors = (await fRes.json())?.factors || []
+      const hasVerifiedTotp = factors.some(f => f.status === 'verified' && (f.factor_type === 'totp' || f.type === 'totp'))
+      if (hasVerifiedTotp && caller.aal !== 'aal2') {
+        return Response.json({ error: 'mfa_required', message: 'נדרש אימות דו-שלבי (2FA) לביצוע פעולה זו.' }, { status: 403, headers: cors })
+      }
+    }
+  } catch { /* factor lookup failed → don't hard-block onboarding */ }
+
   let body
   try { body = await context.request.json() } catch { return Response.json({ error: 'bad_json' }, { status: 400, headers: cors }) }
   const businessName = (body?.businessName || '').trim()

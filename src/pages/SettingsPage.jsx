@@ -10,6 +10,7 @@ import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveF
 import { useInstall } from '../hooks/useInstall'
 import { isMobileDevice } from '../lib/isMobileDevice'
 import MailConnectCard from '../components/MailConnectCard'
+import MfaCard from '../components/MfaCard'
 import { rescanAllReceipts } from '../lib/rescanReceipts'
 import { downloadBackup, restoreFromObject, readBackupFile } from '../lib/backup'
 import ShekelSign from '../components/icons/ShekelSign'
@@ -548,6 +549,9 @@ export default function SettingsPage() {
         </div>
       </div>
       )}
+
+      {/* Two-factor authentication (A.5.17) */}
+      <div style={{ scrollMarginTop: 76 }}><MfaCard /></div>
 
       {/* Account security Card */}
       <div id="set-account" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>
