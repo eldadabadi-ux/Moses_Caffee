@@ -1,3 +1,13 @@
 # Cloudflare Pages configuration
 name = "moses-caffee"
 pages_build_output_dir = "dist"
+
+# Platform-owner email (not a secret; also hardcoded as a fallback in onboard.js).
+[vars]
+SUPERADMIN_EMAIL = "eldadabadi@gmail.com"
+
+# Rate-limiting store (A.8.12). The app writes per-user counters here at runtime;
+# fail-open if absent.
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "b724a7851939426499cabc2bbcb66d50"
