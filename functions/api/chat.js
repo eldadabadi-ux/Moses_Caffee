@@ -11,6 +11,7 @@
  */
 
 import { requireMember, wrapAuthErrors } from './_lib/auth.js'
+import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS   = 2048
@@ -229,6 +230,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   const { ANTHROPIC_API_KEY, SUPABASE_SERVICE_ROLE_KEY: sk } = context.env
   const SUPABASE_URL = getSupabaseUrl(context.env)
 
+  // Throttle the (paid) Anthropic chat per user (A.8.12) — fail-open if KV unbound.
+  const rl = await checkRateLimit(context.env, `${user.user_id}:chat`, { limit: 20, windowSec: 60 })
+  if (!rl.allowed) return rateLimitedResponse(rl.retryAfter, CORS)
+
   if (!ANTHROPIC_API_KEY) {
     return Response.json({ error: 'הבוט אינו מוגדר עדיין (חסר ANTHROPIC_API_KEY בשרת).' }, { status: 500, headers: CORS })
   }
@@ -312,8 +317,9 @@ ${dataBlock}`
     })
     if (!res.ok) {
       const err = await res.text()
+      // Full upstream error logged server-side only (A.8.28) — client gets a generic message.
       console.error('[chat] Anthropic error:', res.status, err.slice(0, 300))
-      return Response.json({ error: 'בקשת ה-AI נכשלה', detail: err.slice(0, 200) }, { status: 502, headers: CORS })
+      return Response.json({ error: 'ai_failed', message: 'בקשת ה-AI נכשלה — נסה שוב' }, { status: 502, headers: CORS })
     }
     const data = await res.json()
     // Cache visibility: cache_read_input_tokens > 0 from the 2nd message onward
@@ -323,6 +329,6 @@ ${dataBlock}`
     return Response.json({ reply }, { headers: CORS })
   } catch (err) {
     console.error('[chat] Fatal:', err?.message)
-    return Response.json({ error: 'שגיאת עיבוד', detail: err?.message }, { status: 500, headers: CORS })
+    return Response.json({ error: 'processing_error', message: 'שגיאת עיבוד' }, { status: 500, headers: CORS })
   }
 })

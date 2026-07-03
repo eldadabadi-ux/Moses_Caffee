@@ -8,9 +8,16 @@
 import { requireMember, wrapAuthErrors } from '../_lib/auth.js'
 import { getSupabaseUrl } from '../_lib/extractReceipt.js'
 import { scanConnection } from '../_lib/mailScan.js'
+import { checkRateLimit, rateLimitedResponse } from '../_lib/rateLimit.js'
 
 export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
   const user = await requireMember(request, env)
+
+  // Throttle mailbox scans per user (A.8.12). A single "scan now" click loops up
+  // to ~15 batched rounds client-side, so 30/min leaves room for that + a retry.
+  const rl = await checkRateLimit(env, `${user.user_id}:mailscan`, { limit: 30, windowSec: 60 })
+  if (!rl.allowed) return rateLimitedResponse(rl.retryAfter)
+
   const url = getSupabaseUrl(env), key = env.SUPABASE_SERVICE_ROLE_KEY
   const h = { apikey: key, Authorization: `Bearer ${key}` }
 

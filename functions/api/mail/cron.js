@@ -6,10 +6,13 @@
  */
 import { getSupabaseUrl } from '../_lib/extractReceipt.js'
 import { scanConnection } from '../_lib/mailScan.js'
+import { constantTimeEqual } from '../_lib/auth.js'
 
 export async function onRequest({ request, env }) {
   const secret = request.headers.get('x-cron-secret') || new URL(request.url).searchParams.get('secret')
-  if (!env.CRON_SECRET || secret !== env.CRON_SECRET) return new Response('forbidden', { status: 403 })
+  // Constant-time compare — a plain !== leaks, via response timing, how many
+  // leading characters of the secret matched (A.8.24 crypto hygiene).
+  if (!env.CRON_SECRET || !constantTimeEqual(secret, env.CRON_SECRET)) return new Response('forbidden', { status: 403 })
 
   const url = getSupabaseUrl(env), key = env.SUPABASE_SERVICE_ROLE_KEY
   const h = { apikey: key, Authorization: `Bearer ${key}` }

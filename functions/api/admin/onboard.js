@@ -8,8 +8,11 @@
  * → { ok, org, user }
  */
 import { requireUser, wrapAuthErrors } from '../_lib/auth.js'
+import { writeAudit } from '../_lib/audit.js'
 
-const SUPERADMIN = 'eldadabadi@gmail.com'
+// Platform owner — configurable via Cloudflare env (SUPERADMIN_EMAIL); the
+// hardcoded value is only a fallback so existing deploys keep working.
+const SUPERADMIN_FALLBACK = 'eldadabadi@gmail.com'
 function sbUrl(env) { return env.VITE_SUPABASE_URL || env.SUPABASE_URL || 'https://dsoucojqjrodxozcbicf.supabase.co' }
 const cors = { 'Content-Type': 'application/json' }
 
@@ -22,7 +25,8 @@ function makeSlug(name) {
 
 export const onRequestPost = wrapAuthErrors(async (context) => {
   const caller = await requireUser(context.request, context.env)
-  if ((caller.email || '').toLowerCase() !== SUPERADMIN) {
+  const superadmin = (context.env.SUPERADMIN_EMAIL || SUPERADMIN_FALLBACK).toLowerCase()
+  if ((caller.email || '').toLowerCase() !== superadmin) {
     return Response.json({ error: 'forbidden' }, { status: 403, headers: cors })
   }
   const key = context.env.SUPABASE_SERVICE_ROLE_KEY
@@ -47,7 +51,8 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   if (!uRes.ok) {
     const detail = (await uRes.text()).slice(0, 300)
     const dup = /already.*registered|exists|duplicate/i.test(detail)
-    return Response.json({ error: dup ? 'email_taken' : 'user_failed', detail }, { status: 400, headers: cors })
+    console.error('[onboard] create user failed:', uRes.status, detail)
+    return Response.json({ error: dup ? 'email_taken' : 'user_failed' }, { status: 400, headers: cors })
   }
   const newUser = await uRes.json()
 
@@ -60,10 +65,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     }),
   })
   if (!oRes.ok) {
-    const detail = (await oRes.text()).slice(0, 300)
+    console.error('[onboard] create org failed:', oRes.status, (await oRes.text()).slice(0, 300))
     // rollback the auth user we just created
     await fetch(`${url}/auth/v1/admin/users/${newUser.id}`, { method: 'DELETE', headers }).catch(() => {})
-    return Response.json({ error: 'org_failed', detail }, { status: 400, headers: cors })
+    return Response.json({ error: 'org_failed' }, { status: 400, headers: cors })
   }
   const org = (await oRes.json())[0]
 
@@ -73,11 +78,12 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     body: JSON.stringify({ org_id: org.id, user_id: newUser.id, role: 'owner' }),
   })
   if (!mRes.ok) {
-    const detail = (await mRes.text()).slice(0, 300)
+    console.error('[onboard] create membership failed:', mRes.status, (await mRes.text()).slice(0, 300))
     await fetch(`${url}/rest/v1/organizations?id=eq.${org.id}`, { method: 'DELETE', headers }).catch(() => {})
     await fetch(`${url}/auth/v1/admin/users/${newUser.id}`, { method: 'DELETE', headers }).catch(() => {})
-    return Response.json({ error: 'membership_failed', detail }, { status: 400, headers: cors })
+    return Response.json({ error: 'membership_failed' }, { status: 400, headers: cors })
   }
 
+  await writeAudit(context.env, { orgId: org.id, userId: caller.user_id, action: 'customer_onboarded', target: org.id, meta: { plan: 'pilot' } })
   return Response.json({ ok: true, org: { id: org.id, name: org.name, slug: org.slug }, user: { id: newUser.id, email: ownerEmail } }, { headers: cors })
 })

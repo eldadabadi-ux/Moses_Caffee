@@ -74,7 +74,8 @@ export async function scanGmail(conn, env, { vatRate = 18 } = {}) {
     try { msg = await gget(`/messages/${id}?format=full`, token) } catch { continue }
     const internalDate = Number(msg.internalDate) || 0
     const atts = collectAttachments(msg.payload)
-    console.warn(`[gmailScan] "${headerOf(msg, 'subject')}" — ${atts.length} eligible attachment(s)`)
+    // Log the message id + attachment count only — never the subject (PII, A.8.15).
+    console.warn(`[gmailScan] msg ${id} — ${atts.length} eligible attachment(s)`)
     if (atts.length) {
       const meta = { from: headerOf(msg, 'from'), subject: headerOf(msg, 'subject'), message_id: id, provider: 'gmail' }
       for (const att of atts) {

@@ -813,7 +813,7 @@ export default function ReceiptsPage() {
           source = result._model ? `AI: ${result._model}${multi ? ` · ${pages.length} עמ׳` : ''}` : 'AI'
         } else {
           const errBody = await res.json().catch(() => ({}))
-          source = `שגיאת שרת ${res.status}: ${errBody.detail || errBody.error || ''}`
+          source = `שגיאת שרת ${res.status}: ${errBody.message || errBody.error || ''}`
           console.warn('[scan] API error:', res.status, errBody)
         }
       } catch (aiErr) {

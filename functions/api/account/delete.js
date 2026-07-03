@@ -11,6 +11,7 @@
  */
 
 import { requireUser, wrapAuthErrors } from '../_lib/auth.js'
+import { writeAudit } from '../_lib/audit.js'
 
 const RECEIPTS_BUCKET = 'receipts'
 
@@ -86,19 +87,23 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     })
     if (!res.ok) {
       const detail = (await res.text().catch(() => '')).slice(0, 200)
+      // Detail logged server-side only (A.8.28) — not returned to the client.
       console.error('[account/delete] admin deleteUser failed:', res.status, detail)
       return Response.json(
-        { error: 'delete_failed', message: 'מחיקת החשבון נכשלה. נסה שוב או פנה לתמיכה.', detail, errors },
+        { error: 'delete_failed', message: 'מחיקת החשבון נכשלה. נסה שוב או פנה לתמיכה.' },
         { status: 502 },
       )
     }
   } catch (e) {
     console.error('[account/delete] Fatal:', e?.message)
     return Response.json(
-      { error: 'delete_failed', message: 'שגיאת שרת במחיקת החשבון.', detail: e?.message },
+      { error: 'delete_failed', message: 'שגיאת שרת במחיקת החשבון.' },
       { status: 500 },
     )
   }
 
+  // Record the erasure (append-only trail; audit.user_id has no FK so it
+  // survives the user's deletion). meta carries counts only, no PII.
+  await writeAudit(context.env, { userId: uid, action: 'account_deleted', target: uid, meta: { storage_errors: errors.length } })
   return Response.json({ ok: true, errors: errors.length ? errors : undefined })
 })

@@ -71,6 +71,20 @@ export async function requireMember(request, env) {
   return { ...user, org_id }
 }
 
+/**
+ * Constant-time string comparison — prevents timing attacks when comparing
+ * shared secrets (e.g. CRON_SECRET). Returns false fast only on the length
+ * check; the per-character loop runs over the full length regardless of where
+ * the first mismatch is, so elapsed time doesn't leak how many chars matched.
+ */
+export function constantTimeEqual(a, b) {
+  const sa = String(a ?? ''), sb = String(b ?? '')
+  if (sa.length !== sb.length) return false
+  let diff = 0
+  for (let i = 0; i < sa.length; i++) diff |= sa.charCodeAt(i) ^ sb.charCodeAt(i)
+  return diff === 0
+}
+
 export function wrapAuthErrors(handler) {
   return async (context) => {
     try {

@@ -55,7 +55,8 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
     }
     return false
   }
-  console.warn(`[mailIngest] OCR result: vendor="${result?.vendor_name || ''}" total=${result?.total_amount || 0} (${meta?.subject || ''})`)
+  // Log the message id only — not the subject or vendor (PII, A.8.15).
+  console.warn(`[mailIngest] OCR result for msg ${meta?.message_id || '?'}: total=${result?.total_amount || 0}`)
   if (!result || !(result.total_amount > 0 || result.vendor_name)) return false
 
   const ext = mimeType.includes('pdf') ? 'pdf' : (mimeType.split('/')[1] || 'bin')

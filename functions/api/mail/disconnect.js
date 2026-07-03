@@ -5,6 +5,7 @@
 import { requireUser, wrapAuthErrors } from '../_lib/auth.js'
 import { getSupabaseUrl } from '../_lib/extractReceipt.js'
 import { decryptToken } from '../_lib/mailCrypto.js'
+import { writeAudit } from '../_lib/audit.js'
 
 export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
   const user = await requireUser(request, env)
@@ -21,6 +22,7 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
       // (Microsoft has no simple server-side revoke endpoint; deleting the stored token is sufficient.)
     } catch {}
     await fetch(`${url}/rest/v1/mail_connections?id=eq.${conn.id}`, { method: 'DELETE', headers: h })
+    await writeAudit(env, { userId: user.user_id, action: 'mailbox_disconnected', target: provider, meta: { provider } })
   }
   return Response.json({ ok: true })
 })

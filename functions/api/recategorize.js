@@ -13,6 +13,7 @@
 
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
 import { classifyReceipt } from './_lib/classifyReceipt.js'
+import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
 
 const GEMINI_PRIMARY  = 'gemini-2.5-flash'
 const GEMINI_FALLBACK = 'gemini-flash-latest'
@@ -39,6 +40,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   const { GEMINI_API_KEY, SUPABASE_SERVICE_ROLE_KEY } = context.env
   const SUPABASE_URL = getSupabaseUrl(context.env)
   if (!GEMINI_API_KEY) return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500, headers: CORS })
+
+  // Throttle Gemini re-classification per user (A.8.12) — fail-open if KV unbound.
+  const rl = await checkRateLimit(context.env, `${user.user_id}:recat`, { limit: 10, windowSec: 60 })
+  if (!rl.allowed) return rateLimitedResponse(rl.retryAfter, CORS)
 
   let body
   try { body = await context.request.json() } catch { return Response.json({ error: 'Invalid JSON' }, { status: 400, headers: CORS }) }

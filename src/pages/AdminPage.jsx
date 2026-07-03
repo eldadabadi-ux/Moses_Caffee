@@ -1,9 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
-import { Building2, UserPlus, ShieldCheck, Check, Copy } from 'lucide-react'
+import { Building2, UserPlus, ShieldCheck, Check, Copy, ScrollText, RefreshCw, ShieldAlert } from 'lucide-react'
 import toast from 'react-hot-toast'
+
+const AUDIT_LABELS = {
+  customer_onboarded: 'לקוח הוקם',
+  account_deleted: 'חשבון נמחק',
+  mailbox_connected: 'תיבת מייל חוברה',
+  mailbox_disconnected: 'תיבת מייל נותקה',
+}
+const fmtTs = ts => { try { return new Date(ts).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) } catch { return ts } }
 
 const SUPERADMIN = 'eldadabadi@gmail.com'
 
@@ -19,6 +27,25 @@ export default function AdminPage() {
   const [password, setPassword]         = useState('')
   const [busy, setBusy]                 = useState(false)
   const [created, setCreated]           = useState([])
+  const [audit, setAudit]               = useState(null)   // { entries, chainOk, migrated } | null
+  const [auditBusy, setAuditBusy]       = useState(false)
+
+  const isSuperadmin = (user?.email || '').toLowerCase() === SUPERADMIN
+
+  const loadAudit = useCallback(async () => {
+    if (!isSuperadmin) return
+    setAuditBusy(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/admin/audit?limit=50', { headers: { Authorization: `Bearer ${session?.access_token}` } })
+      const body = await res.json().catch(() => ({}))
+      if (res.ok) setAudit(body)
+      else toast.error('שגיאה בטעינת יומן הביקורת')
+    } catch { toast.error('שגיאה בטעינת יומן הביקורת') }
+    finally { setAuditBusy(false) }
+  }, [isSuperadmin])
+
+  useEffect(() => { loadAudit() }, [loadAudit])
 
   if (user && (user.email || '').toLowerCase() !== SUPERADMIN) return <Navigate to="/" replace />
 
@@ -109,6 +136,41 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* ── Audit log (append-only, hash-chained) ─────────────────────────────── */}
+      <div style={{ background:'var(--panel)', border:'1px solid var(--border)', borderRadius:16, overflow:'hidden', boxShadow:'var(--shadow-card)' }}>
+        <div style={{ padding:'15px 20px', borderBottom:'1px solid var(--border)', background:'var(--panel-2)', display:'flex', alignItems:'center', gap:8 }}>
+          <ScrollText size={17} color="var(--accent)" />
+          <span style={{ fontWeight:700, fontSize:16, color:'var(--text)' }}>יומן ביקורת</span>
+          {audit && audit.migrated && (
+            audit.chainOk
+              ? <span title="שרשרת ה-hash רציפה — לא זוהה שינוי" style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700, color:'var(--ok)', background:'var(--success-tint-1)', border:'1px solid var(--success-tint-border)', borderRadius:6, padding:'2px 8px' }}><ShieldCheck size={13} /> שרשרת תקינה</span>
+              : <span title="נמצא שבר בשרשרת — ייתכן שינוי/מחיקה" style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700, color:'var(--danger)', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:6, padding:'2px 8px' }}><ShieldAlert size={13} /> שבר בשרשרת!</span>
+          )}
+          <button onClick={loadAudit} disabled={auditBusy} title="רענן" style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-mute)', fontSize:13, cursor: auditBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
+            <RefreshCw size={13} style={{ animation: auditBusy ? 'spin 1s linear infinite' : 'none' }} /> רענן
+          </button>
+        </div>
+        <div style={{ padding: audit?.entries?.length ? 0 : 20 }}>
+          {audit && !audit.migrated ? (
+            <p style={{ margin:0, fontSize:13.5, color:'var(--text-mute)', lineHeight:1.7 }}>
+              יומן הביקורת עדיין לא הופעל. יש להריץ את <code style={{ background:'var(--panel-2)', padding:'1px 6px', borderRadius:5 }}>supabase_audit.sql</code> ב-Supabase SQL Editor.
+            </p>
+          ) : !audit?.entries?.length ? (
+            <p style={{ margin:0, fontSize:13.5, color:'var(--text-mute)' }}>{auditBusy ? 'טוען…' : 'אין רשומות עדיין. פעולות מנהל יירשמו כאן.'}</p>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column' }}>
+              {audit.entries.map((e, i) => (
+                <div key={e.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'11px 20px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize:13.5 }}>
+                  <span style={{ fontWeight:700, color:'var(--text)', minWidth:130 }}>{AUDIT_LABELS[e.action] || e.action}</span>
+                  <span dir="ltr" style={{ color:'var(--text-mute)', fontSize:12, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{e.target || ''}</span>
+                  <span style={{ color:'var(--text-mute)', fontSize:12, whiteSpace:'nowrap' }}>{fmtTs(e.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

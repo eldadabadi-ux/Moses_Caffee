@@ -11,6 +11,7 @@
 
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
 import { extractReceipt } from './_lib/extractReceipt.js'
+import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
 
 function corsHeaders(request, env) {
   const origin  = (request.headers.get('origin') || '').trim()
@@ -34,6 +35,10 @@ export async function onRequestOptions(context) {
 export const onRequestPost = wrapAuthErrors(async (context) => {
   const user = await requireUser(context.request, context.env)
   const CORS = corsHeaders(context.request, context.env)
+
+  // Throttle expensive Gemini OCR per user (A.8.12) — fail-open if KV unbound.
+  const rl = await checkRateLimit(context.env, `${user.user_id}:scan`, { limit: 30, windowSec: 60 })
+  if (!rl.allowed) return rateLimitedResponse(rl.retryAfter, CORS)
 
   if (!context.env.GEMINI_API_KEY) {
     return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500, headers: CORS })
@@ -59,13 +64,15 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     const result = await extractReceipt({ images, mimeType, env: context.env, userId: user.user_id, vatRate })
     return Response.json(result, { headers: CORS })
   } catch (err) {
+    // Log the full upstream detail server-side only; never leak it to the client
+    // (A.8.28 information disclosure) — the browser gets a stable code + message.
+    console.error('[scan-receipt] error:', err?.code || '', err?.message || '', err?.detail || '')
     if (err?.code === 'AI_FAILED') {
-      return Response.json({ error: 'AI processing failed', detail: err.detail }, { status: 502, headers: CORS })
+      return Response.json({ error: 'ai_failed', message: 'עיבוד ה-AI נכשל — נסה שוב' }, { status: 502, headers: CORS })
     }
     if (err?.code === 'BAD_INPUT') {
-      return Response.json({ error: err.message }, { status: 400, headers: CORS })
+      return Response.json({ error: 'bad_input', message: 'הקלט אינו תקין' }, { status: 400, headers: CORS })
     }
-    console.error('[scan-receipt] Fatal:', err?.message)
-    return Response.json({ error: 'שגיאת עיבוד', detail: err?.message }, { status: 500, headers: CORS })
+    return Response.json({ error: 'processing_error', message: 'שגיאת עיבוד' }, { status: 500, headers: CORS })
   }
 })

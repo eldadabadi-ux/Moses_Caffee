@@ -6,6 +6,7 @@
  */
 import { verifyState, encryptToken } from '../_lib/mailCrypto.js'
 import { getSupabaseUrl } from '../_lib/extractReceipt.js'
+import { writeAudit } from '../_lib/audit.js'
 
 const back = (origin, status) => Response.redirect(`${origin}/settings?mail=${status}#set-mail`, 302)
 
@@ -50,6 +51,7 @@ export async function onRequestGet({ request, env }) {
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
       body: JSON.stringify({ user_id: st.uid, org_id: st.oid || null, provider, email, refresh_token_enc: enc, status: 'active', last_error: null }),
     })
+    await writeAudit(env, { orgId: st.oid || null, userId: st.uid, action: 'mailbox_connected', target: provider, meta: { provider } })
     return back(origin, 'connected')
   } catch {
     return back(origin, 'error')
