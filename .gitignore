@@ -22,3 +22,6 @@ Thumbs.db
 
 # Wrangler
 .wrangler/
+
+# Abandoned local-only cron workflow (GITHUB_TOKEN lacks 'workflow' scope → push rejected)
+.github/workflows/mail-scan.yml

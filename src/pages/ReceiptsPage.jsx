@@ -10,7 +10,7 @@ import { normalizeCategoryName, categoryKey } from '../lib/categoryNormalize'
 import { archiveReceipts } from '../lib/archive'
 import ImageViewer from '../components/ImageViewer'
 import { downloadFile } from '../lib/downloadFile'
-import { compressImage, downscaleForUpload } from '../lib/imageUtils'
+import { compressImage, downscaleForUpload, dataUrlToBlob } from '../lib/imageUtils'
 import { isPdf, pdfToImages } from '../lib/pdfUtils'
 import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip, buildReconciliationRows, buildReconciliationHtml } from '../lib/receiptExport'
 import ReceiptScanAnimation from '../components/ReceiptScanAnimation'
@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import { DOC_TYPES, docTypeOf, docTypeLabel, isExpenseDoc, DOC_COL_RE } from '../lib/docTypes'
 import { openIssues } from '../lib/reconciliation'
-import { deleteReceiptFile, signedReceiptUrl } from '../lib/storage'
+import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/storage'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -922,11 +922,33 @@ export default function ReceiptsPage() {
 
       const pages = reviewPages.length ? reviewPages : (reviewImage ? [reviewImage] : [])
       const finalImage = await compressDataUrl(pages[0] || reviewImage)
-      // Extra pages of a multi-page receipt (compressed) — kept in ai_summary so
-      // no schema migration is needed.
+      // Extra pages of a multi-page receipt (compressed).
       const extraPages = pages.length > 1
         ? await Promise.all(pages.slice(1).map(compressDataUrl))
         : []
+
+      // ── A.8.24: keep the full-resolution receipt OUT of the relational DB.
+      // Upload the original(s) to the private per-user Storage bucket and store
+      // only a small thumbnail (text illegible) in receipt_image for the list.
+      // If the upload fails (e.g. offline) we fall back to the old behaviour so
+      // an image is never lost.
+      let storagePath = null
+      const extraPaths = []
+      try {
+        const rand = Math.random().toString(36).slice(2, 10)
+        const blob0 = finalImage ? dataUrlToBlob(finalImage) : null
+        if (blob0) storagePath = await uploadReceiptFile(user.id, `scan_${rand}`, blob0, 'image/jpeg')
+        if (storagePath) {
+          for (let i = 0; i < extraPages.length; i++) {
+            const b = dataUrlToBlob(extraPages[i])
+            if (b) { try { extraPaths.push(await uploadReceiptFile(user.id, `scan_${rand}_p${i + 2}`, b, 'image/jpeg')) } catch {} }
+          }
+        }
+      } catch (upErr) { console.warn('[approveScan] bucket upload failed, keeping inline image:', upErr?.message); storagePath = null }
+      // Thumbnail for the list when the original is safely in the bucket; otherwise
+      // fall back to the full inline image (legacy behaviour).
+      const thumbImage = storagePath ? await downscaleForUpload(finalImage, 256, 0.55) : finalImage
+      const uploadedExtras = storagePath && extraPaths.length === extraPages.length
 
       // Amounts are entered in the ORIGINAL currency; for a foreign receipt we
       // convert to ILS with the official Bank-of-Israel rate so the dashboard/
@@ -956,11 +978,15 @@ export default function ReceiptsPage() {
         amount: totalAmt, currency: 'ILS',
         category_id, category_text: normalizeCategoryName(reviewCategory) || 'שונות',
         items: storedItems,
-        receipt_image: finalImage || null, ai_extracted: true,
+        receipt_image: thumbImage || null, ai_extracted: true,
+        ...(storagePath ? { storage_path: storagePath } : {}),
         // Exact VAT breakdown is stored inside ai_summary too — this works even
         // when the dedicated columns don't exist yet (no migration required).
         ai_summary: { vendor: reviewVendor, total: totalAmt, before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate, model: 'gemini-2.5-flash',
-          pages: pages.length, ...(extraPages.length ? { extra_pages: extraPages } : {}),
+          pages: pages.length,
+          // Full-res original(s) live in the private bucket (A.8.24); only fall
+          // back to inline base64 extra pages if the upload didn't happen.
+          ...(uploadedExtras && extraPaths.length ? { extra_paths: extraPaths } : (extraPages.length ? { extra_pages: extraPages } : {})),
           // Doc classification mirrored here so it survives even before the
           // supabase_doctype.sql migration adds the dedicated columns.
           doc_type: reviewDocType,
@@ -1158,6 +1184,22 @@ export default function ReceiptsPage() {
     const url = await signedReceiptUrl(r.storage_path)
     if (url) window.open(url, '_blank', 'noopener')
     else toast.error('הקובץ המקורי לא זמין')
+  }
+
+  // Open the FULL-resolution original from the private bucket via a short-lived
+  // signed URL — WITHOUT writing it back into the row (keeps full images out of
+  // the DB, A.8.24). The list shows only a small thumbnail; this is the zoom.
+  async function viewFull(r) {
+    if (!r.storage_path) { if (r.receipt_image) setLightboxUrl(r.receipt_image); return }
+    const t = toast.loading('טוען קבלה…')
+    try {
+      const url = await signedReceiptUrl(r.storage_path)
+      toast.dismiss(t)
+      if (url && /\.pdf$/i.test(r.storage_path)) { window.open(url, '_blank', 'noopener'); return }
+      if (url) { setLightboxUrl(url); return }
+      if (r.receipt_image) setLightboxUrl(r.receipt_image)
+      else toast.error('הקובץ המקורי לא זמין')
+    } catch { toast.dismiss(t); if (r.receipt_image) setLightboxUrl(r.receipt_image); else toast.error('שגיאה בטעינה') }
   }
 
   // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
@@ -1509,7 +1551,7 @@ export default function ReceiptsPage() {
               )}
               {/* Thumbnail */}
               {r.receipt_image ? (
-                <button onClick={selecting ? undefined : () => setLightboxUrl(r.receipt_image)} style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border)', background:'var(--panel-2)', flexShrink:0, cursor:'pointer', padding:0 }}>
+                <button onClick={selecting ? undefined : () => (r.storage_path ? viewFull(r) : setLightboxUrl(r.receipt_image))} title={r.storage_path ? 'הצג קבלה מלאה' : undefined} style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border)', background:'var(--panel-2)', flexShrink:0, cursor:'pointer', padding:0 }}>
                   <img src={r.receipt_image} alt="קבלה" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
                 </button>
               ) : r.storage_path ? (

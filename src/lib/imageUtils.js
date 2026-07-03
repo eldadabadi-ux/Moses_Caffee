@@ -2,6 +2,20 @@
  * imageUtils — shared image helpers (used by receipt scanning + logo upload).
  */
 
+/**
+ * Convert a base64 data URL to a Blob WITHOUT fetch() — the app's CSP has no
+ * `data:` in connect-src, so `fetch(dataUrl)` is blocked. Decodes manually.
+ */
+export function dataUrlToBlob(dataUrl) {
+  const [head, b64] = String(dataUrl || '').split(',')
+  if (!b64) return null
+  const mime = (head.match(/data:([^;]+)/) || [])[1] || 'image/jpeg'
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type: mime })
+}
+
 export function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

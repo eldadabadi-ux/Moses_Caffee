@@ -4,6 +4,7 @@
  */
 import { docTypeOf, docTypeLabel, isExpenseDoc } from './docTypes'
 import { matchInvoice, findCandidates, normalizeVendor, docNumberOf, TOLERANCE } from './reconciliation'
+import { signedReceiptUrl } from './storage'
 
 const fmtDate = d => d ? d.split('-').reverse().join('.') : ''
 const il = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}`
@@ -268,17 +269,38 @@ export function pdfBlob(receipts, opts) {
 }
 
 // ── Images ZIP ────────────────────────────────────────────────────────────────
+// Prefers the FULL-resolution original from the private bucket (storage_path)
+// via a signed URL; falls back to an inline receipt_image data-URL for legacy
+// rows. (New scans keep only a small thumbnail inline — A.8.24.)
 export async function buildImagesZip(receipts) {
-  const withImages = receipts.filter(r => (r.receipt_image || '').startsWith('data:'))
-  if (withImages.length === 0) return null
+  const rows = receipts.filter(r => r.storage_path || (r.receipt_image || '').startsWith('data:'))
+  if (rows.length === 0) return null
   const JSZip = (await import('jszip')).default
   const zip = new JSZip()
-  withImages.forEach((r, i) => {
-    const [header, b64] = (r.receipt_image || '').split(','); if (!b64) return
-    const ext = header.includes('png') ? 'png' : 'jpg'
+  let n = 0
+  for (const r of rows) {
     const vendor = (r.vendor_name || 'קבלה').replace(/[/\\?%*:|"<>]/g, '-').slice(0, 30)
-    zip.file(`${String(i+1).padStart(3,'0')}_${fmtDate(r.receipt_date)||'ללא_תאריך'}_${vendor}.${ext}`, b64, { base64: true })
-  })
+    const nameBase = `${String(++n).padStart(3, '0')}_${fmtDate(r.receipt_date) || 'ללא_תאריך'}_${vendor}`
+    let added = false
+    if (r.storage_path) {
+      try {
+        const url = await signedReceiptUrl(r.storage_path)
+        if (url) {
+          const resp = await fetch(url)
+          if (resp.ok) {
+            const buf = await resp.arrayBuffer()
+            const ext = /\.png$/i.test(r.storage_path) ? 'png' : /\.pdf$/i.test(r.storage_path) ? 'pdf' : 'jpg'
+            zip.file(`${nameBase}.${ext}`, buf)
+            added = true
+          }
+        }
+      } catch { /* fall back to inline below */ }
+    }
+    if (!added && (r.receipt_image || '').startsWith('data:')) {
+      const [header, b64] = r.receipt_image.split(',')
+      if (b64) { zip.file(`${nameBase}.${header.includes('png') ? 'png' : 'jpg'}`, b64, { base64: true }) }
+    }
+  }
   return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } })
 }
 
