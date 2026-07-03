@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>דוח אבטחת מידע — ISO/IEC 27001:2022 — Moses Caffee</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800&display=swap');
+  :root{
+    --ink:#1e293b; --mut:#64748b; --line:#e2e8f0; --panel:#f8fafc;
+    --accent:#2563eb; --ok:#16a34a; --okbg:#f0fdf4; --okbd:#bbf7d0;
+    --warn:#d97706; --warnbg:#fffbeb; --warnbd:#fde68a;
+    --hi:#dc2626; --hibg:#fef2f2; --hibd:#fecaca; --brand:#7c3aed;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'Heebo',Arial,sans-serif;direction:rtl;color:var(--ink);background:#fff;font-size:15px;line-height:1.65;}
+  .page{max-width:960px;margin:0 auto;padding:40px 44px;}
+  .cover{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:18px;padding:44px 40px;margin-bottom:34px;}
+  .cover h1{font-size:32px;font-weight:800;line-height:1.25;margin-bottom:8px;}
+  .cover .sub{font-size:18px;font-weight:500;opacity:.92;}
+  .cover .meta{margin-top:22px;display:flex;gap:26px;flex-wrap:wrap;font-size:14px;opacity:.9;}
+  .cover .meta b{display:block;font-size:17px;font-weight:700;opacity:1;}
+  .print-tip{background:var(--warnbg);border:1px solid var(--warnbd);color:#92400e;border-radius:10px;padding:10px 16px;font-size:13px;margin-bottom:26px;}
+  h2{font-size:23px;font-weight:800;color:#0f172a;margin:34px 0 14px;padding-bottom:8px;border-bottom:3px solid var(--accent);}
+  h3{font-size:18px;font-weight:700;color:#1e293b;margin:22px 0 10px;}
+  p{margin-bottom:12px;}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:14px 0 20px;}
+  th{background:#eef2ff;color:#3730a3;font-weight:700;padding:9px 11px;text-align:right;border:1px solid var(--line);}
+  td{padding:9px 11px;border:1px solid var(--line);vertical-align:top;}
+  tbody tr:nth-child(even){background:var(--panel);}
+  .badge{display:inline-block;padding:2px 9px;border-radius:6px;font-size:12px;font-weight:700;white-space:nowrap;}
+  .b-ok{background:var(--okbg);color:var(--ok);border:1px solid var(--okbd);}
+  .b-warn{background:var(--warnbg);color:var(--warn);border:1px solid var(--warnbd);}
+  .b-hi{background:var(--hibg);color:var(--hi);border:1px solid var(--hibd);}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0;}
+  .kpi .card{flex:1 1 150px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+  .kpi .n{font-size:26px;font-weight:800;color:var(--accent);}
+  .kpi .l{font-size:13px;color:var(--mut);margin-top:2px;}
+  .ctrl{background:var(--panel);border:1px solid var(--line);border-right:4px solid var(--accent);border-radius:10px;padding:14px 18px;margin-bottom:14px;}
+  .ctrl h3{margin:0 0 6px;color:var(--accent);}
+  .ctrl .anx{font-size:12px;color:var(--mut);font-weight:600;}
+  .arch{background:#0f172a;color:#cbd5e1;border-radius:12px;padding:18px 20px;font-family:'Courier New',monospace;font-size:12.5px;line-height:1.5;white-space:pre;overflow-x:auto;direction:ltr;text-align:left;}
+  .strong-box{background:var(--okbg);border:1px solid var(--okbd);border-radius:10px;padding:14px 18px;font-size:14px;line-height:1.7;}
+  code{background:#eef2ff;padding:1px 6px;border-radius:5px;font-size:12.5px;direction:ltr;display:inline-block;}
+  ul,ol{margin:0 26px 14px;}li{margin-bottom:6px;}
+  .foot{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:#94a3b8;font-size:12.5px;}
+  @media print{
+    body{font-size:12.5px;} .page{max-width:none;padding:0;}
+    .cover{border-radius:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+    .print-tip{display:none;} h2{page-break-after:avoid;} table,.ctrl{page-break-inside:avoid;}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="cover">
+    <h1>דוח אבטחת מידע — ISO/IEC 27001:2022</h1>
+    <div class="sub">אפליקציית Moses Caffee · מערכת ניהול קבלות</div>
+    <div class="meta">
+      <div><b>1.73.0</b>גרסת מערכת</div>
+      <div><b>3 ביולי 2026</b>תאריך הדוח</div>
+      <div><b>פנימי / חסוי</b>סיווג</div>
+      <div><b>הערכת פער + יישום בקרות</b>סוג</div>
+    </div>
+  </div>
+
+  <div class="print-tip">🖨️ להפקת PDF: הדפס (Ctrl+P) ← יעד "שמור כ-PDF" ← וודא ש-"גרפיקת רקע / Background graphics" מסומן, כדי לשמר צבעים.</div>
+
+  <h2>1. תקציר מנהלים</h2>
+  <p>בוצעה הערכת אבטחה מקיפה (Gap Assessment) לאפליקציית ניהול הקבלות מול נספח A של תקן ISO/IEC 27001:2022,
+  ולאחריה יושמו בקרות טכניות לסגירת הפערים המהותיים. המערכת נבנתה מלכתחילה עם בסיס אבטחה חזק — בידוד רב-דיירתי
+  מלא ברמת מסד הנתונים, כותרות אבטחה מחמירות, הצפנת טוקנים ומחיקת GDPR — ולכן ההערכה התמקדה בהעמקת הבקרות.</p>
+  <p><strong>תוצאה כללית:</strong> רמת בשלות <strong>גבוהה</strong>. כל הממצאים בדרגת סיכון גבוהה טופלו בגרסה 1.73.0.
+  הסיכון המהותי היחיד שנותר פתוח מנוהל באמצעות תיעוד ובקרות ארגוניות (יציאת נתונים לספקי בינה מלאכותית — ראו §7).</p>
+  <div class="kpi">
+    <div class="card"><div class="n">0</div><div class="l">ממצאים בסיכון גבוה (מ-2)</div></div>
+    <div class="card"><div class="n">9</div><div class="l">בקרות Annex A שהודקו</div></div>
+    <div class="card"><div class="n">✓</div><div class="l">יומן ביקורת hash-chain</div></div>
+    <div class="card"><div class="n">✓</div><div class="l">הגבלת קצב פר-משתמש</div></div>
+    <div class="card"><div class="n">✓</div><div class="l">MFA לחשבון הבעלים</div></div>
+  </div>
+
+  <h2>2. היקף ומתודולוגיה</h2>
+  <p><strong>היקף:</strong> כלל בסיס הקוד — צד לקוח (React 19 / Vite 8), צד שרת (Cloudflare Pages Functions),
+  מסד נתונים (Supabase PostgreSQL + RLS + Auth), אחסון קבצים, ושרשרת אספקה (npm).</p>
+  <p><strong>מתודולוגיה:</strong> סקירת קוד מלאה (read-only) בשלושה תחומים במקביל — שרת/API, מסד נתונים/RLS,
+  וצד לקוח/שרשרת אספקה — עם מיפוי כל ממצא לבקרת Annex A ולדירוג סיכון. כל ממצא מהותי אומת ידנית מול הקוד.</p>
+
+  <h2>3. ארכיטקטורה וזרימת נתונים</h2>
+  <div class="arch">┌───────────┐   HTTPS     ┌──────────────────────┐  service-role  ┌──────────────┐
+│ דפדפן/PWA │ ──────────► │ Cloudflare Pages     │ ─────────────► │  Supabase    │
+│ React 19  │  JWT (RLS)  │ Functions (/api/*)   │ ◄───────────── │  PG+RLS+Auth │
+└───────────┘ ◄────────── └──────────┬───────────┘                │  + Storage   │
+      │ anon key (RLS)               │                            └──────────────┘
+      ▼                              ▼  external egress
+   Supabase (direct, RLS)   Gemini(OCR) · Anthropic(chat) · Gmail/Graph · Bank of Israel</div>
+  <p><strong>סיווג נתונים רגישים:</strong> תמונות קבלות, סכומים ומע"מ, פרטי ספקים, כתובות מייל, טוקני OAuth
+  (מוצפנים). בידוד פר-ארגון (<code>org_id</code>) ופר-משתמש (<code>user_id</code>) באמצעות RLS.</p>
+
+  <h2>4. טבלת ממצאים</h2>
+  <h3>4.1 תיקוני אימות (הערכות אוטומטיות שנמצאו שגויות)</h3>
+  <ul>
+    <li><code>.env</code> אינו ב-git (git-ignored) — אין סודות במאגר.</li>
+    <li>לא היה audit log פעיל — הטבלה הייתה רק בקובץ מיגרציה נטוש שמעולם לא הופעל.</li>
+    <li>Session ב-localStorage (ברירת מחדל) — ממותן ע"י CSP חזק.</li>
+    <li>ה-OCR הראשי הוא Google Gemini בענן (Tesseract = גיבוי).</li>
+    <li>כותרות האבטחה נבנות אוטומטית מ-<code>public/_headers</code> בכל build.</li>
+  </ul>
+  <h3>4.2 ממצאים ודירוגם</h3>
+  <table>
+    <thead><tr><th>#</th><th>ממצא</th><th>סיכון</th><th>Annex A</th><th>סטטוס</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>יציאת נתונים לספקי AI ללא DPA מתועד</td><td><span class="badge b-hi">גבוה</span></td><td>A.5.19–23, A.5.34</td><td><span class="badge b-warn">מנוהל</span></td></tr>
+      <tr><td>2</td><td>היעדר audit trail</td><td><span class="badge b-hi">גבוה</span></td><td>A.8.15/16</td><td><span class="badge b-ok">נסגר · S1.2</span></td></tr>
+      <tr><td>3</td><td>היעדר הגבלת קצב על נתיבי AI</td><td><span class="badge b-warn">בינוני</span></td><td>A.8.12</td><td><span class="badge b-ok">נסגר · S1.3</span></td></tr>
+      <tr><td>4</td><td>תמונות קבלות base64 ב-DB</td><td><span class="badge b-warn">בינוני</span></td><td>A.8.24</td><td><span class="badge b-ok">הודק · S1.4</span></td></tr>
+      <tr><td>5</td><td><code>xlsx@0.18.5</code> — CVEs ידועות</td><td><span class="badge b-warn">בינוני</span></td><td>A.8.8/19</td><td><span class="badge b-warn">מנוהל</span></td></tr>
+      <tr><td>6</td><td>היעדר MFA לבעלים</td><td><span class="badge b-warn">בינוני</span></td><td>A.5.17</td><td><span class="badge b-ok">נסגר · S1.5</span></td></tr>
+      <tr><td>7</td><td>PII (נושאי מייל) בלוגים</td><td><span class="badge b-warn">בינוני-נמוך</span></td><td>A.8.15</td><td><span class="badge b-ok">נסגר · S1.1</span></td></tr>
+      <tr><td>8</td><td>חשיפת שגיאות upstream ללקוח</td><td><span class="badge b-ok">נמוך</span></td><td>A.8.28</td><td><span class="badge b-ok">נסגר · S1.1</span></td></tr>
+      <tr><td>9</td><td>CRON_SECRET לא constant-time; SUPERADMIN קשיח</td><td><span class="badge b-ok">נמוך</span></td><td>A.8.24/5.18</td><td><span class="badge b-ok">נסגר · S1.1</span></td></tr>
+      <tr><td>10</td><td>suppliers ללא org_id; settings לא NOT NULL</td><td><span class="badge b-ok">נמוך</span></td><td>A.8.3</td><td><span class="badge b-ok">נסגר · S1.1</span></td></tr>
+      <tr><td>11</td><td>EXECUTE על SECURITY DEFINER לא מוגבל</td><td><span class="badge b-ok">נמוך</span></td><td>A.8.2</td><td><span class="badge b-ok">נסגר · S1.1</span></td></tr>
+    </tbody>
+  </table>
+  <h3>4.3 בקרות קיימות מלכתחילה (לא נדרש תיקון)</h3>
+  <div class="strong-box">RLS על כל הטבלאות (כולל <code>mail_connections</code> deny-all) · SECURITY DEFINER עם
+  <code>search_path</code> נעול · הצפנת AES-GCM לטוקני OAuth + חתימת HMAC · bucket פרטי עם מדיניות per-user ·
+  CSP חזק (ללא unsafe-eval/inline-script) + HSTS preload + X-Frame-Options DENY · sourcemaps כבויים + הסרת
+  console · מחיקת GDPR · דפי משפט + גילוי סב-מעבדים · אין סודות במאגר.</div>
+
+  <h2>5. בקרות שיושמו (v1.73.0)</h2>
+  <div class="ctrl"><h3>S1.1 — חיזוק בסיסי (Hygiene)</h3><div class="anx">A.8.24 · A.5.18 · A.8.28 · A.8.15 · A.8.3 · A.8.2</div>
+    <p>השוואה קבועת-זמן ל-CRON_SECRET; <code>SUPERADMIN_EMAIL</code> כמשתנה סביבה; סניטציית שגיאות (פרטים בשרת
+    בלבד); הסתרת נושאי מייל מהלוגים; <code>supabase_hardening_27001.sql</code> (org_id ל-suppliers, NOT NULL
+    ל-user_settings, הגבלת EXECUTE, אילוץ amount≥0).</p></div>
+  <div class="ctrl"><h3>S1.2 — יומן ביקורת append-only + שרשרת-Hash</h3><div class="anx">A.8.15 · A.8.16 · A.8.7</div>
+    <p><code>supabase_audit.sql</code> — טבלת <code>audit_log</code> עם טריגר SHA-256 המשרשר כל רשומה לקודמתה
+    (tamper-evidence); RLS קריאה-בלבד לחברי ארגון, כתיבה service-role בלבד. רישום: הקמת לקוח, מחיקת חשבון,
+    חיבור/ניתוק מייל. לוח ב-AdminPage עם אימות שלמות שרשרת.</p></div>
+  <div class="ctrl"><h3>S1.3 — הגבלת קצב פר-משתמש</h3><div class="anx">A.8.12</div>
+    <p>מונה מבוסס Cloudflare KV (fail-open) על scan-receipt (30/דק'), chat (20/דק'), recategorize (10/דק'),
+    mail/scan (30/דק'), עם 429 + Retry-After.</p></div>
+  <div class="ctrl"><h3>S1.4 — העברת תמונות ל-Storage מוצפן במנוחה</h3><div class="anx">A.8.24</div>
+    <p>סריקות חדשות מעלות את המקור ל-bucket פרטי ושומרות ב-DB thumbnail בלבד; צפייה מלאה וייצוא דרך signed URL
+    קצר-מועד; נפילה חיננית ל-inline.</p></div>
+  <div class="ctrl"><h3>S1.5 — אימות דו-שלבי (TOTP) לבעלים</h3><div class="anx">A.5.17 · A.8.5</div>
+    <p>הרשמת TOTP בהגדרות (QR+אימות); שכבת step-up חוסמת (אינרטית ללא factor); אכיפת שרת — onboard דוחה
+    <code>mfa_required</code> ב-AAL1 כשקיים factor מאומת.</p></div>
+
+  <h2>6. הצהרת ישימות (SoA) — תמצית</h2>
+  <table>
+    <thead><tr><th>בקרה</th><th>תיאור</th><th>סטטוס</th></tr></thead>
+    <tbody>
+      <tr><td>A.5.17</td><td>אימות (MFA)</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.5.19–23</td><td>אבטחה בשרשרת אספקת שירותים</td><td><span class="badge b-warn">מנוהל</span></td></tr>
+      <tr><td>A.5.31/34</td><td>פרטיות והגנת PII</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.2</td><td>הרשאות גישה מורחבות</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.3</td><td>בידוד דיירים</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.7</td><td>שלמות מידע</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.8/19</td><td>ניהול חולשות / תלויות</td><td><span class="badge b-warn">מנוהל</span></td></tr>
+      <tr><td>A.8.12</td><td>הגבלת קצב</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.15/16</td><td>רישום וניטור</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.23</td><td>כותרות אבטחה</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.24</td><td>הצפנה</td><td><span class="badge b-ok">מיושם</span></td></tr>
+      <tr><td>A.8.28</td><td>קידוד מאובטח</td><td><span class="badge b-ok">מיושם</span></td></tr>
+    </tbody>
+  </table>
+
+  <h2>7. סב-מעבדים וסיכונים שאריתיים</h2>
+  <table>
+    <thead><tr><th>ספק</th><th>תפקיד</th><th>נתונים</th><th>DPA</th></tr></thead>
+    <tbody>
+      <tr><td>Supabase</td><td>DB / Auth / Storage</td><td>כל נתוני המערכת</td><td>סטנדרטי — לתיעוד</td></tr>
+      <tr><td>Cloudflare</td><td>אירוח / Functions / KV</td><td>תעבורה, מטא-דאטה</td><td>סטנדרטי — לתיעוד</td></tr>
+      <tr><td>Google (Gemini)</td><td>OCR תמונות</td><td>תמונות קבלות + טקסט</td><td><span class="badge b-warn">נדרש</span></td></tr>
+      <tr><td>Anthropic (Claude)</td><td>צ'אט עסקי</td><td>קבלות + ספקים</td><td><span class="badge b-warn">נדרש</span></td></tr>
+      <tr><td>Google / Microsoft</td><td>קריאת מייל (OAuth)</td><td>נושאים + קבצים</td><td>scope קריאה-בלבד</td></tr>
+      <tr><td>בנק ישראל</td><td>שערי מטבע</td><td>קוד מטבע (ללא PII)</td><td>לא רלוונטי</td></tr>
+    </tbody>
+  </table>
+  <h3>סיכונים שאריתיים (מקובלים / בניהול)</h3>
+  <ol>
+    <li><strong>יציאת נתונים לספקי AI:</strong> מגולה במדיניות הפרטיות; יש להשלים תיעוד DPA מול Google ו-Anthropic.</li>
+    <li><strong>xlsx@0.18.5:</strong> משטח מוגבל (ייצוא בעיקר); המלצה למעבר ל-exceljs.</li>
+    <li><strong>Thumbnails ב-DB:</strong> ≤256px (טקסט לא קריא), מוגן RLS + הצפנת-דיסק.</li>
+    <li><strong>קבלות ישן (base64):</strong> מומלץ backfill מבוקר אחרי גיבוי.</li>
+    <li><strong>Session ב-localStorage:</strong> ממותן ע"י CSP.</li>
+  </ol>
+
+  <h2>8. מפת דרכים</h2>
+  <ul>
+    <li>השלמת/תיעוד DPA מול Google ו-Anthropic; מזעור PII בצ'אט.</li>
+    <li>Backfill מבוקר של תמונות ישנות ל-Storage.</li>
+    <li>החלפת xlsx ב-exceljs או ולידציית ייבוא.</li>
+    <li>הרחבת MFA כאופציה לכלל הלקוחות.</li>
+    <li>דף offline ל-Service Worker (A.8.14).</li>
+    <li>בדיקות חדירה תקופתיות ובדיקת בידוד דיירים אוטומטית.</li>
+  </ul>
+
+  <h2>9. נספח — פעולות הגדרה ידניות</h2>
+  <table>
+    <thead><tr><th>#</th><th>פעולה</th><th>היכן</th><th>סטטוס</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>הרצת <code>supabase_hardening_27001.sql</code></td><td>Supabase SQL Editor</td><td><span class="badge b-warn">לביצוע (אחרי גיבוי)</span></td></tr>
+      <tr><td>2</td><td>הרצת <code>supabase_audit.sql</code></td><td>Supabase SQL Editor</td><td><span class="badge b-warn">לביצוע</span></td></tr>
+      <tr><td>3</td><td>יצירת KV וקישור כ-<code>RATE_LIMIT</code></td><td>Cloudflare Pages</td><td><span class="badge b-warn">לביצוע</span></td></tr>
+      <tr><td>4</td><td>הגדרת <code>SUPERADMIN_EMAIL</code></td><td>Cloudflare · Env</td><td><span class="badge b-warn">לביצוע</span></td></tr>
+      <tr><td>5</td><td>הפעלת MFA (TOTP)</td><td>Supabase · Authentication</td><td><span class="badge b-warn">לביצוע</span></td></tr>
+    </tbody>
+  </table>
+  <div class="strong-box">כל הבקרות תוכננו לנפילה חיננית: המערכת ממשיכה לתפקד גם לפני ביצוע הפעולות הידניות
+  (rate-limit ב-fail-open, audit ב-best-effort, hardening עם guards). ביצוע הפעולות מפעיל את ההגנה במלואה.</div>
+
+  <div class="foot">הופק אוטומטית כחלק מתהליך ISO/IEC 27001:2022 · משקף את מצב המערכת בגרסה 1.73.0 · 3 ביולי 2026 · סיווג: פנימי/חסוי.</div>
+</div>
+</body>
+</html>
