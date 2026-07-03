@@ -59,7 +59,7 @@
     <h1>דוח אבטחת מידע — ISO/IEC 27001:2022</h1>
     <div class="sub">אפליקציית Moses Caffee · מערכת ניהול קבלות</div>
     <div class="meta">
-      <div><b>1.73.2</b>גרסת מערכת</div>
+      <div><b>1.74.0</b>גרסת מערכת</div>
       <div><b>3 ביולי 2026</b>תאריך הדוח</div>
       <div><b>✅ פעיל ומאומת</b>מצב</div>
       <div><b>פנימי / חסוי</b>סיווג</div>
@@ -118,7 +118,7 @@
       <tr><td>2</td><td>היעדר audit trail</td><td><span class="badge b-hi">גבוה</span></td><td>A.8.15/16</td><td><span class="badge b-ok">נסגר · S1.2</span></td></tr>
       <tr><td>3</td><td>היעדר הגבלת קצב על נתיבי AI</td><td><span class="badge b-warn">בינוני</span></td><td>A.8.12</td><td><span class="badge b-ok">נסגר · S1.3</span></td></tr>
       <tr><td>4</td><td>תמונות קבלות base64 ב-DB</td><td><span class="badge b-warn">בינוני</span></td><td>A.8.24</td><td><span class="badge b-ok">הודק · S1.4</span></td></tr>
-      <tr><td>5</td><td><code>xlsx@0.18.5</code> — CVEs ידועות</td><td><span class="badge b-warn">בינוני</span></td><td>A.8.8/19</td><td><span class="badge b-warn">מנוהל</span></td></tr>
+      <tr><td>5</td><td><code>xlsx@0.18.5</code> — CVEs ידועות</td><td><span class="badge b-warn">בינוני</span></td><td>A.8.8/19</td><td><span class="badge b-ok">נסגר · v1.74.0 (הוסרה)</span></td></tr>
       <tr><td>6</td><td>היעדר MFA לבעלים</td><td><span class="badge b-warn">בינוני</span></td><td>A.5.17</td><td><span class="badge b-ok">נסגר · S1.5</span></td></tr>
       <tr><td>7</td><td>PII (נושאי מייל) בלוגים</td><td><span class="badge b-warn">בינוני-נמוך</span></td><td>A.8.15</td><td><span class="badge b-ok">נסגר · S1.1</span></td></tr>
       <tr><td>8</td><td>חשיפת שגיאות upstream ללקוח</td><td><span class="badge b-ok">נמוך</span></td><td>A.8.28</td><td><span class="badge b-ok">נסגר · S1.1</span></td></tr>
@@ -133,7 +133,7 @@
   CSP חזק (ללא unsafe-eval/inline-script) + HSTS preload + X-Frame-Options DENY · sourcemaps כבויים + הסרת
   console · מחיקת GDPR · דפי משפט + גילוי סב-מעבדים · אין סודות במאגר.</div>
 
-  <h2>5. בקרות שיושמו (v1.73.2 — פרוסות ומאומתות)</h2>
+  <h2>5. בקרות שיושמו (v1.74.0 — פרוסות ומאומתות)</h2>
   <div class="ctrl"><h3>S1.1 — חיזוק בסיסי (Hygiene)</h3><div class="anx">A.8.24 · A.5.18 · A.8.28 · A.8.15 · A.8.3 · A.8.2</div>
     <p>השוואה קבועת-זמן ל-CRON_SECRET; <code>SUPERADMIN_EMAIL</code> כמשתנה סביבה; סניטציית שגיאות (פרטים בשרת
     בלבד); הסתרת נושאי מייל מהלוגים; <code>supabase_hardening_27001.sql</code> (org_id ל-suppliers, NOT NULL
@@ -151,6 +151,12 @@
   <div class="ctrl"><h3>S1.5 — אימות דו-שלבי (TOTP) לבעלים</h3><div class="anx">A.5.17 · A.8.5</div>
     <p>הרשמת TOTP בהגדרות (QR+אימות); שכבת step-up חוסמת (אינרטית ללא factor); אכיפת שרת — onboard דוחה
     <code>mfa_required</code> ב-AAL1 כשקיים factor מאומת.</p></div>
+
+  <div class="ctrl" style="border-right-color:var(--brand)"><h3>S1.6 — סבב חיזוק לפי סקירת מנהל IT (v1.74.0)</h3><div class="anx">A.8.8 · A.8.28 · A.8.16</div>
+    <p><strong>הסרת <code>xlsx@0.18.5</code></strong> — dependency בלתי-מנוצל (בשימוש רק <code>xlsx-js-style</code>, לכתיבה/ייצוא בלבד);
+    הוסרה, ואומת ב-<code>npm audit</code> שה-CVEs נעלמו. <strong>עטיפת שגיאות אחידה + Correlation ID</strong> (<code>errorResponse</code>) על כל
+    נתיבי ה-AI — פרטים בשרת בלבד, ללקוח קוד+הודעה גנרית+מזהה; תוקנה דליפת <code>detail</code> ב-recategorize. <strong>אימות שרשרת</strong> —
+    <code>verify_audit_chain()</code> מחשב מחדש את כל ה-SHA-256 (לא רק רציפות). <strong>SQLi</strong> — סינון מזהי Gmail לפני שאילתת <code>in.()</code>.</p></div>
 
   <h2>6. הצהרת ישימות (SoA) — תמצית</h2>
   <table>
@@ -186,7 +192,7 @@
   <h3>סיכונים שאריתיים (מקובלים / בניהול)</h3>
   <ol>
     <li><strong>יציאת נתונים לספקי AI:</strong> מגולה במדיניות הפרטיות; יש להשלים תיעוד DPA מול Google ו-Anthropic.</li>
-    <li><strong>xlsx@0.18.5:</strong> משטח מוגבל (ייצוא בעיקר); המלצה למעבר ל-exceljs.</li>
+    <li><strong>תלויות פיתוח (wrangler→esbuild/undici/ws):</strong> 5 חולשות ב-npm audit — כולן dev/deploy-only, לא ב-runtime הפרודקשן. <em>(xlsx — נסגר ב-v1.74.0.)</em></li>
     <li><strong>Thumbnails ב-DB:</strong> ≤256px (טקסט לא קריא), מוגן RLS + הצפנת-דיסק.</li>
     <li><strong>קבלות ישן (base64):</strong> מומלץ backfill מבוקר אחרי גיבוי.</li>
     <li><strong>Session ב-localStorage:</strong> ממותן ע"י CSP.</li>
@@ -196,7 +202,7 @@
   <ul>
     <li>השלמת/תיעוד DPA מול Google ו-Anthropic; מזעור PII בצ'אט.</li>
     <li>Backfill מבוקר של תמונות ישנות ל-Storage.</li>
-    <li>החלפת xlsx ב-exceljs או ולידציית ייבוא.</li>
+    <li>עדכון תקופתי של wrangler (חולשות dev-only בלבד).</li>
     <li>הרחבת MFA כאופציה לכלל הלקוחות.</li>
     <li>דף offline ל-Service Worker (A.8.14).</li>
     <li>בדיקות חדירה תקופתיות ובדיקת בידוד דיירים אוטומטית.</li>
@@ -212,6 +218,7 @@
       <tr><td>3</td><td>חיבור KV כ-<code>RATE_LIMIT</code></td><td><code>wrangler.toml</code> (IaC)</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
       <tr><td>4</td><td>הגדרת <code>SUPERADMIN_EMAIL</code></td><td><code>wrangler.toml</code> (IaC)</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
       <tr><td>5</td><td>הפעלת MFA (TOTP) + הרשמת הבעלים</td><td>Supabase · Auth + אפליקציה</td><td><span class="badge b-ok">✅ בוצע</span></td></tr>
+      <tr><td>6</td><td>הרצה-מחדש של <code>supabase_audit.sql</code> (ל-<code>verify_audit_chain()</code>)</td><td>Supabase SQL Editor</td><td><span class="badge b-warn">⏳ לביצוע (חד-פעמי)</span></td></tr>
     </tbody>
   </table>
   <p><strong>הערת יישום (A.8.9):</strong> חיבור ה-KV ומשתנה <code>SUPERADMIN_EMAIL</code> הוגדרו כ<strong>תצורה-כקוד</strong>
@@ -233,7 +240,7 @@
   בסריקה; נוסף רענון-טוקן אוטומטי + ניסיון-חוזר כך שהמצב מתקן את עצמו ללא כניסה מחדש. כל הבקרות בנויות לנפילה חיננית,
   ולכן המערכת תפקדה ברציפות לאורך כל ההפעלה.</div>
 
-  <div class="foot">הופק אוטומטית כחלק מתהליך ISO/IEC 27001:2022 · משקף את מצב המערכת בגרסה 1.73.2 (לאחר יישום, הפעלה ואימות חי) · 3 ביולי 2026 · סיווג: פנימי/חסוי.</div>
+  <div class="foot">הופק אוטומטית כחלק מתהליך ISO/IEC 27001:2022 · משקף את מצב המערכת בגרסה 1.74.0 (לאחר יישום, הפעלה, אימות חי וסבב חיזוק לפי סקירת מנהל IT) · 3 ביולי 2026 · סיווג: פנימי/חסוי.</div>
 </div>
 </body>
 </html>
