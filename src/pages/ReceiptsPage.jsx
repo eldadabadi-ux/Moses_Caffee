@@ -803,11 +803,23 @@ export default function ReceiptsPage() {
         // Downscale each page before upload so large phone photos don't time out
         const uploads = await Promise.all(pages.map(p => downscaleForUpload(p)))
         const imagesBase64 = uploads.map(u => u.split(',')[1])
-        const res = await fetch('/api/scan-receipt', {
+        const doScan = (tok) => fetch('/api/scan-receipt', {
           method: 'POST', signal: controller.signal,
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tok}` },
           body: JSON.stringify({ imagesBase64, mimeType: 'image/jpeg', vatRate }),
-        }).finally(() => clearTimeout(fetchTimer))
+        })
+        let res
+        try {
+          res = await doScan(session.access_token)
+          // The access token can be rotated out from under an open tab (e.g. right
+          // after enabling 2FA), leaving a stale in-memory token → 401. Refresh the
+          // session once and retry before falling back to local OCR.
+          if (res.status === 401) {
+            const { data: refreshed } = await supabase.auth.refreshSession()
+            const t2 = refreshed?.session?.access_token
+            if (t2) res = await doScan(t2)
+          }
+        } finally { clearTimeout(fetchTimer) }
         if (res.ok) {
           result = await res.json()
           source = result._model ? `AI: ${result._model}${multi ? ` · ${pages.length} עמ׳` : ''}` : 'AI'
