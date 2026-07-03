@@ -12,6 +12,7 @@
 
 import { requireMember, wrapAuthErrors } from './_lib/auth.js'
 import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
+import { errorResponse } from './_lib/response.js'
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS   = 2048
@@ -235,12 +236,12 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   if (!rl.allowed) return rateLimitedResponse(rl.retryAfter, CORS)
 
   if (!ANTHROPIC_API_KEY) {
-    return Response.json({ error: 'הבוט אינו מוגדר עדיין (חסר ANTHROPIC_API_KEY בשרת).' }, { status: 500, headers: CORS })
+    return errorResponse('העוזר החכם אינו מוגדר בשרת', 500, { code: 'server_config', headers: CORS })
   }
 
   let body
   try { body = await context.request.json() }
-  catch { return Response.json({ error: 'Invalid JSON body' }, { status: 400, headers: CORS }) }
+  catch { return errorResponse('גוף הבקשה אינו תקין', 400, { code: 'bad_json', headers: CORS }) }
   const { messages = [], context: ctx = {} } = body ?? {}
 
   // ── Load the user's data (service role, filtered by user_id) ───────────────
@@ -317,9 +318,9 @@ ${dataBlock}`
     })
     if (!res.ok) {
       const err = await res.text()
-      // Full upstream error logged server-side only (A.8.28) — client gets a generic message.
-      console.error('[chat] Anthropic error:', res.status, err.slice(0, 300))
-      return Response.json({ error: 'ai_failed', message: 'בקשת ה-AI נכשלה — נסה שוב' }, { status: 502, headers: CORS })
+      // Full upstream error logged server-side with a correlation id (A.8.28);
+      // client gets a generic message + that id only.
+      return errorResponse('בקשת ה-AI נכשלה — נסה שוב', 502, { code: 'ai_failed', err: new Error(`Anthropic ${res.status}: ${err.slice(0, 300)}`), headers: CORS })
     }
     const data = await res.json()
     // Cache visibility: cache_read_input_tokens > 0 from the 2nd message onward
@@ -328,7 +329,6 @@ ${dataBlock}`
     const reply = data?.content?.[0]?.text || ''
     return Response.json({ reply }, { headers: CORS })
   } catch (err) {
-    console.error('[chat] Fatal:', err?.message)
-    return Response.json({ error: 'processing_error', message: 'שגיאת עיבוד' }, { status: 500, headers: CORS })
+    return errorResponse('שגיאת עיבוד', 500, { code: 'processing_error', err, headers: CORS })
   }
 })

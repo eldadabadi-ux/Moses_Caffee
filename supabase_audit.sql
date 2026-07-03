@@ -66,6 +66,45 @@ CREATE POLICY read_org_audit ON audit_log
 -- append-only from the app's perspective (service-role can still insert).
 REVOKE UPDATE, DELETE ON audit_log FROM authenticated, anon;
 
+-- ── Integrity verifier: recompute the whole SHA-256 chain ───────────────────
+-- Returns ok=false + the first offending row id if ANY row's content was edited
+-- or a link broken. Recomputes with the exact same formula as the trigger, using
+-- Postgres' own jsonb::text so serialisation matches byte-for-byte (a JS recompute
+-- can't guarantee that). Server-side only (called via service-role RPC).
+CREATE OR REPLACE FUNCTION verify_audit_chain()
+RETURNS TABLE(ok boolean, broken_id bigint, checked bigint)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  r      audit_log%ROWTYPE;
+  prev   text := '';
+  expect text;
+  n      bigint := 0;
+BEGIN
+  FOR r IN SELECT * FROM audit_log ORDER BY id ASC LOOP
+    n := n + 1;
+    -- 1) linkage: prev_hash must equal the previous row's row_hash
+    IF coalesce(r.prev_hash, '') <> prev THEN
+      ok := false; broken_id := r.id; checked := n; RETURN NEXT; RETURN;
+    END IF;
+    -- 2) content: recompute this row's hash and compare
+    expect := encode(digest(
+      coalesce(r.prev_hash,'') || coalesce(r.action,'') || coalesce(r.target,'') ||
+      coalesce(r.meta::text,'') || coalesce(r.user_id::text,'') ||
+      coalesce(r.org_id::text,'') || r.created_at::text, 'sha256'), 'hex');
+    IF r.row_hash IS DISTINCT FROM expect THEN
+      ok := false; broken_id := r.id; checked := n; RETURN NEXT; RETURN;
+    END IF;
+    prev := r.row_hash;
+  END LOOP;
+  ok := true; broken_id := NULL; checked := n; RETURN NEXT;
+END $$;
+
+REVOKE ALL   ON FUNCTION verify_audit_chain() FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION verify_audit_chain() TO service_role;
+
 -- Verify chain continuity (should return 0 broken links):
 --   SELECT count(*) FROM (
 --     SELECT row_hash, LAG(row_hash) OVER (ORDER BY id) AS prev_actual, prev_hash

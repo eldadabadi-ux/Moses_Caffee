@@ -49,7 +49,9 @@ export async function scanGmail(conn, env, { vatRate = 18 } = {}) {
   const lastMs = Number(conn.last_internal_date) || 0
   const q = lastMs > 0 ? `${RECEIPT_QUERY} after:${Math.floor(lastMs / 1000)}` : `${RECEIPT_QUERY} newer_than:30d`
   const list = await gget(`/messages?q=${encodeURIComponent(q)}&maxResults=${MAX_LIST}`, token)
-  const ids = (list.messages || []).map(m => m.id)
+  // Defensive: keep only well-formed Gmail ids (alphanumeric) before they ever
+  // reach a PostgREST in-list — no interpolation of unvalidated provider input.
+  const ids = (list.messages || []).map(m => m.id).filter(id => /^[A-Za-z0-9_-]+$/.test(id || ''))
   if (!ids.length) {
     await db.patch('mail_connections', `id=eq.${conn.id}`, { last_scan_at: new Date().toISOString(), status: 'active', last_error: null })
     return { imported: 0, scanned: 0, more: false, lastInternalDate: lastMs }

@@ -12,6 +12,7 @@
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
 import { extractReceipt } from './_lib/extractReceipt.js'
 import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
+import { errorResponse } from './_lib/response.js'
 
 function corsHeaders(request, env) {
   const origin  = (request.headers.get('origin') || '').trim()
@@ -41,12 +42,12 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   if (!rl.allowed) return rateLimitedResponse(rl.retryAfter, CORS)
 
   if (!context.env.GEMINI_API_KEY) {
-    return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500, headers: CORS })
+    return errorResponse('שירות הסריקה אינו מוגדר בשרת', 500, { code: 'server_config', headers: CORS })
   }
 
   let body
   try { body = await context.request.json() } catch {
-    return Response.json({ error: 'Invalid JSON body' }, { status: 400, headers: CORS })
+    return errorResponse('גוף הבקשה אינו תקין', 400, { code: 'bad_json', headers: CORS })
   }
 
   const { imageBase64, imagesBase64, mimeType } = body ?? {}
@@ -55,7 +56,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     ? imagesBase64.filter(Boolean)
     : (imageBase64 ? [imageBase64] : [])
   if (!images.length || !mimeType) {
-    return Response.json({ error: 'Missing required fields: imageBase64/imagesBase64, mimeType' }, { status: 400, headers: CORS })
+    return errorResponse('חסרים שדות חובה בבקשה', 400, { code: 'bad_input', headers: CORS })
   }
 
   const vatRate = Number(body?.vatRate) > 0 ? Number(body.vatRate) : 18
@@ -64,15 +65,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     const result = await extractReceipt({ images, mimeType, env: context.env, userId: user.user_id, vatRate })
     return Response.json(result, { headers: CORS })
   } catch (err) {
-    // Log the full upstream detail server-side only; never leak it to the client
-    // (A.8.28 information disclosure) — the browser gets a stable code + message.
-    console.error('[scan-receipt] error:', err?.code || '', err?.message || '', err?.detail || '')
-    if (err?.code === 'AI_FAILED') {
-      return Response.json({ error: 'ai_failed', message: 'עיבוד ה-AI נכשל — נסה שוב' }, { status: 502, headers: CORS })
-    }
-    if (err?.code === 'BAD_INPUT') {
-      return Response.json({ error: 'bad_input', message: 'הקלט אינו תקין' }, { status: 400, headers: CORS })
-    }
-    return Response.json({ error: 'processing_error', message: 'שגיאת עיבוד' }, { status: 500, headers: CORS })
+    // Full upstream detail is logged server-side with a correlation id (A.8.28);
+    // the browser gets a stable code + generic message + that id only.
+    if (err?.code === 'AI_FAILED') return errorResponse('עיבוד ה-AI נכשל — נסה שוב', 502, { code: 'ai_failed', err, headers: CORS })
+    if (err?.code === 'BAD_INPUT') return errorResponse('הקלט אינו תקין', 400, { code: 'bad_input', err, headers: CORS })
+    return errorResponse('שגיאת עיבוד', 500, { code: 'processing_error', err, headers: CORS })
   }
 })

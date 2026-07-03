@@ -25,7 +25,9 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
   try {
     conns = await fetch(`${url}/rest/v1/mail_connections?user_id=eq.${user.user_id}&select=*`, { headers: h }).then(r => r.ok ? r.json() : [])
   } catch (e) {
-    return Response.json({ ok: false, imported: 0, more: false, error: `db: ${(e?.message || e)}`.slice(0, 200) })
+    // Raw DB/network detail logged server-side only; client gets a generic message (A.8.28).
+    console.error('[mail/scan] connections fetch failed:', e?.message || e)
+    return Response.json({ ok: false, imported: 0, more: false, error: 'שגיאת מערכת — נסה שוב מאוחר יותר' })
   }
   if (!conns.length) return Response.json({ error: 'no_connection', message: 'אין תיבת מייל מחוברת' }, { status: 400 })
 
@@ -45,11 +47,16 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
       if (r.more) more = true
     } catch (err) {
       errors++
-      lastError = (err?.message || String(err)).slice(0, 200)
+      const raw = (err?.message || String(err))
+      // Log the raw detail server-side; surface only a safe message to the client.
+      // Keep our own user-facing quota/OCR notice (safe + useful); genericize the
+      // rest so no upstream/DB text leaks (A.8.28).
+      console.error('[mail/scan] connection error:', raw)
+      lastError = /מכסה|quota|OCR|Gemini/i.test(raw) ? raw.slice(0, 160) : 'שגיאה בסריקת המייל — נסה שוב מאוחר יותר'
       // Best-effort status update — must not itself crash the request (a failing
       // PATCH here, e.g. when already at the subrequest limit, previously 500'd).
       try {
-        await fetch(`${url}/rest/v1/mail_connections?id=eq.${conn.id}`, { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: err?.code === 'AUTH' ? 'error' : conn.status, last_error: lastError }) })
+        await fetch(`${url}/rest/v1/mail_connections?id=eq.${conn.id}`, { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: err?.code === 'AUTH' ? 'error' : conn.status, last_error: raw.slice(0, 200) }) })
       } catch {}
     }
   }

@@ -25,7 +25,7 @@ export async function recategorizeAll() {
   })
   if (!res.ok) {
     const e = await res.json().catch(() => ({}))
-    throw new Error(e.detail || e.error || `שגיאה ${res.status}`)
+    throw new Error(e.message || e.error || `שגיאה ${res.status}`)
   }
   const { results } = await res.json()
   if (!Array.isArray(results)) return { changed: 0, total: receipts.length }

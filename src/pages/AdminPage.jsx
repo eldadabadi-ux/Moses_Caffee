@@ -145,7 +145,7 @@ export default function AdminPage() {
           {audit && audit.migrated && (
             audit.chainOk
               ? <span title="שרשרת ה-hash רציפה — לא זוהה שינוי" style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700, color:'var(--ok)', background:'var(--success-tint-1)', border:'1px solid var(--success-tint-border)', borderRadius:6, padding:'2px 8px' }}><ShieldCheck size={13} /> שרשרת תקינה</span>
-              : <span title="נמצא שבר בשרשרת — ייתכן שינוי/מחיקה" style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700, color:'var(--danger)', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:6, padding:'2px 8px' }}><ShieldAlert size={13} /> שבר בשרשרת!</span>
+              : <span title="חישוב-מחדש של ה-SHA-256 מצא אי-התאמה — ייתכן שינוי/מחיקה" style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, fontWeight:700, color:'var(--danger)', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:6, padding:'2px 8px' }}><ShieldAlert size={13} /> שבר בשרשרת{audit.brokenId ? ` (#${audit.brokenId})` : ''}!</span>
           )}
           <button onClick={loadAudit} disabled={auditBusy} title="רענן" style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:5, padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-mute)', fontSize:13, cursor: auditBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
             <RefreshCw size={13} style={{ animation: auditBusy ? 'spin 1s linear infinite' : 'none' }} /> רענן

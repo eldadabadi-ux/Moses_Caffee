@@ -31,14 +31,27 @@ export const onRequestGet = wrapAuthErrors(async ({ request, env }) => {
   }
   const rows = await res.json()
 
-  // Integrity check over the returned window: each row's prev_hash must equal
-  // the previous (older) row's row_hash. A deleted/reordered/edited row breaks
-  // the link. (UPDATE/DELETE are revoked from client roles, so only a DB-level
-  // compromise could tamper — this surfaces it.)
-  const asc = [...rows].reverse()
-  let chainOk = true
-  for (let i = 1; i < asc.length; i++) {
-    if (asc[i].prev_hash !== asc[i - 1].row_hash) { chainOk = false; break }
+  // Authoritative integrity check: recompute the ENTIRE SHA-256 chain in Postgres
+  // (verify_audit_chain RPC) — catches edited content, not just broken links.
+  // Falls back to a client-side linkage check over the window if the function
+  // isn't installed yet.
+  let chainOk = true, brokenId = null
+  try {
+    const vr = await fetch(`${url}/rest/v1/rpc/verify_audit_chain`, {
+      method: 'POST', headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: '{}',
+    })
+    if (vr.ok) {
+      const out = await vr.json()
+      const row = Array.isArray(out) ? out[0] : out
+      chainOk = !!row?.ok
+      brokenId = row?.broken_id ?? null
+    } else {
+      const asc = [...rows].reverse()
+      for (let i = 1; i < asc.length; i++) if (asc[i].prev_hash !== asc[i - 1].row_hash) { chainOk = false; break }
+    }
+  } catch {
+    const asc = [...rows].reverse()
+    for (let i = 1; i < asc.length; i++) if (asc[i].prev_hash !== asc[i - 1].row_hash) { chainOk = false; break }
   }
-  return json({ entries: rows, chainOk, migrated: true })
+  return json({ entries: rows, chainOk, brokenId, migrated: true })
 })

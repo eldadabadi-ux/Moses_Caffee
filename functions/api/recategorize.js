@@ -14,6 +14,7 @@
 import { requireUser, wrapAuthErrors } from './_lib/auth.js'
 import { classifyReceipt } from './_lib/classifyReceipt.js'
 import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
+import { errorResponse } from './_lib/response.js'
 
 const GEMINI_PRIMARY  = 'gemini-2.5-flash'
 const GEMINI_FALLBACK = 'gemini-flash-latest'
@@ -39,7 +40,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   const CORS = corsHeaders(context.request, context.env)
   const { GEMINI_API_KEY, SUPABASE_SERVICE_ROLE_KEY } = context.env
   const SUPABASE_URL = getSupabaseUrl(context.env)
-  if (!GEMINI_API_KEY) return Response.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500, headers: CORS })
+  if (!GEMINI_API_KEY) return errorResponse('שירות הסיווג אינו מוגדר בשרת', 500, { code: 'server_config', headers: CORS })
 
   // Throttle Gemini re-classification per user (A.8.12) — fail-open if KV unbound.
   const rl = await checkRateLimit(context.env, `${user.user_id}:recat`, { limit: 10, windowSec: 60 })
@@ -146,7 +147,9 @@ ${JSON.stringify(compact, null, 1)}
     try { out = await callGemini(GEMINI_API_KEY, model, prompt, schema); if (out?.results) break }
     catch (e) { lastErr = e; console.warn(`[recategorize] ${model}:`, e?.message) }
   }
-  if (!out) return Response.json({ error: 'AI failed', detail: lastErr?.message }, { status: 502, headers: CORS })
+  // Full upstream detail is logged server-side with a correlation id; the client
+  // gets a generic message only (A.8.28 — no upstream error leakage).
+  if (!out) return errorResponse('סיווג ה-AI נכשל — נסה שוב מאוחר יותר', 502, { code: 'ai_failed', err: lastErr, headers: CORS })
 
   // ── Deterministic safety net ────────────────────────────────────────────────
   // Force fuel/transport receipts to "תחבורה ודלק" + a real sub-category (חניון /

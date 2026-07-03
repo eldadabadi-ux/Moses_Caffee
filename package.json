@@ -1,7 +1,7 @@
 {
   "name": "moses-caffee",
   "private": true,
-  "version": "1.73.2",
+  "version": "1.74.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,7 +21,6 @@
     "react-hot-toast": "^2.6.0",
     "react-router-dom": "^7.13.2",
     "tesseract.js": "^7.0.0",
-    "xlsx": "^0.18.5",
     "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
