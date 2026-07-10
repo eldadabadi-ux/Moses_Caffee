@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "node --test tests/security/rls.pentest.test.js",
+    "test:security": "node --test tests/security/rls.pentest.test.js",
     "deploy": "npm run build && wrangler pages deploy dist --project-name moses-caffee --branch=master --commit-dirty=true",
     "deploy:manual": "npm run build && wrangler pages deploy dist --project-name moses-caffee --branch=master --commit-dirty=true"
   },
