@@ -523,6 +523,10 @@ export default function ReceiptsPage() {
   const [reviewFx, setReviewFx]         = useState(null)      // { rate, date, source, currency } for foreign receipts
   const [reviewPages, setReviewPages]   = useState([])        // all page images of a multi-page receipt
   const [scanSource, setScanSource]     = useState('')        // diagnostic: which engine produced the data
+  // Canonical-supplier resolution for the scanned vendor (audit R1 / request #3).
+  // { outcome:'linked'|'ask'|'created'|'skipped', supplier_id, supplier_name, suggestion }
+  const [scanSupplier, setScanSupplier] = useState(null)
+  const [supplierBusy, setSupplierBusy] = useState(false)
   const [reviewCategory, setReviewCategory] = useState('שונות')
   const [reviewImage, setReviewImage]   = useState(null)
   const [approving, setApproving]       = useState(false)
@@ -895,6 +899,7 @@ export default function ReceiptsPage() {
       setReviewDocNumber(result.doc_number || '')
       setReviewDocRefs(Array.isArray(result.doc_refs) ? result.doc_refs : [])
       setReviewCurrency(result.currency || 'ILS')
+      setScanSupplier(result.supplier || null)   // canonical supplier match / question
       setReviewFx(result.fx || null)   // foreign-currency receipts: { rate, date, source, currency }
       setReviewPages(pages)
       setReviewImage(pages[0])
@@ -1021,6 +1026,7 @@ export default function ReceiptsPage() {
 
       const base = {
         user_id: user.id, vendor_name: reviewVendor,
+        supplier_id: scanSupplier?.supplier_id || null,
         receipt_date: reviewDate || new Date().toISOString().slice(0, 10),
         amount: totalAmt, currency: 'ILS',
         category_id, category_text: normalizeCategoryName(reviewCategory) || 'שונות',
@@ -1043,14 +1049,9 @@ export default function ReceiptsPage() {
       }
       const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
       const docCols = { doc_type: reviewDocType, doc_number: reviewDocNumber || null }
-      let { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols })
-      // Graceful fallbacks while a migration hasn't run yet — ai_summary keeps the values
-      if (error && /doc_type|doc_number/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols }))
-      }
-      if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null }))
-      }
+      // The migration is authoritative — these columns exist. The retry ladder
+      // that used to sit here hid real write failures (guardrail 1, audit M1).
+      const { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols })
       if (error) throw error
       if (reviewDocType === 'summary_invoice') {
         window.dispatchEvent(new Event('reconcile-changed'))
@@ -1069,11 +1070,37 @@ export default function ReceiptsPage() {
       }
       setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
       setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null)
-      setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([])
+      setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([]); setScanSupplier(null)
       loadData()
     } catch (err) {
       toast.error('שגיאה בשמירה: ' + (err?.message || ''))
     } finally { setApproving(false) }
+  }
+
+  /**
+   * Answer "is this the same supplier?" (client request #3).
+   * `supplierId` = link this spelling to that supplier; null = it's a new one.
+   * The answer is stored server-side as an alias, so it is asked only once.
+   */
+  async function answerSupplier(supplierId) {
+    const scanned = (reviewVendor || scanSupplier?.suggestion?.scanned || '').trim()
+    if (!scanned) return
+    setSupplierBusy(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/suppliers/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify(supplierId ? { scanned, supplier_id: supplierId } : { scanned, new_name: scanned }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.message || 'שמירת הספק נכשלה')
+      const r = await res.json()
+      setScanSupplier({ outcome: 'linked', supplier_id: r.supplier_id, supplier_name: r.supplier_name, suggestion: null })
+      if (supplierId) setReviewVendor(r.supplier_name)   // adopt the canonical spelling
+      toast.success(supplierId ? `שויך ל${r.supplier_name}` : 'נוצר ספק חדש')
+    } catch (e) {
+      toast.error(e.message || 'שגיאה')
+    } finally { setSupplierBusy(false) }
   }
 
   // ── Manual CRUD ───────────────────────────────────────────────────────────────
@@ -1124,27 +1151,14 @@ export default function ReceiptsPage() {
       const prevRow = receipts.find(r => r.id === editId)
       // Editing a pending (email-imported) receipt also APPROVES it → status 'ready'.
       const approve = prevRow?.status === 'pending' ? { status: 'ready' } : {}
-      // Pre-migration fallback keeps the classification in the ai_summary mirror.
-      const aiMirror = { ai_summary: { ...(prevRow?.ai_summary || {}), doc_type: docType } }
-      let { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, doc_type: docType, ...approve }).eq('id', editId)
-      if (error && /doc_type/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').update({ ...payload, ...vatCols, ...aiMirror, ...approve }).eq('id', editId))
-      }
-      if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').update({ ...payload, ...aiMirror, ...approve }).eq('id', editId))
-      }
-      if (error) { toast.error('שגיאה בעדכון'); return }
+      // The migration is authoritative — no retry ladder (guardrail 1, audit M1).
+      const { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, doc_type: docType, ...approve }).eq('id', editId)
+      if (error) { toast.error('שגיאה בעדכון: ' + (error.message || '')); return }
       toast.success(approve.status ? 'הקבלה אושרה ונשמרה' : 'קבלה עודכנה')
       setReceipts(prev => { const next = prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols, doc_type: docType, ...approve } : r); setCached('receipts', next); return next })
     } else {
-      let resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, doc_type: docType }).select().single()
-      if (resp.error && /doc_type/.test(resp.error.message || '')) {
-        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, ai_summary: { doc_type: docType } }).select().single()
-      }
-      if (resp.error && /amount_before_vat|vat_amount|vat_rate/.test(resp.error.message || '')) {
-        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ai_summary: { doc_type: docType } }).select().single()
-      }
-      if (resp.error) { toast.error('שגיאה בשמירה'); return }
+      const resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, doc_type: docType }).select().single()
+      if (resp.error) { toast.error('שגיאה בשמירה: ' + (resp.error.message || '')); return }
       toast.success('קבלה נשמרה')
       setReceipts(prev => [resp.data, ...prev])
     }
@@ -1778,6 +1792,36 @@ export default function ReceiptsPage() {
               <div>
                 <label style={LS}>ספק</label>
                 <input value={reviewVendor} onChange={e => setReviewVendor(e.target.value)} style={FS} dir="auto" placeholder="שם בית העסק" />
+
+                {/* Canonical supplier: confirmed link, or the one question we ask */}
+                {scanSupplier?.outcome === 'linked' && scanSupplier.supplier_name && (
+                  <div style={{ display:'flex', alignItems:'center', gap:5, marginTop:6, fontSize:'12.5px', color:'var(--ok)' }}>
+                    <CheckCircle2 size={13} /> שויך לספק: {scanSupplier.supplier_name}
+                  </div>
+                )}
+                {scanSupplier?.outcome === 'ask' && scanSupplier.suggestion?.candidates?.length > 0 && (
+                  <div style={{ marginTop:8, padding:'10px 12px', borderRadius:10, background:'var(--accent-bg)', border:'1px solid var(--accent)' }}>
+                    <div style={{ fontSize:'13px', color:'var(--text)', marginBottom:8, lineHeight:1.5 }}>
+                      נסרק <strong>{scanSupplier.suggestion.scanned}</strong> — האם זה אותו ספק?
+                    </div>
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                      {scanSupplier.suggestion.candidates.map(c => (
+                        <button key={c.id} onClick={() => answerSupplier(c.id)} disabled={supplierBusy}
+                          title={`התאמה ${Math.round(c.score * 100)}%`}
+                          style={{ padding:'6px 12px', borderRadius:999, border:'1px solid var(--accent)', background:'var(--panel)', color:'var(--accent)', fontSize:'13px', fontWeight:600, cursor: supplierBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
+                          כן — {c.name}
+                        </button>
+                      ))}
+                      <button onClick={() => answerSupplier(null)} disabled={supplierBusy}
+                        style={{ padding:'6px 12px', borderRadius:999, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-mute)', fontSize:'13px', fontWeight:600, cursor: supplierBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
+                        לא — ספק חדש
+                      </button>
+                    </div>
+                    <div style={{ fontSize:'11.5px', color:'var(--text-mute)', marginTop:7 }}>
+                      התשובה נשמרת — לא נשאל שוב על האיות הזה.
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label style={LS}>תאריך</label>
