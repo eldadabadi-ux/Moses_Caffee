@@ -23,7 +23,6 @@ import { existsSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
 
 const YES = process.argv.includes('--yes')
-const BRANCH = 'feat/phase0-c1-and-quickfixes'
 const MAIN = 'master'
 
 const c = { g: (s) => `\x1b[32m${s}\x1b[0m`, r: (s) => `\x1b[31m${s}\x1b[0m`,
@@ -65,14 +64,19 @@ console.log('\n' + c.b('Moses Caffee - release') + '\n')
 // ── 1. preconditions ─────────────────────────────────────────────────────────
 if (sh('git status --porcelain')) die('Working tree has uncommitted changes. Commit or stash them first.')
 
-const current = sh('git rev-parse --abbrev-ref HEAD')
-if (current !== BRANCH) {
-  console.log(c.y(`  You are on "${current}" - switching to "${BRANCH}"`))
-  step('switch branch', `git checkout ${BRANCH}`)
-}
+// Release whatever branch you are standing on. Already on master means there
+// are unpushed commits to send straight out; anything else gets merged first.
+const BRANCH = sh('git rev-parse --abbrev-ref HEAD')
+const onMain = BRANCH === MAIN
 
-const commits = sh(`git log --oneline ${MAIN}..${BRANCH}`).split('\n').filter(Boolean)
-if (!commits.length) die(`Nothing new on ${BRANCH} compared to ${MAIN}.`)
+sh(`git fetch origin ${MAIN}`)
+const range = onMain ? `origin/${MAIN}..${MAIN}` : `${MAIN}..${BRANCH}`
+const commits = sh(`git log --oneline ${range}`).split('\n').filter(Boolean)
+if (!commits.length) {
+  die(onMain
+    ? `Nothing to push - ${MAIN} matches origin/${MAIN}.`
+    : `Nothing new on ${BRANCH} compared to ${MAIN}.`)
+}
 
 // ── 2. checks ────────────────────────────────────────────────────────────────
 console.log(c.b('Checks'))
@@ -88,7 +92,9 @@ step('build             ', 'npm run build')
 
 // ── 3. plan ──────────────────────────────────────────────────────────────────
 console.log('\n' + c.b('What happens next'))
-console.log(`  ${commits.length} commits move from ${c.b(BRANCH)} to ${c.b(MAIN)} and get pushed:`)
+console.log(onMain
+  ? `  ${commits.length} commits on ${c.b(MAIN)} get pushed:`
+  : `  ${commits.length} commits move from ${c.b(BRANCH)} to ${c.b(MAIN)} and get pushed:`)
 for (const l of commits.reverse()) console.log(c.d('    ' + l))
 console.log(`\n  Pushing to ${MAIN} triggers GitHub Actions, which builds and deploys to Cloudflare Pages.`)
 console.log(c.d('  (nothing here talks to Cloudflare directly - no wrangler login needed)'))
@@ -102,10 +108,11 @@ if (!YES) {
 
 // ── 4. merge + push ──────────────────────────────────────────────────────────
 console.log('\n' + c.b('Releasing'))
-step('fetch             ', `git fetch origin ${MAIN}`)
-step(`checkout ${MAIN}   `, `git checkout ${MAIN}`)
-step('sync with origin  ', `git merge --ff-only origin/${MAIN}`)
-step('merge branch      ', `git merge --no-ff ${BRANCH} -m "Merge ${BRANCH}: supplier identity, units, bot tools, events book"`)
+if (!onMain) {
+  step(`checkout ${MAIN}   `, `git checkout ${MAIN}`)
+  step('sync with origin  ', `git merge --ff-only origin/${MAIN}`)
+  step('merge branch      ', `git merge --no-ff ${BRANCH} -m "Merge ${BRANCH}"`)
+}
 step('push              ', `git push origin ${MAIN}`)
 
 const remote = sh('git remote get-url origin')
