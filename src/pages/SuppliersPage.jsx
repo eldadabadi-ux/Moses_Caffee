@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { loadSuppliers, upsertSupplier, deleteSupplier, deriveVendorStats, waLink, telLink, gmailComposeLink } from '../lib/suppliers'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
-import { Store, Phone, Mail, MapPin, Pencil, Plus, Trash2, Package, CalendarDays, MessageCircle } from 'lucide-react'
+import { Store, Phone, Mail, MapPin, Pencil, Plus, Trash2, Package, CalendarDays, MessageCircle, Receipt, Merge } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
@@ -14,6 +15,7 @@ const fmtILS = n => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`
 const fmtDate = d => d ? d.split('-').reverse().join('.') : '—'
 
 export default function SuppliersPage() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { settings } = useSettings()
   const isMobile = window.innerWidth < 768
@@ -30,7 +32,7 @@ export default function SuppliersPage() {
       // doc_type is needed so summary invoices don't double-count supplier spend;
       // pre-migration the column doesn't exist → retry without it.
       let [{ data: recs, error: recsErr }, sup] = await Promise.all([
-        supabase.from('receipts').select('id, vendor_name, receipt_date, amount, category_text, items, archived_at, created_at, doc_type').eq('user_id', user.id),
+        supabase.from('receipts').select('id, vendor_name, supplier_id, receipt_date, amount, category_text, items, archived_at, created_at, doc_type, book').eq('user_id', user.id),
         loadSuppliers(user.id),
       ])
       if (recsErr) {
@@ -62,15 +64,38 @@ export default function SuppliersPage() {
     return () => window.removeEventListener('suppliers-add', onAdd)
   }, [])
 
-  const stats = useMemo(() => deriveVendorStats(receipts), [receipts])
+  // Contacts carry the canonical supplier names, so stats group by supplier_id
+  // rather than by whatever the OCR wrote on each receipt (audit R1).
+  const stats = useMemo(() => deriveVendorStats(receipts, contacts), [receipts, contacts])
+
+  /** Open the receipts list filtered to exactly this supplier (client request #8). */
+  const openReceipts = useCallback((row) => {
+    const p = new URLSearchParams()
+    if (row.stats?.supplierId) p.set('supplier', row.stats.supplierId)
+    p.set('supplierName', row.name)
+    navigate(`/receipts?${p.toString()}`)
+  }, [navigate])
   const contactByName = useMemo(() => { const m = {}; contacts.forEach(c => { m[(c.name || '').trim()] = c }); return m }, [contacts])
 
   // Union of vendors-from-receipts + manual-only contacts
   const rows = useMemo(() => {
-    const byName = {}
-    stats.forEach(s => { byName[s.name] = { name: s.name, stats: s, contact: contactByName[s.name] || null } })
-    contacts.forEach(c => { const n = (c.name || '').trim(); if (!byName[n]) byName[n] = { name: n, stats: null, contact: c } })
-    let list = Object.values(byName)
+    // Keyed by supplier_id when the receipts are linked, else by name. Keying by
+    // NAME alone silently dropped spend: a linked group and a not-yet-linked
+    // group can carry the same display name, and the second write replaced the
+    // first — showing ₪300 for a supplier who had cost ₪9,300.
+    const byKey = {}
+    stats.forEach(s => {
+      const k = s.supplierId || `name:${s.name}`
+      byKey[k] = { key: k, name: s.name, stats: s, contact: contactByName[s.name] || null }
+    })
+    contacts.forEach(c => {
+      const n = (c.name || '').trim()
+      const k = c.id || `name:${n}`
+      if (!byKey[k] && !Object.values(byKey).some(r => r.name === n)) {
+        byKey[k] = { key: k, name: n, stats: null, contact: c }
+      }
+    })
+    let list = Object.values(byKey)
     const q = search.trim().toLowerCase()
     if (q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.contact?.supplies || '').toLowerCase().includes(q))
     return list.sort((a, b) => (b.stats?.total || 0) - (a.stats?.total || 0))
@@ -106,10 +131,16 @@ export default function SuppliersPage() {
           </h1>
           <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>{rows.length} ספקים · עלויות מחושבות מהקבלות</p>
         </div>
-        <button onClick={() => setEdit({ name: '', phone: '', whatsapp: '', email: '', address: '', supplies: '', notes: '' })}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 'var(--r-btn)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
-          <Plus size={16} /> הוסף ספק
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => navigate('/suppliers/merge')} title="אחד ספקים שנסרקו בכמה איותים"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 'var(--r-btn)', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-dim)', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+            <Merge size={16} /> איחוד ספקים
+          </button>
+          <button onClick={() => setEdit({ name: '', phone: '', whatsapp: '', email: '', address: '', supplies: '', notes: '' })}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 'var(--r-btn)', border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+            <Plus size={16} /> הוסף ספק
+          </button>
+        </div>
       </div>
 
       <SearchInput value={search} onChange={setSearch} placeholder="חיפוש ספק / מה מספק…" />
@@ -123,8 +154,8 @@ export default function SuppliersPage() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(330px, 1fr))', gap: '14px' }}>
-        {rows.map(({ name, stats: s, contact }) => (
-          <div key={name} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+        {rows.map((row) => { const { name, stats: s, contact } = row; return (
+          <div key={row.key} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
             {/* Title row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Store size={18} color="var(--accent)" /></div>
@@ -183,8 +214,23 @@ export default function SuppliersPage() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><CalendarDays size={12} /> רכישה אחרונה: {fmtDate(s.lastDate)}</span>
               </div>
             )}
+
+            {/* Spellings folded into this supplier — so a merge is visible, not magic */}
+            {s?.aliases?.length > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-mute)' }} title={s.aliases.join(' · ')}>
+                נסרק גם כ: {s.aliases.slice(0, 2).join(' · ')}{s.aliases.length > 2 ? ` +${s.aliases.length - 2}` : ''}
+              </div>
+            )}
+
+            {/* Straight to this supplier's receipts (client request #8) */}
+            {s && (
+              <button onClick={() => openReceipts(row)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '9px 12px', borderRadius: 'var(--r-btn)', border: '1px solid var(--accent)', background: 'var(--accent-bg)', color: 'var(--accent)', fontSize: 13.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)', width: '100%' }}>
+                <Receipt size={15} /> הצג את הקבלות של הספק
+              </button>
+            )}
           </div>
-        ))}
+        )})}
       </div>
 
       {/* Edit / Add modal */}

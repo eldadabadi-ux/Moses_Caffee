@@ -5,13 +5,19 @@
 import { supabase } from './supabase'
 import { flattenItems, vendorComposition } from './itemAggregation'
 import { isExpenseDoc } from './docTypes'
+import { isCafeBook } from './books'
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
 // ── Contact CRUD (graceful if the table doesn't exist yet) ───────────────────
 export async function loadSuppliers(userId) {
-  const { data, error } = await supabase.from('suppliers').select('*').eq('user_id', userId).order('name')
-  if (error) return []                       // table not created yet → no contacts
+  // Merged-away suppliers stay in the table for provenance but must never show
+  // up as a supplier again. No retry-without-the-column ladder here: the
+  // migration is authoritative, and a fallback would quietly resurrect merged
+  // suppliers into the picker (guardrail 1).
+  const { data, error } = await supabase.from('suppliers')
+    .select('*').eq('user_id', userId).is('merged_into', null).order('name')
+  if (error) { console.warn('[suppliers] load failed:', error.message); return [] }
   return data || []
 }
 
@@ -34,22 +40,45 @@ export async function deleteSupplier(id) {
 }
 
 // ── Derived per-vendor spend stats (from receipts; amounts are ILS) ──────────
-export function deriveVendorStats(receipts) {
+/**
+ * Per-supplier spend, derived from receipts.
+ *
+ * Grouping key is `supplier_id` when the receipt has been linked to a canonical
+ * supplier (audit R1), and the raw `vendor_name` only for rows that predate the
+ * merge. That is what stops one supplier appearing five times because the OCR
+ * spelled it five ways.
+ *
+ * @param {Array} receipts
+ * @param {Array} [contacts] supplier rows — supplies the canonical display name
+ */
+export function deriveVendorStats(receipts, contacts = []) {
   const now = new Date()
   const curY = now.getFullYear()
   const curYM = `${curY}-${String(now.getMonth() + 1).padStart(2, '0')}`
   // Summary invoices (חשבונית מרכזת) are excluded — they aggregate delivery
   // notes that are already counted, so including them would double the spend.
-  const active = (receipts || []).filter(r => !r.archived_at && isExpenseDoc(r))
+  // Catering events are a separate book and never colour café supplier costs.
+  const active = (receipts || []).filter(r => !r.archived_at && isExpenseDoc(r) && isCafeBook(r))
   const flat = flattenItems(active)
+
+  const nameById = {}
+  for (const c of contacts || []) if (c?.id) nameById[c.id] = (c.name || '').trim()
+
+  // A linked receipt is filed under its supplier's canonical name; an unlinked
+  // one under whatever the scan happened to write.
+  const displayName = (r) =>
+    (r.supplier_id && nameById[r.supplier_id]) || (r.vendor_name || '').trim() || 'לא ידוע'
+  const keyOf = (r) => r.supplier_id || `name:${(r.vendor_name || '').trim() || 'לא ידוע'}`
 
   const map = {}
   for (const r of active) {
-    const name = (r.vendor_name || '').trim() || 'לא ידוע'
+    const key = keyOf(r)
+    const name = displayName(r)
     const amt = parseFloat(r.amount) || 0
     const d = r.receipt_date || (r.created_at || '').slice(0, 10)
-    if (!map[name]) map[name] = { name, total: 0, count: 0, thisMonth: 0, thisYear: 0, dates: [] }
-    const v = map[name]
+    if (!map[key]) map[key] = { name, supplierId: r.supplier_id || null, total: 0, count: 0, thisMonth: 0, thisYear: 0, dates: [], rawNames: new Set() }
+    const v = map[key]
+    v.rawNames.add((r.vendor_name || '').trim())
     v.total += amt; v.count += 1
     if (d) v.dates.push(d)
     if ((d || '').slice(0, 7) === curYM) v.thisMonth += amt
@@ -59,15 +88,22 @@ export function deriveVendorStats(receipts) {
   return Object.values(map).map(v => {
     const dates = v.dates.sort()
     const first = dates[0], last = dates[dates.length - 1]
-    const comp = vendorComposition(flat, v.name)
+    // Item-level stats are keyed by the raw scanned names, so a merged supplier
+    // must gather the composition of ALL its spellings.
+    const raws = [...v.rawNames].filter(Boolean)
+    const comp = vendorComposition(flat, raws[0] || v.name, raws)
     const cats = {}
-    flat.forEach(f => { if (f.vendor === v.name) cats[f.l1] = (cats[f.l1] || 0) + f.price })
+    // Only this group's OWN raw spellings — matching on the display name too
+    // would pull an unlinked group's items into the linked one as well.
+    flat.forEach(f => { if (raws.includes(f.vendor)) cats[f.l1] = (cats[f.l1] || 0) + f.price })
     const topCategories = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, total]) => ({ name, total: r2(total) }))
     // Only real, summed figures — never extrapolated daily/weekly/yearly averages
     // (a single receipt must not invent a "yearly" cost). Period sums grow as
     // more receipts come in.
     return {
-      name: v.name, total: r2(v.total), count: v.count, thisMonth: r2(v.thisMonth), thisYear: r2(v.thisYear),
+      name: v.name, supplierId: v.supplierId,
+      aliases: [...v.rawNames].filter(n => n && n !== v.name),
+      total: r2(v.total), count: v.count, thisMonth: r2(v.thisMonth), thisYear: r2(v.thisYear),
       firstDate: first || null, lastDate: last || null,
       topProducts: comp.rows.slice(0, 6), topCategories,
     }

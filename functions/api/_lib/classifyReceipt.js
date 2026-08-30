@@ -1,3 +1,5 @@
+import { containsAnyWord } from './textMatch.js'
+
 /**
  * classifyReceipt — deterministic receipt-type → { l1, l2 } safety net.
  *
@@ -12,20 +14,19 @@
  * false positives. The scan flow also shows an editable review screen.
  */
 
-// Standalone-token match — for short ambiguous names (e.g. "פז", "דלק") that we
-// don't want to match as a substring of another word. The haystack joins fields
-// with " | ", so a real token is bounded by spaces / pipes / string ends.
-function hasToken(hay, token) {
-  const t = token.toLowerCase()
-  const re = new RegExp(`(?:^|[\\s|/,.\-])${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[\\s|/,.\-]|$)`)
-  return re.test(hay)
-}
+// Every rule term is matched as a WHOLE WORD (see _lib/textMatch.js). Substring
+// matching used to be the default here and it mis-filed real receipts: "מונית"
+// matched inside "לימונית", so a dairy invoice full of lemon-verbena tea was
+// classified as taxi rides. Multi-word phrases still work — only the characters
+// immediately outside the match are checked.
 
 // All of these roll up to one L1 ("תחבורה ודלק"), each with its own sub-category.
 const L1_TRANSPORT = 'תחבורה ודלק'
 
 // First matching rule wins → more specific types (parking/taxi) before the
-// generic fuel fallback. `subs` = safe substrings, `toks` = standalone words.
+// generic fuel fallback. Every term below is matched as a whole word, so the
+// historical `subs` / `toks` split no longer changes behaviour; both lists are
+// kept only to preserve the original grouping.
 const RULES = [
   { l2: 'חניון',           subs: ['חניון', 'חנייה', 'חניה', 'אחוזות החוף'],                              toks: ['פנגו', 'pango', 'סלופארק', 'cellopark'] },
   { l2: 'מוניות',          subs: ['מונית', 'מוניות', 'טקסי'],                                            toks: ['taxi', 'gett', 'uber', 'אובר', 'yango', 'יאנגו'] },
@@ -47,8 +48,7 @@ export function classifyReceipt(receipt) {
   const hay = (' | ' + parts.join(' | ') + ' | ').toLowerCase()
 
   for (const rule of RULES) {
-    if ((rule.subs || []).some(s => hay.includes(s.toLowerCase())) ||
-        (rule.toks || []).some(t => hasToken(hay, t))) {
+    if (containsAnyWord(hay, [...(rule.subs || []), ...(rule.toks || [])])) {
       return { l1: L1_TRANSPORT, l2: rule.l2 }
     }
   }

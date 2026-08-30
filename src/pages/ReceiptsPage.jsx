@@ -19,17 +19,21 @@ import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
   CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
-  Archive, RotateCcw, AlertTriangle, FileText, ListChecks,
+  Archive, RotateCcw, AlertTriangle, ListChecks, Store,
 } from 'lucide-react'
 import { DOC_TYPES, docTypeOf, docTypeLabel, isExpenseDoc, DOC_COL_RE } from '../lib/docTypes'
 import { openIssues } from '../lib/reconciliation'
 import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/storage'
+import { fetchLegacyInlineImage } from '../lib/receiptImage'
+import { vendorSimilarity, AUTO_THRESHOLD } from '../lib/supplierMatch'
+import { BOOKS, DEFAULT_BOOK, bookOf, bookLabel } from '../lib/books'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput from '../components/ui/DateInput'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import Badge from '../components/ui/Badge'
+import ReceiptThumb from '../components/ReceiptThumb'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +47,10 @@ const COMMON_CATEGORIES = [
 
 const fmtDate = d => d ? d.split('-').reverse().join('.') : ''
 const fmtILS  = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}`
+
+// All receipt columns EXCEPT the heavy base64 receipt_image — the list never
+// pulls image bytes; thumbnails load lazily from storage_path (audit C1).
+const RECEIPT_COLS = 'id, user_id, vendor_name, supplier_id, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation, book'
 // Foreign-currency helpers (for receipts from abroad)
 const CUR_SYMBOL = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'Fr', AUD: 'A$', CAD: 'C$', ILS: '₪' }
 const fmtCur = (n, code) => {
@@ -176,7 +184,7 @@ function CameraModal({ onCapture, onClose, multi = false, onFiles }) {
               <div style={{ color: '#fff', fontSize: 13.5, fontWeight: 600, marginBottom: pages.length ? 8 : 0, textAlign: 'center' }}>
                 {pages.length === 0
                   ? 'צלם את הקבלה — אפשר להוסיף כמה עמודים'
-                  : `צולמו ${pages.length} עמודים · "המשך סריקה" לעמוד נוסף, "המשך" לסיום`}
+                  : `צולמו ${pages.length} עמודים · "המשך סריקה" לעמוד נוסף, "סיום" לסיום הסריקה`}
               </div>
               {pages.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
@@ -210,7 +218,7 @@ function CameraModal({ onCapture, onClose, multi = false, onFiles }) {
             {multi ? (
               <button onClick={finish} disabled={!pages.length}
                 style={{ minWidth: 64, height: 52, padding: '0 16px', borderRadius: 26, background: pages.length ? '#16a34a' : 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: pages.length ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', fontFamily: 'var(--font-main)', flexShrink: 0 }}>
-                המשך{pages.length ? ` (${pages.length})` : ''}
+                סיום{pages.length ? ` (${pages.length})` : ''}
               </button>
             ) : <div style={{ width: 52 }} />}
           </div>
@@ -381,7 +389,7 @@ function CropModal({ src, onConfirm, onCancel }) {
 function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 18, onClose, onExported }) {
   const [opts, setOpts] = useState({ excel: true, pdf: true, images: true })
   const [busy, setBusy] = useState(false)
-  const nImages = receipts.filter(r => r.receipt_image).length
+  const nImages = receipts.filter(r => r.storage_path || r.receipt_image).length
   const noneSelected = !opts.excel && !opts.pdf && !opts.images
   const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent) || window.innerWidth < 768
   const selectedCount = [opts.excel, opts.pdf, opts.images && nImages > 0].filter(Boolean).length
@@ -506,6 +514,15 @@ export default function ReceiptsPage() {
   const [reviewDocNumber, setReviewDocNumber] = useState('')      // printed doc number (if detected)
   const [reviewDocRefs, setReviewDocRefs] = useState([])          // summary invoice: itemized delivery-note refs
   const [docFilter, setDocFilter]       = useState('all')         // list filter by doc type
+  // Supplier filter — arrives as ?supplier=<id>&supplierName=<name> from the
+  // suppliers screen (client requests #4 / #8).
+  const [supplierFilter, setSupplierFilter] = useState(null)      // { id, name } | null
+  // Which ledger the list shows. Catering events are catalogued apart from the
+  // café and stay out of every statistic (client request #17). The choice is
+  // remembered so a catering session doesn't have to re-pick it per scan.
+  const [bookView, setBookView] = useState(() => {
+    try { return localStorage.getItem('moses_book_view') || DEFAULT_BOOK } catch { return DEFAULT_BOOK }
+  })
   const [selectMode, setSelectMode]     = useState(false)         // bulk classification mode
   const [selectedIds, setSelectedIds]   = useState(() => new Set())
   const [bulkBusy, setBulkBusy]         = useState(false)
@@ -513,6 +530,11 @@ export default function ReceiptsPage() {
   const [reviewFx, setReviewFx]         = useState(null)      // { rate, date, source, currency } for foreign receipts
   const [reviewPages, setReviewPages]   = useState([])        // all page images of a multi-page receipt
   const [scanSource, setScanSource]     = useState('')        // diagnostic: which engine produced the data
+  // Canonical-supplier resolution for the scanned vendor (audit R1 / request #3).
+  // { outcome:'linked'|'ask'|'created'|'skipped', supplier_id, supplier_name, suggestion }
+  const [reviewBook, setReviewBook]     = useState(DEFAULT_BOOK)   // ledger for the scan under review
+  const [scanSupplier, setScanSupplier] = useState(null)
+  const [supplierBusy, setSupplierBusy] = useState(false)
   const [reviewCategory, setReviewCategory] = useState('שונות')
   const [reviewImage, setReviewImage]   = useState(null)
   const [approving, setApproving]       = useState(false)
@@ -553,6 +575,19 @@ export default function ReceiptsPage() {
     }
   }, [])
 
+  // ── Supplier filter via ?supplier= / ?supplierName= (from the suppliers screen) ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const id = params.get('supplier')
+    const nm = params.get('supplierName')
+    if (id || nm) {
+      setSupplierFilter({ id: id || null, name: nm || '' })
+      const u = new URL(window.location.href)
+      u.searchParams.delete('supplier'); u.searchParams.delete('supplierName')
+      window.history.replaceState({}, '', u.toString())
+    }
+  }, [])
+
   // ── Auto-start scan when arriving via ?scan=1 (bottom-nav FAB / PWA shortcut) ──
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -566,6 +601,8 @@ export default function ReceiptsPage() {
     }
   }, [])
 
+  useEffect(() => { try { localStorage.setItem('moses_book_view', bookView) } catch {} }, [bookView])
+
   useEffect(() => { loadData() }, [])
   useEffect(() => { loadCategories() }, [])
 
@@ -573,7 +610,7 @@ export default function ReceiptsPage() {
     if (!hasCached('receipts')) setLoading(true)
     try {
       const { data, error } = await supabase
-        .from('receipts').select('*').is('archived_at', null)
+        .from('receipts').select(RECEIPT_COLS).is('archived_at', null)
         .order('receipt_date', { ascending: false })
       if (error) throw error
       setReceipts(data || [])
@@ -609,8 +646,21 @@ export default function ReceiptsPage() {
     }
     const date = r.receipt_date || ''
     const matchDoc = docFilter === 'all' || docTypeOf(r) === docFilter
-    return matchSearch && matchDoc && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
-  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter])
+    const matchBook = bookOf(r) === bookView
+    // Supplier match: by canonical id once the receipt is linked, and by name
+    // similarity for rows that predate the merge — so the filter is complete
+    // either way and never silently drops receipts.
+    let matchSupplier = true
+    if (supplierFilter) {
+      matchSupplier = supplierFilter.id
+        ? r.supplier_id === supplierFilter.id
+        : false
+      if (!matchSupplier && !r.supplier_id && supplierFilter.name) {
+        matchSupplier = vendorSimilarity(r.vendor_name, supplierFilter.name) >= AUTO_THRESHOLD
+      }
+    }
+    return matchSearch && matchDoc && matchBook && matchSupplier && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
+  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter, bookView])
 
   // Existing top-level (L1) category names — used to flag AI-proposed NEW
   // categories in the scan review + drive the category autocomplete.
@@ -860,6 +910,8 @@ export default function ReceiptsPage() {
       setReviewDocNumber(result.doc_number || '')
       setReviewDocRefs(Array.isArray(result.doc_refs) ? result.doc_refs : [])
       setReviewCurrency(result.currency || 'ILS')
+      setScanSupplier(result.supplier || null)   // canonical supplier match / question
+      setReviewBook(bookView)                    // file it where the user is working
       setReviewFx(result.fx || null)   // foreign-currency receipts: { rate, date, source, currency }
       setReviewPages(pages)
       setReviewImage(pages[0])
@@ -957,9 +1009,9 @@ export default function ReceiptsPage() {
           }
         }
       } catch (upErr) { console.warn('[approveScan] bucket upload failed, keeping inline image:', upErr?.message); storagePath = null }
-      // Thumbnail for the list when the original is safely in the bucket; otherwise
-      // fall back to the full inline image (legacy behaviour).
-      const thumbImage = storagePath ? await downscaleForUpload(finalImage, 256, 0.55) : finalImage
+      // Full image is safely in the bucket → keep NO base64 in the row (audit C1);
+      // only if the upload failed do we fall back to an inline image so none is lost.
+      const thumbImage = storagePath ? null : finalImage
       const uploadedExtras = storagePath && extraPaths.length === extraPages.length
 
       // Amounts are entered in the ORIGINAL currency; for a foreign receipt we
@@ -986,6 +1038,8 @@ export default function ReceiptsPage() {
 
       const base = {
         user_id: user.id, vendor_name: reviewVendor,
+        supplier_id: scanSupplier?.supplier_id || null,
+        book: reviewBook,
         receipt_date: reviewDate || new Date().toISOString().slice(0, 10),
         amount: totalAmt, currency: 'ILS',
         category_id, category_text: normalizeCategoryName(reviewCategory) || 'שונות',
@@ -1008,14 +1062,9 @@ export default function ReceiptsPage() {
       }
       const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
       const docCols = { doc_type: reviewDocType, doc_number: reviewDocNumber || null }
-      let { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols })
-      // Graceful fallbacks while a migration hasn't run yet — ai_summary keeps the values
-      if (error && /doc_type|doc_number/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols }))
-      }
-      if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null }))
-      }
+      // The migration is authoritative — these columns exist. The retry ladder
+      // that used to sit here hid real write failures (guardrail 1, audit M1).
+      const { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols })
       if (error) throw error
       if (reviewDocType === 'summary_invoice') {
         window.dispatchEvent(new Event('reconcile-changed'))
@@ -1034,11 +1083,38 @@ export default function ReceiptsPage() {
       }
       setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
       setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null)
-      setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([])
+      setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([]); setScanSupplier(null)
+      setReviewBook(bookView)
       loadData()
     } catch (err) {
       toast.error('שגיאה בשמירה: ' + (err?.message || ''))
     } finally { setApproving(false) }
+  }
+
+  /**
+   * Answer "is this the same supplier?" (client request #3).
+   * `supplierId` = link this spelling to that supplier; null = it's a new one.
+   * The answer is stored server-side as an alias, so it is asked only once.
+   */
+  async function answerSupplier(supplierId) {
+    const scanned = (reviewVendor || scanSupplier?.suggestion?.scanned || '').trim()
+    if (!scanned) return
+    setSupplierBusy(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/suppliers/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token}` },
+        body: JSON.stringify(supplierId ? { scanned, supplier_id: supplierId } : { scanned, new_name: scanned }),
+      })
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.message || 'שמירת הספק נכשלה')
+      const r = await res.json()
+      setScanSupplier({ outcome: 'linked', supplier_id: r.supplier_id, supplier_name: r.supplier_name, suggestion: null })
+      if (supplierId) setReviewVendor(r.supplier_name)   // adopt the canonical spelling
+      toast.success(supplierId ? `שויך ל${r.supplier_name}` : 'נוצר ספק חדש')
+    } catch (e) {
+      toast.error(e.message || 'שגיאה')
+    } finally { setSupplierBusy(false) }
   }
 
   // ── Manual CRUD ───────────────────────────────────────────────────────────────
@@ -1065,11 +1141,21 @@ export default function ReceiptsPage() {
         if (created) { category_id = created.id; loadCategories() }
       } catch { /* category row optional — category_text still drives display */ }
     }
+    // Route a newly-attached photo to Storage — never base64 in the row (audit C1).
+    // An unchanged edit keeps imagePreview as a signed URL / null → image untouched.
+    let imgPatch = {}
+    if (imagePreview && imagePreview.startsWith('data:')) {
+      try {
+        const blob = dataUrlToBlob(imagePreview)
+        const path = await uploadReceiptFile(user.id, `manual_${Math.random().toString(36).slice(2, 10)}`, blob, blob?.type || 'image/jpeg')
+        imgPatch = { storage_path: path, receipt_image: null }
+      } catch { imgPatch = { receipt_image: imagePreview } }   // offline fallback: keep inline
+    }
     const payload = {
       user_id: user.id, vendor_name: form.vendor_name || null,
       receipt_date: form.receipt_date || new Date().toISOString().slice(0, 10),
       amount: totalAmt, currency: 'ILS',
-      category_text: catName, category_id, receipt_image: imagePreview || null,
+      category_text: catName, category_id, ...imgPatch,
       items: cleanItems.length ? cleanItems : null,
     }
     const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
@@ -1079,27 +1165,14 @@ export default function ReceiptsPage() {
       const prevRow = receipts.find(r => r.id === editId)
       // Editing a pending (email-imported) receipt also APPROVES it → status 'ready'.
       const approve = prevRow?.status === 'pending' ? { status: 'ready' } : {}
-      // Pre-migration fallback keeps the classification in the ai_summary mirror.
-      const aiMirror = { ai_summary: { ...(prevRow?.ai_summary || {}), doc_type: docType } }
-      let { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, doc_type: docType, ...approve }).eq('id', editId)
-      if (error && /doc_type/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').update({ ...payload, ...vatCols, ...aiMirror, ...approve }).eq('id', editId))
-      }
-      if (error && /amount_before_vat|vat_amount|vat_rate/.test(error.message || '')) {
-        ;({ error } = await supabase.from('receipts').update({ ...payload, ...aiMirror, ...approve }).eq('id', editId))
-      }
-      if (error) { toast.error('שגיאה בעדכון'); return }
+      // The migration is authoritative — no retry ladder (guardrail 1, audit M1).
+      const { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, doc_type: docType, ...approve }).eq('id', editId)
+      if (error) { toast.error('שגיאה בעדכון: ' + (error.message || '')); return }
       toast.success(approve.status ? 'הקבלה אושרה ונשמרה' : 'קבלה עודכנה')
       setReceipts(prev => { const next = prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols, doc_type: docType, ...approve } : r); setCached('receipts', next); return next })
     } else {
-      let resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, doc_type: docType }).select().single()
-      if (resp.error && /doc_type/.test(resp.error.message || '')) {
-        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, ai_summary: { doc_type: docType } }).select().single()
-      }
-      if (resp.error && /amount_before_vat|vat_amount|vat_rate/.test(resp.error.message || '')) {
-        resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ai_summary: { doc_type: docType } }).select().single()
-      }
-      if (resp.error) { toast.error('שגיאה בשמירה'); return }
+      const resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, doc_type: docType }).select().single()
+      if (resp.error) { toast.error('שגיאה בשמירה: ' + (resp.error.message || '')); return }
       toast.success('קבלה נשמרה')
       setReceipts(prev => [resp.data, ...prev])
     }
@@ -1146,72 +1219,27 @@ export default function ReceiptsPage() {
     } finally { setBulkBusy(false) }
   }
 
-  // ── Inbound-receipt preview hydration ─────────────────────────────────────
-  // Email receipts arrive with only the ORIGINAL file in the private bucket
-  // (PDFs have no inline image). Render it to a compressed preview image and
-  // save it on the row — from then on they behave EXACTLY like camera scans
-  // (thumbnail + floating zoomable viewer). One-time per receipt.
-  async function hydratePreview(r) {
-    try {
-      const url = await signedReceiptUrl(r.storage_path)
-      if (!url) return null
-      const blob = await fetch(url).then(x => (x.ok ? x.blob() : null))
-      if (!blob) return null
-      let dataUrl = null
-      if (/\.pdf$/i.test(r.storage_path)) {
-        // pdf.js first-page render — already a compressed JPEG data URL (same as
-        // camera PDF uploads). NOTE: no fetch(dataUrl) here — CSP connect-src
-        // blocks data: URLs, which silently killed the previous version.
-        const pages = await pdfToImages(blob, { maxPages: 1 })
-        dataUrl = pages[0] || null
-      } else {
-        // Image file: camera-profile compression straight from the blob.
-        const file = new File([blob], 'receipt.jpg', { type: blob.type || 'image/jpeg' })
-        try { ({ dataUrl } = await compressImage(file)) } catch {}
-      }
-      if (!dataUrl) return null
-      const { error } = await supabase.from('receipts').update({ receipt_image: dataUrl }).eq('id', r.id)
-      if (!error) setReceipts(prev => { const next = prev.map(x => x.id === r.id ? { ...x, receipt_image: dataUrl } : x); setCached('receipts', next); return next })
-      return dataUrl
-    } catch { return null }
-  }
-
-  // Auto-hydrate a few at a time whenever un-previewed inbound receipts are visible.
-  const hydratingRef = useRef(new Set())
-  useEffect(() => {
-    if (archiveView) return
-    const todo = receipts.filter(r => !r.receipt_image && r.storage_path && !hydratingRef.current.has(r.id)).slice(0, 3)
-    if (!todo.length) return
-    todo.forEach(r => hydratingRef.current.add(r.id))
-    ;(async () => { for (const r of todo) await hydratePreview(r) })()
-  }, [receipts, archiveView])
-
-  // Click on a not-yet-hydrated inbound receipt: hydrate now, then open the
-  // floating viewer (fallback to the raw file in a new tab if rendering fails).
-  async function openStoredFile(r) {
-    const t = toast.loading('טוען קבלה…')
-    const dataUrl = await hydratePreview(r)
-    toast.dismiss(t)
-    if (dataUrl) { setLightboxUrl(dataUrl); return }
-    const url = await signedReceiptUrl(r.storage_path)
-    if (url) window.open(url, '_blank', 'noopener')
-    else toast.error('הקובץ המקורי לא זמין')
-  }
+  // (audit C1) Thumbnails now load straight from Storage via <ReceiptThumb>, so we
+  // no longer render a preview back into receipt_image — nothing to hydrate here.
 
   // Open the FULL-resolution original from the private bucket via a short-lived
   // signed URL — WITHOUT writing it back into the row (keeps full images out of
   // the DB, A.8.24). The list shows only a small thumbnail; this is the zoom.
   async function viewFull(r) {
-    if (!r.storage_path) { if (r.receipt_image) setLightboxUrl(r.receipt_image); return }
     const t = toast.loading('טוען קבלה…')
     try {
-      const url = await signedReceiptUrl(r.storage_path)
+      if (r.storage_path) {
+        const url = await signedReceiptUrl(r.storage_path)
+        if (url && /\.pdf$/i.test(r.storage_path)) { toast.dismiss(t); window.open(url, '_blank', 'noopener'); return }
+        if (url) { toast.dismiss(t); setLightboxUrl(url); return }
+      }
+      // Not in the bucket yet (pre-backfill row): pull the legacy inline image
+      // for THIS receipt only — the list query never loads that column.
+      const legacy = r.receipt_image || await fetchLegacyInlineImage(r.id)
       toast.dismiss(t)
-      if (url && /\.pdf$/i.test(r.storage_path)) { window.open(url, '_blank', 'noopener'); return }
-      if (url) { setLightboxUrl(url); return }
-      if (r.receipt_image) setLightboxUrl(r.receipt_image)
+      if (legacy) setLightboxUrl(legacy)
       else toast.error('הקובץ המקורי לא זמין')
-    } catch { toast.dismiss(t); if (r.receipt_image) setLightboxUrl(r.receipt_image); else toast.error('שגיאה בטעינה') }
+    } catch { toast.dismiss(t); toast.error('שגיאה בטעינה') }
   }
 
   // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
@@ -1229,7 +1257,7 @@ export default function ReceiptsPage() {
     setArchivedLoading(true)
     try {
       const { data, error } = await supabase
-        .from('receipts').select('*').not('archived_at', 'is', null)
+        .from('receipts').select(RECEIPT_COLS).not('archived_at', 'is', null)
         .order('archived_at', { ascending: false })
       if (error) throw error
       setArchived(data || [])
@@ -1291,7 +1319,14 @@ export default function ReceiptsPage() {
       items: Array.isArray(r.items) ? r.items.map(it => ({ ...it })) : [],
       doc_type: docTypeOf(r),
     })
-    setImagePreview(r.receipt_image||null)
+    // Preview loads from Storage (no base64 in the row); for a row that hasn't
+    // been backfilled yet, pull its legacy inline image by id (single row only).
+    setImagePreview(r.receipt_image || null)
+    if (r.storage_path && !/\.pdf$/i.test(r.storage_path)) {
+      signedReceiptUrl(r.storage_path).then(u => { if (u) setImagePreview(u) })
+    } else if (!r.receipt_image && !r.storage_path) {
+      fetchLegacyInlineImage(r.id).then(img => { if (img) setImagePreview(img) })
+    }
     setShowModal(true)
   }
 
@@ -1353,7 +1388,7 @@ export default function ReceiptsPage() {
 
   if (loading && receipts.length === 0) return <LoadingSpinner />
 
-  const hasActiveFilter = search || filterFrom || filterTo || docFilter !== 'all'
+  const hasActiveFilter = search || filterFrom || filterTo || docFilter !== 'all' || supplierFilter
 
   return (
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap: isMobile ? '14px' : '20px' }} dir="rtl">
@@ -1475,11 +1510,50 @@ export default function ReceiptsPage() {
             <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>עד:</span>
             <DateInput value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ flex:'1 1 130px', maxWidth:'180px', height:'36px', fontSize:'13px' }} clearable />
             {hasActiveFilter && (
-              <button onClick={() => { setSearch(''); setFilterFrom(''); setFilterTo(''); setDocFilter('all'); setShowFilters(false) }}
+              <button onClick={() => { setSearch(''); setFilterFrom(''); setFilterTo(''); setDocFilter('all'); setSupplierFilter(null); setShowFilters(false) }}
                 style={{ padding:'6px 12px', background:'none', border:'1px solid var(--border)', borderRadius:'6px', fontSize:'12px', color:'var(--text-mute)', cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
                 נקה הכל
               </button>
             )}
+          </div>
+        )}
+
+        {/* Book of account — the café and the catering events are separate ledgers,
+            so the switch is a top-level tab, not a filter chip. */}
+        {(
+          <div style={{ display:'flex', gap:6 }}>
+            {BOOKS.map(b => {
+              const on = bookView === b.value
+              // Count what the CURRENT view holds, so the archive shows archive counts.
+              const n = ((archiveView ? archived : receipts) || []).filter(r => bookOf(r) === b.value).length
+              return (
+                <button key={b.value} onClick={() => setBookView(b.value)}
+                  style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:10, border:`1.5px solid ${on ? 'var(--accent)' : 'var(--border)'}`, background: on ? 'var(--accent-bg)' : 'var(--panel)', color: on ? 'var(--accent)' : 'var(--text-mute)', fontSize:'13.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+                  <span>{b.icon}</span>{b.label}
+                  <span style={{ fontSize:'12px', fontWeight:600, opacity:0.75, fontVariantNumeric:'tabular-nums' }}>{n}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {bookView === 'events' && (
+          <div style={{ fontSize:'12.5px', color:'var(--text-mute)', lineHeight:1.6 }}>
+            🎪 ספר האירועים מנוהל בנפרד — המסמכים כאן אינם נספרים בדשבורד, בקטגוריות, בעלויות הספקים או בתובנות של בית הקפה.
+          </div>
+        )}
+
+        {/* Active supplier filter — always visible, never a hidden filter */}
+        {supplierFilter && (
+          <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+            <span style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:999, background:'var(--accent-bg)', border:'1px solid var(--accent)', color:'var(--accent)', fontSize:'13px', fontWeight:700, maxWidth:'100%' }}>
+              <Store size={13} style={{ flexShrink:0 }} />
+              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{supplierFilter.name || 'ספק'}</span>
+              <button onClick={() => setSupplierFilter(null)} aria-label="בטל סינון ספק"
+                style={{ border:'none', background:'none', cursor:'pointer', color:'var(--accent)', padding:0, display:'flex', flexShrink:0 }}>
+                <X size={13} />
+              </button>
+            </span>
+            <span style={{ fontSize:'12.5px', color:'var(--text-mute)' }}>{filtered.length} מסמכים</span>
           </div>
         )}
 
@@ -1561,21 +1635,13 @@ export default function ReceiptsPage() {
                   {isSel && <CheckCircle2 size={14} color="white" />}
                 </div>
               )}
-              {/* Thumbnail */}
-              {r.receipt_image ? (
-                <button onClick={selecting ? undefined : () => (r.storage_path ? viewFull(r) : setLightboxUrl(r.receipt_image))} title={r.storage_path ? 'הצג קבלה מלאה' : undefined} style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border)', background:'var(--panel-2)', flexShrink:0, cursor:'pointer', padding:0 }}>
-                  <img src={r.receipt_image} alt="קבלה" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
-                </button>
-              ) : r.storage_path ? (
-                <button onClick={selecting ? undefined : () => openStoredFile(r)} title="פתח את הקובץ המקורי מהמייל"
-                  style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', border:'1px solid var(--accent)', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer', padding:0 }}>
-                  <FileText size={17} style={{ color:'var(--accent)' }} />
-                </button>
-              ) : (
-                <div style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', background:'var(--panel-2)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <Receipt size={16} style={{ color:'var(--text-mute)' }} />
-                </div>
-              )}
+              {/* Thumbnail — lazy-loaded from Storage; no base64 in the list (audit C1) */}
+              <ReceiptThumb
+                storagePath={r.storage_path} inlineImage={r.receipt_image}
+                size={isMobile ? 40 : 44}
+                title="הצג קבלה מלאה"
+                onClick={selecting ? undefined : () => viewFull(r)}
+              />
 
               {/* Details */}
               <div style={{ flex:1, minWidth:0 }}>
@@ -1737,6 +1803,24 @@ export default function ReceiptsPage() {
                 הסכומים הם ב-{reviewCurrency} — נא להזין/לתקן את הערך בשקלים ידנית לפני שמירה.
               </div>
             )}
+            {/* Book of account — orthogonal to document type (client request #17) */}
+            <div>
+              <label style={LS}>ספר חשבונות</label>
+              <div style={{ display:'flex', gap:'6px' }}>
+                {BOOKS.map(b => (
+                  <button key={b.value} type="button" onClick={() => setReviewBook(b.value)}
+                    style={{ flex:1, padding:'10px 6px', borderRadius:'10px', border:`1.5px solid ${reviewBook === b.value ? 'var(--accent)' : 'var(--border)'}`, background: reviewBook === b.value ? 'var(--accent-bg)' : 'var(--panel)', color: reviewBook === b.value ? 'var(--accent)' : 'var(--text-mute)', fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+                    {b.icon} {b.label}
+                  </button>
+                ))}
+              </div>
+              {reviewBook === 'events' && (
+                <div style={{ marginTop:8, fontSize:'12.5px', color:'var(--text-mute)', lineHeight:1.6 }}>
+                  🎪 מסמך של אירוע נשמר בנפרד ו<strong>לא נכנס</strong> לסטטיסטיקות, לתובנות ולהשוואות של בית הקפה.
+                </div>
+              )}
+            </div>
+
             {/* Document type — detected by the AI, user can override */}
             <div>
               <label style={LS}>סוג מסמך</label>
@@ -1764,6 +1848,36 @@ export default function ReceiptsPage() {
               <div>
                 <label style={LS}>ספק</label>
                 <input value={reviewVendor} onChange={e => setReviewVendor(e.target.value)} style={FS} dir="auto" placeholder="שם בית העסק" />
+
+                {/* Canonical supplier: confirmed link, or the one question we ask */}
+                {scanSupplier?.outcome === 'linked' && scanSupplier.supplier_name && (
+                  <div style={{ display:'flex', alignItems:'center', gap:5, marginTop:6, fontSize:'12.5px', color:'var(--ok)' }}>
+                    <CheckCircle2 size={13} /> שויך לספק: {scanSupplier.supplier_name}
+                  </div>
+                )}
+                {scanSupplier?.outcome === 'ask' && scanSupplier.suggestion?.candidates?.length > 0 && (
+                  <div style={{ marginTop:8, padding:'10px 12px', borderRadius:10, background:'var(--accent-bg)', border:'1px solid var(--accent)' }}>
+                    <div style={{ fontSize:'13px', color:'var(--text)', marginBottom:8, lineHeight:1.5 }}>
+                      נסרק <strong>{scanSupplier.suggestion.scanned}</strong> — האם זה אותו ספק?
+                    </div>
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                      {scanSupplier.suggestion.candidates.map(c => (
+                        <button key={c.id} onClick={() => answerSupplier(c.id)} disabled={supplierBusy}
+                          title={`התאמה ${Math.round(c.score * 100)}%`}
+                          style={{ padding:'6px 12px', borderRadius:999, border:'1px solid var(--accent)', background:'var(--panel)', color:'var(--accent)', fontSize:'13px', fontWeight:600, cursor: supplierBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
+                          כן — {c.name}
+                        </button>
+                      ))}
+                      <button onClick={() => answerSupplier(null)} disabled={supplierBusy}
+                        style={{ padding:'6px 12px', borderRadius:999, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-mute)', fontSize:'13px', fontWeight:600, cursor: supplierBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
+                        לא — ספק חדש
+                      </button>
+                    </div>
+                    <div style={{ fontSize:'11.5px', color:'var(--text-mute)', marginTop:7 }}>
+                      התשובה נשמרת — לא נשאל שוב על האיות הזה.
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label style={LS}>תאריך</label>

@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
-import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X } from 'lucide-react'
+import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X, Store } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
@@ -14,6 +14,7 @@ import ProductCompareChart from '../components/charts/ProductCompareChart'
 import ShekelSign from '../components/icons/ShekelSign'
 import { flattenItems, vendorComposition } from '../lib/itemAggregation'
 import { isExpenseDoc } from '../lib/docTypes'
+import { isCafeBook } from '../lib/books'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
@@ -82,10 +83,12 @@ export default function DashboardPage() {
   const [receipts,    setReceipts]    = useState(() => getCached('dash:' + thisYear)?.receipts || [])
   const [prevReceipts,setPrevReceipts]= useState(() => getCached('dash:' + thisYear)?.prevReceipts || [])
   const [categories,  setCategories]  = useState(() => getCached('dash:' + thisYear)?.categories || [])
+  const [supplierRows, setSupplierRows] = useState(() => getCached('dash:' + thisYear)?.suppliers || [])
   const [loading,     setLoading]     = useState(() => !hasCached('dash:' + thisYear))
   const [year,        setYear]        = useState(thisYear)
   const [compareYear, setCompareYear] = useState(null)
   const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
+  const [filterVendor, setFilterVendor] = useState(null) // supplier filter (client request #7)
   const [distMode,    setDistMode]    = useState('cat') // distribution donut: 'cat' | 'vendor'
   const [selVendor,   setSelVendor]   = useState(null)  // highlighted vendor slice (local)
   const [selCat,      setSelCat]      = useState(null)  // highlighted category slice (local — NO filtering)
@@ -119,7 +122,7 @@ export default function DashboardPage() {
         // the column doesn't exist → retry without it.
         let { data: recs, error: recsErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, items, doc_type')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type, book, archived_at')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year}-01-01`)
           .lte('receipt_date', `${year}-12-31`)
@@ -133,12 +136,13 @@ export default function DashboardPage() {
             .lte('receipt_date', `${year}-12-31`)
             .order('receipt_date'))
         }
-        recs = (recs || []).filter(isExpenseDoc)
+        // Catering events are a separate book — the café dashboard never shows them.
+        recs = (recs || []).filter(r => isExpenseDoc(r) && isCafeBook(r))
 
         // Previous year (for YoY)
         let { data: prevRecs, error: prevErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, doc_type')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, doc_type, book, archived_at')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year - 1}-01-01`)
           .lte('receipt_date', `${year - 1}-12-31`)
@@ -150,13 +154,18 @@ export default function DashboardPage() {
             .gte('receipt_date', `${year - 1}-01-01`)
             .lte('receipt_date', `${year - 1}-12-31`))
         }
-        prevRecs = (prevRecs || []).filter(isExpenseDoc)
+        prevRecs = (prevRecs || []).filter(r => isExpenseDoc(r) && isCafeBook(r))
 
         // Categories
         const { data: cats } = await supabase
           .from('categories')
           .select('id, name, parent_id, level, sort_order')
           .order('level').order('sort_order')
+
+        // Canonical supplier names — a merged supplier must appear once on the
+        // dashboard, not once per OCR spelling.
+        const { data: sups } = await supabase
+          .from('suppliers').select('id, name').eq('user_id', user.id)
 
         // Available years
         const { data: allDates } = await supabase
@@ -170,10 +179,11 @@ export default function DashboardPage() {
         setReceipts(recs || [])
         setPrevReceipts(prevRecs || [])
         setCategories(cats || [])
+        setSupplierRows(sups || [])
         setAvailYears(years.length ? years : [thisYear])
         setCached('dash:' + year, {
           receipts: recs || [], prevReceipts: prevRecs || [],
-          categories: cats || [], availYears: years.length ? years : [thisYear],
+          categories: cats || [], suppliers: sups || [], availYears: years.length ? years : [thisYear],
         })
       } catch (err) {
         console.error('Dashboard load error:', err)
@@ -182,14 +192,33 @@ export default function DashboardPage() {
     load()
   }, [user, year])
 
-  // ── Active receipts (applying the category filter) ───────────────────────────
+  // ── Active receipts (category + supplier filters) ────────────────────────────
+  // The supplier filter matches on the canonical supplier_id once a receipt has
+  // been linked, and on the scanned name for rows that predate the merge.
   const active = useMemo(() => receipts.filter(r => {
     if (filterCat && r.category_text !== filterCat) return false
+    if (filterVendor) {
+      const linked = filterVendor.id && r.supplier_id === filterVendor.id
+      const byName = !r.supplier_id && (r.vendor_name || '').trim() === filterVendor.name
+      if (!linked && !byName) return false
+    }
     return true
-  }), [receipts, filterCat])
+  }), [receipts, filterCat, filterVendor])
 
   const total     = useMemo(() => active.reduce((s, r) => s + amt(r), 0), [active, settings.showWithVat])
-  const totalPrev = useMemo(() => prevReceipts.reduce((s, r) => s + amt(r), 0), [prevReceipts, settings.showWithVat])
+  // The comparison year must obey the SAME filters as the current one. Comparing
+  // one filtered supplier's ₪12k against the whole previous year's ₪400k
+  // rendered "-97% מהשנה הקודמת" next to a correctly filtered number.
+  const activePrev = useMemo(() => prevReceipts.filter(r => {
+    if (filterCat && r.category_text !== filterCat) return false
+    if (filterVendor) {
+      const linked = filterVendor.id && r.supplier_id === filterVendor.id
+      const byName = !r.supplier_id && (r.vendor_name || '').trim() === filterVendor.name
+      if (!linked && !byName) return false
+    }
+    return true
+  }), [prevReceipts, filterCat, filterVendor])
+  const totalPrev = useMemo(() => activePrev.reduce((s, r) => s + amt(r), 0), [activePrev, settings.showWithVat])
   const yoy       = totalPrev > 0 ? ((total - totalPrev) / totalPrev) * 100 : null
 
   // Flattened line-items for the drill-down (item-level L1→L2→L3 over time)
@@ -273,6 +302,18 @@ export default function DashboardPage() {
   // When a category is selected, the time charts adopt its colour.
   const selColor = filterCat ? (catColor[filterCat] || '#2563eb') : '#2563eb'
 
+  // Display name for a receipt's supplier: the canonical one when the receipt is
+  // linked, otherwise whatever the scan wrote. Without this the dashboard shows a
+  // merged supplier as N separate slices while SuppliersPage shows it as one —
+  // two different numbers for the same supplier in the same app.
+  const canonicalById = useMemo(
+    () => Object.fromEntries((supplierRows || []).map(s => [s.id, (s.name || '').trim()])),
+    [supplierRows])
+  const supplierNameOf = useCallback((r) => {
+    const raw = (r.vendor_name || '').trim()
+    return (r.supplier_id && canonicalById[r.supplier_id]) || raw
+  }, [canonicalById])
+
   // ── Vendor aggregation (full) — powers the "by vendor" distribution ──────────
   // Always over ALL receipts (not the category-filtered `active`), so switching
   // the distribution to "ספק" always shows every supplier — selecting a category
@@ -280,13 +321,13 @@ export default function DashboardPage() {
   const vendorDist = useMemo(() => {
     const map = {}
     receipts.forEach(r => {
-      const name = (r.vendor_name || '').trim() || 'לא ידוע'
+      const name = supplierNameOf(r) || 'לא ידוע'
       if (!map[name]) map[name] = { name, total: 0, count: 0 }
       map[name].total += amt(r)
       map[name].count += 1
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
-  }, [receipts, settings.showWithVat])
+  }, [receipts, supplierNameOf, settings.showWithVat])
   const vendorTotal = useMemo(() => vendorDist.reduce((s, v) => s + v.total, 0), [vendorDist])
   // Cap to top 8 + "אחר" so the donut stays readable
   const vendorDonutData = useMemo(() => {
@@ -304,18 +345,40 @@ export default function DashboardPage() {
 
   // ── Vendor comparison (independent of the category/vendor dashboard filters) ───
   const allVendors = useMemo(() => {
-    const set = new Set(receipts.map(r => (r.vendor_name || '').trim()).filter(Boolean))
+    const set = new Set(receipts.map(supplierNameOf).filter(Boolean))
     return [...set].sort((a, b) => a.localeCompare(b, 'he'))
-  }, [receipts])
+  }, [receipts, supplierNameOf])
+
+  // Supplier options for the dashboard filter — one entry per canonical supplier
+  // (falling back to the scanned name for receipts not yet linked).
+  const vendorFilterOptions = useMemo(() => {
+    const map = new Map()
+    for (const r of receipts) {
+      const name = supplierNameOf(r)
+      if (!name) continue
+      const key = r.supplier_id || `name:${name}`
+      if (!map.has(key)) map.set(key, { id: r.supplier_id || null, name })
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'he'))
+  }, [receipts, supplierNameOf])
 
   // Flattened items for the whole year (ignores filters) — drives product picking.
   const flatAll = useMemo(() => flattenItems(receipts), [receipts])
-  const compA = useMemo(() => vendorA ? vendorComposition(flatAll, vendorA) : null, [vendorA, flatAll])
-  const compB = useMemo(() => vendorB ? vendorComposition(flatAll, vendorB) : null, [vendorB, flatAll])
+
+  // Line items still carry the RAW scanned vendor string, so a merged supplier's
+  // composition has to gather every spelling filed under it.
+  const rawNamesFor = useCallback((displayName) => {
+    const set = new Set([displayName])
+    for (const r of receipts) if (supplierNameOf(r) === displayName) set.add((r.vendor_name || '').trim())
+    return [...set].filter(Boolean)
+  }, [receipts, supplierNameOf])
+
+  const compA = useMemo(() => vendorA ? vendorComposition(flatAll, vendorA, rawNamesFor(vendorA)) : null, [vendorA, flatAll, rawNamesFor])
+  const compB = useMemo(() => vendorB ? vendorComposition(flatAll, vendorB, rawNamesFor(vendorB)) : null, [vendorB, flatAll, rawNamesFor])
 
   function monthlyForVendor(name) {
     const map = {}
-    receipts.filter(r => (r.vendor_name || '').trim() === name).forEach(r => {
+    receipts.filter(r => supplierNameOf(r) === name).forEach(r => {
       if (!r.receipt_date) return
       const m = parseInt(r.receipt_date.slice(5, 7))
       if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
@@ -324,7 +387,7 @@ export default function DashboardPage() {
     return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
   }
   function vendorStats(name) {
-    const rows = receipts.filter(r => (r.vendor_name || '').trim() === name)
+    const rows = receipts.filter(r => supplierNameOf(r) === name)
     const total = rows.reduce((s, r) => s + amt(r), 0)
     return { total, count: rows.length, avg: rows.length ? total / rows.length : 0 }
   }
@@ -341,7 +404,7 @@ export default function DashboardPage() {
       .sort((x, y) => (y.a + y.b) - (x.a + x.b))
   }, [selProdsA, selProdsB, compA, compB])
 
-  const hasFilters = filterCat
+  const hasFilters = filterCat || filterVendor
 
   // ── Distribution donut/ranking: switchable between category and vendor ────────
   const isVendorDist = distMode === 'vendor'
@@ -408,9 +471,22 @@ export default function DashboardPage() {
                 {l1DataAll.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </div>
+            {/* Supplier filter (client request #7) */}
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <Store size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
+              <select value={filterVendor ? (filterVendor.id || `name:${filterVendor.name}`) : ''}
+                onChange={e => {
+                  const v = e.target.value
+                  setFilterVendor(v ? vendorFilterOptions.find(o => (o.id || `name:${o.name}`) === v) || null : null)
+                }}
+                style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: `1px solid ${filterVendor ? 'var(--accent)' : 'var(--border)'}`, background: filterVendor ? 'var(--accent-bg)' : 'var(--panel)', color: filterVendor ? 'var(--accent)' : 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer', maxWidth: 190 }}>
+                <option value="">כל הספקים</option>
+                {vendorFilterOptions.map(o => <option key={o.id || o.name} value={o.id || `name:${o.name}`}>{o.name}</option>)}
+              </select>
+            </div>
             {/* Clear filters */}
             {hasFilters && (
-              <button onClick={() => { setFilterCat(null) }}
+              <button onClick={() => { setFilterCat(null); setFilterVendor(null) }}
                 style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid var(--danger)', background: '#fef2f2', color: 'var(--danger)', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}>
                 <X size={12} /> נקה
               </button>
@@ -418,13 +494,21 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Active filter pill */}
-        {filterCat && (
+        {/* Active filter pills */}
+        {(filterCat || filterVendor) && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
-              <Tag size={10} /> {filterCat}
-              <button onClick={() => setFilterCat(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
-            </span>
+            {filterCat && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
+                <Tag size={10} /> {filterCat}
+                <button onClick={() => setFilterCat(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
+              </span>
+            )}
+            {filterVendor && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
+                <Store size={10} /> {filterVendor.name}
+                <button onClick={() => setFilterVendor(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
+              </span>
+            )}
           </div>
         )}
       </div>

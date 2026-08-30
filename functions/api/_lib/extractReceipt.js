@@ -16,6 +16,7 @@
 
 import { getIlsRate, normalizeCurrency } from './fxRate.js'
 import { applyReceiptCategory } from './classifyReceipt.js'
+import { withUnitPricing } from './units.js'
 
 // Model chain — flash models work on the free tier and are fast + accurate.
 // gemini-2.5-pro is intentionally NOT used: it returns 429 (quota) on the free tier.
@@ -180,6 +181,19 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
   // to guess from items[0]). No-op when no strong rule matches → AI's choice.
   applyReceiptCategory(result)
 
+  // ── Date sanity check ─────────────────────────────────────────────────────
+  // A mis-read year sails straight through and lands a receipt years away from
+  // every report it belongs in. The live data holds one dated 2020-08-02 that is
+  // really a 2026 delivery note. An implausible date is dropped, not guessed —
+  // the review screen then asks the user for it.
+  result.receipt_date = sanitizeReceiptDate(result.receipt_date)
+
+  // ── Canonical units + price per base unit (audit R3, client request #12) ──
+  // The model reports the unit as printed ("ק\"ג" / "קילו" / "קג"), which makes
+  // cross-supplier price comparison meaningless. Fold it here, once, so every
+  // downstream consumer reads one consistent ₪/kg · ₪/l · ₪/unit figure.
+  result.items = (result.items || []).map(withUnitPricing)
+
   // ── Foreign currency → official ILS estimate (Bank of Israel rate) ─────────
   const currency = normalizeCurrency(result.currency)
   result.currency = currency
@@ -196,11 +210,38 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
         ...it,
         price_ils: r2(it.price),
         unit_price_ils: (it.unit_price != null && it.unit_price !== '') ? r2(it.unit_price) : null,
+        // ₪/base-unit must be converted too, or a foreign receipt would compare
+        // its original-currency rate against everyone else's shekels.
+        price_per_base_unit: it.price_per_base_unit != null ? r2(it.price_per_base_unit) : null,
       }))
     }
   }
 
   return result
+}
+
+// How far back a scanned receipt date may plausibly reach. This is an ongoing
+// expense tool, not an archive importer: a date older than this is far more
+// likely a mis-read year than a genuinely old invoice, and the review screen
+// always shows the date for the user to fill in when we reject it.
+export const MAX_RECEIPT_AGE_YEARS = 3
+
+/**
+ * Accept a receipt date only when it is a real date in a plausible window:
+ * no older than MAX_RECEIPT_AGE_YEARS, no more than 30 days ahead. Anything
+ * else returns '' so the user is asked rather than silently mis-filed.
+ */
+export function sanitizeReceiptDate(raw, now = new Date()) {
+  const s = String(raw || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return ''
+  const d = new Date(`${s}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return ''
+  // Round-trip guard — "2026-02-31" parses but is not a real calendar date.
+  if (d.toISOString().slice(0, 10) !== s) return ''
+  const maxAhead = new Date(now.getTime() + 30 * 86400000)
+  const minBack = new Date(now.getTime()); minBack.setFullYear(minBack.getFullYear() - MAX_RECEIPT_AGE_YEARS)
+  if (d > maxAhead || d < minBack) return ''
+  return s
 }
 
 /**
@@ -339,7 +380,13 @@ ${multiPageNote}
 - רשום כל שורת מוצר בנפרד עם **כל** עמודות השורה כפי שמופיעות בקבלה (כולל אגורות, ללא עיגול):
   - **item_name** = שם המוצר.
   - **quantity** = הכמות שנרכשה (מספר). למשל 3, 4, 2.77, 16. אם אין כמות — החזר 1.
-  - **unit** = יחידת המידה בדיוק כפי שכתוב: "יח'", "ק"ג", "ל'", "גרם", "מארז" וכו'. אם אין — "".
+  - **unit** = יחידת המידה בדיוק כפי שכתוב: "יח'", "ק"ג", "ל'", "גרם", "מארז", "קרטון", "מגש" וכו'.
+    **חובה למלא** — זהו שדה קריטי להשוואת מחירים. אם היחידה לא מודפסת בשורה, הסק אותה מהקשר:
+    מוצר שנמכר במשקל (ירקות, גבינה, בשר) → "ק"ג"; נוזל → "ל'"; פריט בודד → "יח'".
+    רק אם באמת אי אפשר להסיק — החזר "".
+  - **pack_size** = אם שם המוצר או השורה מציינים גודל אריזה (למשל "1 ליטר", "500 גרם",
+    "12 יח' בקרטון", "4 ק"ג") — החזר את הגודל כמחרוזת בדיוק כפי שמופיע, למשל "1 ליטר".
+    אם אין — החזר "".
   - **unit_price** = המחיר ליחידה אחת / לק"ג (כולל אגורות). אם אין — 0.
   - **price** = הסכום הכולל של השורה = quantity × unit_price (כולל אגורות). זהו הסכום הקובע.
 - אם יש כמות × מחיר ליחידה — ודא ש-price = quantity × unit_price, בדיוק לאגורה.
@@ -407,7 +454,8 @@ ${multiPageNote}
     {
       "item_name": "שם הפריט בעברית",
       "quantity": כמות (מספר, ברירת מחדל 1),
-      "unit": "יחידת מידה (יח'/ק\\"ג/ל' וכו', או ריק)",
+      "unit": "יחידת מידה (יח'/ק\\"ג/ל'/גרם/מארז/קרטון — חובה, הסק אם לא מודפס)",
+      "pack_size": "גודל אריזה אם צוין, למשל 1 ליטר / 500 גרם / 12 יח' (או ריק)",
       "unit_price": מחיר ליחידה (כולל אגורות, 0 אם אין),
       "price": סכום השורה הכולל (quantity × unit_price),
       "category_l1": "קטגוריה ראשית (קיימת אם מתאים, אחרת חדשה מתאימה)",
@@ -480,6 +528,7 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
                 item_name:       { type: 'STRING' },
                 quantity:        { type: 'NUMBER' },
                 unit:            { type: 'STRING' },
+                pack_size:       { type: 'STRING' },
                 unit_price:      { type: 'NUMBER' },
                 price:           { type: 'NUMBER' },
                 category_l1:     { type: 'STRING' },
