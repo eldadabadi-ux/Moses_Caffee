@@ -35,11 +35,11 @@ const sh = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim()
 /** Turn a wall of test output into the one line that explains the failure. */
 function diagnose(out) {
   if (/Host not in allowlist|ENOTFOUND|EAI_AGAIN|fetch failed|ECONNREFUSED/i.test(out))
-    return 'לא הצלחתי להגיע ל-Supabase. בדוק חיבור אינטרנט ואת .env.test — זו לא בעיה בקוד.'
+    return 'Could not reach Supabase. Check your connection and .env.test - this is not a code problem.'
   if (/Missing SUPABASE|SUPABASE_SERVICE_ROLE_KEY/i.test(out))
-    return 'חסרים משתני סביבה ב-.env.test (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY).'
+    return 'Missing environment variables in .env.test (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY).'
   const fails = out.split('\n').filter(l => /^not ok /.test(l.trim())).slice(0, 8)
-  if (fails.length) return 'בדיקות שנכשלו:\n' + fails.map(l => '      ' + l.trim()).join('\n')
+  if (fails.length) return 'Failing tests:\n' + fails.map(l => '      ' + l.trim()).join('\n')
   return null
 }
 
@@ -47,12 +47,12 @@ function step(label, cmd) {
   process.stdout.write(`  ${label} … `)
   const r = spawnSync(cmd, { shell: true, stdio: 'pipe', encoding: 'utf8' })
   if (r.status !== 0) {
-    console.log(c.r('נכשל'))
+    console.log(c.r('FAILED'))
     const out = (r.stdout || '') + (r.stderr || '')
     const why = diagnose(out)
     if (why) console.log('\n    ' + c.y(why) + '\n')
     else console.log(c.d(out.slice(-1500)))
-    console.log(c.d('    (שום דבר לא נדחף — תקן והרץ שוב: npm run ship)'))
+    console.log(c.d('    (nothing was pushed - fix it and run again: npm run ship)'))
     process.exit(1)
   }
   console.log(c.g('✓'))
@@ -60,62 +60,62 @@ function step(label, cmd) {
 }
 const die = (msg) => { console.error('\n' + c.r('עצירה: ') + msg + '\n'); process.exit(1) }
 
-console.log('\n' + c.b('שחרור לאוויר — Moses Caffee') + '\n')
+console.log('\n' + c.b('Moses Caffee - release') + '\n')
 
 // ── 1. preconditions ─────────────────────────────────────────────────────────
-if (sh('git status --porcelain')) die('יש שינויים לא שמורים. עשה commit או stash קודם.')
+if (sh('git status --porcelain')) die('Working tree has uncommitted changes. Commit or stash them first.')
 
 const current = sh('git rev-parse --abbrev-ref HEAD')
 if (current !== BRANCH) {
-  console.log(c.y(`  אתה על "${current}" — עובר ל-"${BRANCH}"`))
-  step('מעבר לענף', `git checkout ${BRANCH}`)
+  console.log(c.y(`  You are on "${current}" - switching to "${BRANCH}"`))
+  step('switch branch', `git checkout ${BRANCH}`)
 }
 
 const commits = sh(`git log --oneline ${MAIN}..${BRANCH}`).split('\n').filter(Boolean)
-if (!commits.length) die(`אין שום דבר חדש ב-${BRANCH} מעל ${MAIN}.`)
+if (!commits.length) die(`Nothing new on ${BRANCH} compared to ${MAIN}.`)
 
 // ── 2. checks ────────────────────────────────────────────────────────────────
-console.log(c.b('בדיקות'))
-step('בדיקות יחידה', 'npm run test:unit')
+console.log(c.b('Checks'))
+step('unit tests        ', 'npm run test:unit')
 
 if (existsSync('.env.test')) {
-  step('בדיקות אבטחה (RLS)', 'npm run test:security')
+  step('security tests    ', 'npm run test:security')
 } else {
-  console.log('  ' + c.y('בדיקות אבטחה — דולג (אין .env.test)'))
+  console.log('  ' + c.y('security tests     - skipped (no .env.test)'))
 }
 
-step('בנייה', 'npm run build')
+step('build             ', 'npm run build')
 
 // ── 3. plan ──────────────────────────────────────────────────────────────────
-console.log('\n' + c.b('מה יקרה עכשיו'))
-console.log(`  ${commits.length} קומיטים יעברו מ-${c.b(BRANCH)} ל-${c.b(MAIN)} וידחפו ל-GitHub:`)
+console.log('\n' + c.b('What happens next'))
+console.log(`  ${commits.length} commits move from ${c.b(BRANCH)} to ${c.b(MAIN)} and get pushed:`)
 for (const l of commits.reverse()) console.log(c.d('    ' + l))
-console.log(`\n  הדחיפה ל-${MAIN} מפעילה את GitHub Actions, שבונה ופורס ל-Cloudflare Pages.`)
-console.log(c.d('  (אף שלב כאן לא מדבר ישירות עם Cloudflare — אין צורך ב-wrangler login)'))
+console.log(`\n  Pushing to ${MAIN} triggers GitHub Actions, which builds and deploys to Cloudflare Pages.`)
+console.log(c.d('  (nothing here talks to Cloudflare directly - no wrangler login needed)'))
 
 if (!YES) {
   const rl = createInterface({ input: process.stdin, output: process.stdout })
-  const ans = (await rl.question('\n  להמשיך? (yes/no) ')).trim().toLowerCase()
+  const ans = (await rl.question('\n  Proceed? (yes/no) ')).trim().toLowerCase()
   rl.close()
-  if (ans !== 'yes' && ans !== 'y') die('בוטל לבקשתך. שום דבר לא נדחף.')
+  if (ans !== 'yes' && ans !== 'y') die('Cancelled. Nothing was pushed.')
 }
 
 // ── 4. merge + push ──────────────────────────────────────────────────────────
-console.log('\n' + c.b('שחרור'))
-step('משיכת עדכונים', `git fetch origin ${MAIN}`)
-step(`מעבר ל-${MAIN}`, `git checkout ${MAIN}`)
-step('סנכרון עם origin', `git merge --ff-only origin/${MAIN}`)
-step('מיזוג הענף', `git merge --no-ff ${BRANCH} -m "Merge ${BRANCH}: supplier identity, units, bot tools, events book"`)
-step('דחיפה', `git push origin ${MAIN}`)
+console.log('\n' + c.b('Releasing'))
+step('fetch             ', `git fetch origin ${MAIN}`)
+step(`checkout ${MAIN}   `, `git checkout ${MAIN}`)
+step('sync with origin  ', `git merge --ff-only origin/${MAIN}`)
+step('merge branch      ', `git merge --no-ff ${BRANCH} -m "Merge ${BRANCH}: supplier identity, units, bot tools, events book"`)
+step('push              ', `git push origin ${MAIN}`)
 
 const remote = sh('git remote get-url origin')
-console.log('\n' + c.g(c.b('  הכל נדחף. ')) + 'הפריסה רצה עכשיו ב-GitHub Actions.\n')
+console.log('\n' + c.g(c.b('  Pushed. ')) + 'The deploy is running in GitHub Actions now.\n')
 if (/github\.com/.test(remote)) {
   const repo = remote.replace(/^git@github\.com:/, 'https://github.com/').replace(/\.git$/, '')
-  console.log('  מעקב אחרי הפריסה:')
+  console.log('  Watch the deploy:')
   console.log(c.d(`    ${repo}/actions`))
 }
-console.log('\n  ' + c.b('אחרי שהפריסה מסתיימת (בערך 2 דקות):'))
-console.log('    1. פתח את האפליקציה ורענן (Ctrl+Shift+R)')
-console.log('    2. היכנס ל־' + c.b('ספקים ← איחוד ספקים') + ' ואשר את הקיבוץ')
-console.log('    3. אופציונלי — ניקוי נתונים ברקע: ' + c.b('npm run cleanup') + '\n')
+console.log('\n  ' + c.b('Once the deploy finishes (about 2 minutes):'))
+console.log('    1. Open the app and hard-refresh (Ctrl+Shift+R)')
+console.log('    2. Go to Suppliers -> Merge suppliers and approve the grouping')
+console.log('    3. Optional data cleanup: ' + c.b('npm run cleanup') + '\n')

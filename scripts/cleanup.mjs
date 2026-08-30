@@ -21,25 +21,25 @@ import { existsSync } from 'node:fs'
 const APPLY = process.argv.includes('--apply')
 const CLEAR = process.argv.includes('--clear')
 if (!existsSync('.env.test')) {
-  console.error('\nחסר .env.test (צריך SUPABASE_URL ו-SUPABASE_SERVICE_ROLE_KEY).\n')
+  console.error('\nMissing .env.test (needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY).\n')
   process.exit(1)
 }
 const run = (label, script, extra = '') => {
   console.log(`\n\x1b[1m── ${label} ──\x1b[0m`)
   const r = spawnSync(`node --env-file=.env.test scripts/${script} ${APPLY ? '--apply' : ''} ${extra}`,
     { shell: true, stdio: 'inherit' })
-  if (r.status !== 0) { console.error(`\n${label}: נכשל\n`); process.exit(1) }
+  if (r.status !== 0) { console.error(`\n${label}: FAILED\n`); process.exit(1) }
 }
 
-console.log(APPLY ? '\n\x1b[32mמצב ביצוע\x1b[0m' : '\n\x1b[33mהרצה יבשה — שום דבר לא ישתנה\x1b[0m')
-run('דו"ח מצב תמונות', 'analyze-images.mjs')
-run('העברת תמונות ל-Storage (שלב 1 — לא הרסני)', 'backfill-images.mjs', '--phase=1')
-run('יחידות מידה על קבלות קיימות', 'backfill-units.mjs')
+console.log(APPLY ? '\n\x1b[32mAPPLY mode - changes will be written\x1b[0m' : '\n\x1b[33mDRY RUN - nothing will change\x1b[0m')
+run('Image storage report', 'analyze-images.mjs')
+run('Move images to Storage (phase 1 - non-destructive)', 'backfill-images.mjs', '--phase=1')
+run('Unit pricing on existing receipts', 'backfill-units.mjs')
 
 if (CLEAR) {
-  console.log('\n\x1b[31mשלב 2 — מחיקת ה-base64 מהשורות. הרץ רק אחרי שאימתת שהתמונות נטענות באפליקציה.\x1b[0m')
-  run('ניקוי base64 מה-DB (הרסני)', 'backfill-images.mjs', '--phase=2')
+  console.log('\n\x1b[31mPhase 2 - clearing base64 from the rows. Only run this after you have verified thumbnails load in the app.\x1b[0m')
+  run('Clear base64 from the DB (destructive)', 'backfill-images.mjs', '--phase=2')
 } else {
-  console.log('\n\x1b[2mשלב 2 (מחיקת ה-base64) לא רץ. אחרי שתאמת שהתמונות נטענות: npm run cleanup -- --apply --clear\x1b[0m')
+  console.log('\n\x1b[2mPhase 2 (clearing base64) did not run. Once thumbnails are verified: npm run cleanup -- --apply --clear\x1b[0m')
 }
-console.log(APPLY ? '\n\x1b[32mהסתיים.\x1b[0m\n' : '\n\x1b[2mזו הייתה הרצה יבשה. לביצוע: npm run cleanup -- --apply\x1b[0m\n')
+console.log(APPLY ? '\n\x1b[32mDone.\x1b[0m\n' : '\n\x1b[2mThat was a dry run. To execute: npm run cleanup -- --apply\x1b[0m\n')
