@@ -14,15 +14,22 @@
  *   - Run phase-2 clearing only AFTER the new front-end (which no longer writes
  *     receipt_image) is deployed, or the old code will re-hydrate it.
  *
- * Run:
- *   node --env-file=.env.test scripts/backfill-images.mjs            # dry-run
- *   node --env-file=.env.test scripts/backfill-images.mjs --apply    # execute
+ * Run (in order — phase 2 is the only destructive step):
+ *   node --env-file=.env.test scripts/backfill-images.mjs                      # dry-run, both phases
+ *   node --env-file=.env.test scripts/backfill-images.mjs --apply --phase=1    # upload only (safe)
+ *   …deploy the new front-end, verify thumbnails load…
+ *   node --env-file=.env.test scripts/backfill-images.mjs --apply --phase=2    # clear inline images
  */
 import { createClient } from '@supabase/supabase-js'
 
 const URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY
 const APPLY = process.argv.includes('--apply')
+// Phase selection: 1 = upload to Storage (non-destructive), 2 = clear the inline
+// column (destructive). Default runs both, which is only safe once the front-end
+// that reads from Storage is already deployed.
+const phaseArg = (process.argv.find(a => a.startsWith('--phase')) || '').split('=')[1]
+const PHASE = phaseArg === '1' ? 1 : phaseArg === '2' ? 2 : 0   // 0 = both
 if (!URL || !SERVICE) { console.error('Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (.env.test).'); process.exit(1) }
 
 const sb = createClient(URL, SERVICE, { auth: { persistSession: false, autoRefreshToken: false } })
@@ -39,14 +46,15 @@ const { data: rows, error } = await sb
   .limit(100000)
 if (error) { console.error('load failed:', error.message); process.exit(1) }
 
-log(`\n${APPLY ? '🟢 APPLY' : '🔵 DRY-RUN'} — ${rows.length} receipts\n`)
+const phaseLabel = PHASE === 1 ? 'phase 1 only (upload)' : PHASE === 2 ? 'phase 2 only (clear)' : 'both phases'
+log(`\n${APPLY ? '🟢 APPLY' : '🔵 DRY-RUN'} — ${rows.length} receipts · ${phaseLabel}\n`)
 
 let toUpload = 0, uploadBytes = 0, uploaded = 0, uploadFail = 0
 let toClear = 0, clearBytes = 0, cleared = 0
 let skipped = 0
 
 // ── Phase 1: legacy inline image, no storage_path → upload to bucket ──────────
-for (const r of rows) {
+for (const r of (PHASE === 2 ? [] : rows)) {
   const img = r.receipt_image || ''
   const isDataUrl = img.startsWith('data:')
   if (r.storage_path || !isDataUrl) continue
@@ -66,7 +74,9 @@ for (const r of rows) {
 }
 
 // ── Phase 2: has storage_path but still an inline image → clear receipt_image ─
-for (const r of rows) {
+// DESTRUCTIVE. Only run once the deployed front-end reads images from Storage —
+// otherwise every existing receipt loses its preview.
+for (const r of (PHASE === 1 ? [] : rows)) {
   const img = r.receipt_image || ''
   if (!r.storage_path || !img) continue
   toClear++; clearBytes += img.length
@@ -80,5 +90,6 @@ log('\n── summary ───────────────────�
 log(`phase 1 — uploads to Storage : ${APPLY ? uploaded + ' done, ' + uploadFail + ' failed' : toUpload + ' pending'} · ${mb(uploadBytes)}`)
 log(`phase 2 — inline images clear: ${APPLY ? cleared + ' done' : toClear + ' pending'} · ${mb(clearBytes)} freed`)
 if (skipped) log(`skipped (non-dataURL inline): ${skipped}`)
-log(APPLY ? '\n✅ backfill complete — re-run scripts/analyze-images.mjs to verify 0 MB inline\n'
+if (PHASE === 1) log('\nphase 2 (clearing inline images) was NOT run — do that after deploying the new front-end.')
+log(APPLY ? '\n✅ done — re-run scripts/analyze-images.mjs to verify\n'
           : '\n(dry-run only — nothing changed. Re-run with --apply to execute.)\n')
