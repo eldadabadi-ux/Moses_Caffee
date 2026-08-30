@@ -38,8 +38,16 @@ const RECEIPT_FIELDS =
 
 // ── data access ──────────────────────────────────────────────────────────────
 
+/**
+ * Encode a value before it enters a PostgREST query string. The date filters
+ * below come from the MODEL, which means ultimately from user text — a '#' in
+ * one would truncate the URL and drop the tenant predicate from a service-role
+ * request (guardrail 3).
+ */
+const q = (v) => encodeURIComponent(String(v ?? ''))
+
 function scopeOf({ orgId, userId }) {
-  return orgId ? `org_id=eq.${orgId}` : `user_id=eq.${userId}`
+  return orgId ? `org_id=eq.${q(orgId)}` : `user_id=eq.${q(userId)}`
 }
 
 async function sbGet(url, key, path) {
@@ -59,8 +67,10 @@ async function sbGet(url, key, path) {
  */
 async function loadReceipts(ctx, { from, to, book } = {}) {
   const filters = [scopeOf(ctx)]
-  if (from) filters.push(`receipt_date=gte.${from}`)
-  if (to) filters.push(`receipt_date=lte.${to}`)
+  // Only well-formed dates reach the query at all — anything else is dropped
+  // rather than passed through as a filter fragment.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(from || ''))) filters.push(`receipt_date=gte.${q(from)}`)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(to || ''))) filters.push(`receipt_date=lte.${q(to)}`)
   const rows = await sbGet(ctx.url, ctx.key,
     `receipts?${filters.join('&')}&select=${RECEIPT_FIELDS}&order=receipt_date.desc.nullslast&limit=${MAX_ROWS + 1}`)
   const truncated = rows.length > MAX_ROWS

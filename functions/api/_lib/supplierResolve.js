@@ -19,9 +19,19 @@ import { matchVendor, normalizeVendor, isJunkVendor } from './supplierMatch.js'
 
 const sbHeaders = (key) => ({ apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' })
 
+/**
+ * Encode a value before it goes into a PostgREST query string.
+ *
+ * MUST be used for every client-supplied value. A raw '#' ends the URL at the
+ * fragment — everything after it, including the `&org_id=eq.…` tenant predicate,
+ * is never sent to the server. These requests carry the service-role key, so RLS
+ * is not a backstop: an unencoded id is a cross-tenant read/write (guardrail 3).
+ */
+const q = (v) => encodeURIComponent(String(v ?? ''))
+
 /** Tenant predicate — org when the user has one, else their user_id. */
 function scopeOf({ orgId, userId }) {
-  return orgId ? `org_id=eq.${orgId}` : `user_id=eq.${userId}`
+  return orgId ? `org_id=eq.${q(orgId)}` : `user_id=eq.${q(userId)}`
 }
 
 /**
@@ -29,20 +39,24 @@ function scopeOf({ orgId, userId }) {
  * Merged-away suppliers are excluded — they must never win a match again.
  */
 export async function loadSupplierCatalogue(url, key, { orgId, userId }) {
-  if (!key || !url || (!orgId && !userId)) return []
+  if (!key || !url || (!orgId && !userId)) return null
   try {
     const scope = scopeOf({ orgId, userId })
     const [supRes, aliasRes] = await Promise.all([
       fetch(`${url}/rest/v1/suppliers?${scope}&merged_into=is.null&select=id,name,user_id,org_id`, { headers: sbHeaders(key) }),
       fetch(`${url}/rest/v1/supplier_aliases?${scope}&select=supplier_id,alias`, { headers: sbHeaders(key) }),
     ])
-    if (!supRes.ok) return []
+    // null (not []) on failure — the caller MUST be able to tell "this tenant has
+    // no suppliers yet" from "I could not read the catalogue". Treating the
+    // second as the first would create a fresh supplier on every scan, which is
+    // the exact vendor-name explosion this module exists to prevent.
+    if (!supRes.ok) return null
     const suppliers = await supRes.json()
     const aliases = aliasRes.ok ? await aliasRes.json() : []
     const byId = {}
     for (const a of aliases) (byId[a.supplier_id] ||= []).push(a.alias)
     return (suppliers || []).map(s => ({ ...s, aliases: byId[s.id] || [] }))
-  } catch { return [] }
+  } catch { return null }
 }
 
 /** Insert a supplier and return the created row (or null). */
@@ -50,7 +64,11 @@ export async function createSupplier(url, key, { name, userId, orgId, createdFro
   const clean = String(name || '').trim()
   if (!clean) return null
   try {
-    const res = await fetch(`${url}/rest/v1/suppliers`, {
+    // on_conflict must name the real unique index (user_id, name); without it
+    // merge-duplicates targets the primary key, which never collides because id
+    // is generated — so a repeat name raised a 23505 and surfaced as a 500 on
+    // what should be an idempotent no-op.
+    const res = await fetch(`${url}/rest/v1/suppliers?on_conflict=user_id,name`, {
       method: 'POST',
       headers: { ...sbHeaders(key), Prefer: 'return=representation,resolution=merge-duplicates' },
       body: JSON.stringify({ name: clean, user_id: userId, org_id: orgId || null, created_from: createdFrom }),
@@ -104,6 +122,11 @@ export async function resolveSupplier({ vendorName, url, key, userId, orgId, cat
   if (isJunkVendor(vendorName)) return { ...miss, outcome: 'skipped' }
 
   const list = catalogue || await loadSupplierCatalogue(url, key, { orgId, userId })
+  if (list === null) {
+    // Could not read the catalogue — leave the receipt unlinked rather than
+    // inventing a supplier we might already have. The scan still succeeds.
+    return { ...miss, outcome: 'skipped', reason: 'catalogue_unavailable' }
+  }
   const m = matchVendor(vendorName, list)
 
   if (m.decision === 'auto' && m.supplier) {

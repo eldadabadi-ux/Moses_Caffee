@@ -79,10 +79,23 @@ export default function SuppliersPage() {
 
   // Union of vendors-from-receipts + manual-only contacts
   const rows = useMemo(() => {
-    const byName = {}
-    stats.forEach(s => { byName[s.name] = { name: s.name, stats: s, contact: contactByName[s.name] || null } })
-    contacts.forEach(c => { const n = (c.name || '').trim(); if (!byName[n]) byName[n] = { name: n, stats: null, contact: c } })
-    let list = Object.values(byName)
+    // Keyed by supplier_id when the receipts are linked, else by name. Keying by
+    // NAME alone silently dropped spend: a linked group and a not-yet-linked
+    // group can carry the same display name, and the second write replaced the
+    // first — showing ₪300 for a supplier who had cost ₪9,300.
+    const byKey = {}
+    stats.forEach(s => {
+      const k = s.supplierId || `name:${s.name}`
+      byKey[k] = { key: k, name: s.name, stats: s, contact: contactByName[s.name] || null }
+    })
+    contacts.forEach(c => {
+      const n = (c.name || '').trim()
+      const k = c.id || `name:${n}`
+      if (!byKey[k] && !Object.values(byKey).some(r => r.name === n)) {
+        byKey[k] = { key: k, name: n, stats: null, contact: c }
+      }
+    })
+    let list = Object.values(byKey)
     const q = search.trim().toLowerCase()
     if (q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.contact?.supplies || '').toLowerCase().includes(q))
     return list.sort((a, b) => (b.stats?.total || 0) - (a.stats?.total || 0))
@@ -142,7 +155,7 @@ export default function SuppliersPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(330px, 1fr))', gap: '14px' }}>
         {rows.map((row) => { const { name, stats: s, contact } = row; return (
-          <div key={name} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+          <div key={row.key} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
             {/* Title row */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Store size={18} color="var(--accent)" /></div>

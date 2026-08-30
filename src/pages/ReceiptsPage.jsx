@@ -1520,11 +1520,12 @@ export default function ReceiptsPage() {
 
         {/* Book of account — the café and the catering events are separate ledgers,
             so the switch is a top-level tab, not a filter chip. */}
-        {!archiveView && (
+        {(
           <div style={{ display:'flex', gap:6 }}>
             {BOOKS.map(b => {
               const on = bookView === b.value
-              const n = (receipts || []).filter(r => bookOf(r) === b.value).length
+              // Count what the CURRENT view holds, so the archive shows archive counts.
+              const n = ((archiveView ? archived : receipts) || []).filter(r => bookOf(r) === b.value).length
               return (
                 <button key={b.value} onClick={() => setBookView(b.value)}
                   style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:10, border:`1.5px solid ${on ? 'var(--accent)' : 'var(--border)'}`, background: on ? 'var(--accent-bg)' : 'var(--panel)', color: on ? 'var(--accent)' : 'var(--text-mute)', fontSize:'13.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>

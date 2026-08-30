@@ -269,3 +269,35 @@ test('orientation reports that an events book exists without mixing it in', asyn
   assert.match(o.total_spend, /372/)
   assert.ok(!o.total_spend.includes('8,372'))
 })
+
+// ── URL encoding (the fragment-truncation class of bug) ──────────────────────
+test('a "#" in a scope value cannot truncate the query string', async () => {
+  installStub()
+  // Unencoded, "org-1#" would end the URL at the fragment and every filter after
+  // it — including the tenant predicate itself — would never reach the server.
+  await runTool('query_receipts', {}, { ...CTX, orgId: 'org-1#' })
+  for (const u of lastUrls) {
+    assert.ok(!u.includes('#'), `raw # reached the URL: ${u}`)
+    assert.ok(u.includes('org_id=eq.org-1%23'), `predicate lost: ${u}`)
+    // Everything the caller asked for must still be present after the id.
+    assert.ok(u.includes('select='), `filters truncated: ${u}`)
+  }
+})
+
+test('model-supplied date filters are validated, not passed through', async () => {
+  installStub()
+  await runTool('query_receipts', { from: "2026-01-01#&user_id=eq.someone", to: 'לא ידוע' }, CTX)
+  for (const u of lastUrls) {
+    assert.ok(!u.includes('#'), `raw # reached the URL: ${u}`)
+    assert.ok(!u.includes('someone'), `injected filter survived: ${u}`)
+    assert.ok(!u.includes('receipt_date=gte'), `malformed date became a filter: ${u}`)
+  }
+})
+
+test('a well-formed date filter still works', async () => {
+  installStub()
+  await runTool('query_receipts', { from: '2026-01-01', to: '2026-12-31' }, CTX)
+  const receiptCall = lastUrls.find(u => u.includes('/rest/v1/receipts'))
+  assert.ok(receiptCall.includes('receipt_date=gte.2026-01-01'))
+  assert.ok(receiptCall.includes('receipt_date=lte.2026-12-31'))
+})

@@ -240,7 +240,9 @@ export default function ReconciliationPage() {
   async function loadData() {
     try {
       const { data, error } = await supabase
-        .from('receipts').select('*').is('archived_at', null)
+        // Café book only — an events delivery note must never be matched against
+        // a café summary invoice (client request #17).
+        .from('receipts').select('*').is('archived_at', null).eq('book', 'cafe')
         .order('receipt_date', { ascending: false })
       if (error) throw error
       setReceipts(data || []); setCached('receipts', data || [])

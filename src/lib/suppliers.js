@@ -12,14 +12,12 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 // ── Contact CRUD (graceful if the table doesn't exist yet) ───────────────────
 export async function loadSuppliers(userId) {
   // Merged-away suppliers stay in the table for provenance but must never show
-  // up as a supplier again.
-  let { data, error } = await supabase.from('suppliers')
+  // up as a supplier again. No retry-without-the-column ladder here: the
+  // migration is authoritative, and a fallback would quietly resurrect merged
+  // suppliers into the picker (guardrail 1).
+  const { data, error } = await supabase.from('suppliers')
     .select('*').eq('user_id', userId).is('merged_into', null).order('name')
-  if (error) {
-    // Pre-migration DB (no merged_into column) → fall back to the plain list.
-    ;({ data, error } = await supabase.from('suppliers').select('*').eq('user_id', userId).order('name'))
-  }
-  if (error) return []                       // table not created yet → no contacts
+  if (error) { console.warn('[suppliers] load failed:', error.message); return [] }
   return data || []
 }
 
@@ -93,9 +91,11 @@ export function deriveVendorStats(receipts, contacts = []) {
     // Item-level stats are keyed by the raw scanned names, so a merged supplier
     // must gather the composition of ALL its spellings.
     const raws = [...v.rawNames].filter(Boolean)
-    const comp = vendorComposition(flat, raws.length === 1 ? raws[0] : v.name, raws)
+    const comp = vendorComposition(flat, raws[0] || v.name, raws)
     const cats = {}
-    flat.forEach(f => { if (raws.includes(f.vendor) || f.vendor === v.name) cats[f.l1] = (cats[f.l1] || 0) + f.price })
+    // Only this group's OWN raw spellings — matching on the display name too
+    // would pull an unlinked group's items into the linked one as well.
+    flat.forEach(f => { if (raws.includes(f.vendor)) cats[f.l1] = (cats[f.l1] || 0) + f.price })
     const topCategories = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, total]) => ({ name, total: r2(total) }))
     // Only real, summed figures — never extrapolated daily/weekly/yearly averages
     // (a single receipt must not invent a "yearly" cost). Period sums grow as

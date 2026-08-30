@@ -18,6 +18,11 @@ import { normalizeVendor } from '../_lib/supplierMatch.js'
 import { errorResponse } from '../_lib/response.js'
 import { writeAudit } from '../_lib/audit.js'
 
+// Every client-supplied value is encoded before it enters a PostgREST query
+// string: a raw '#' would truncate the URL and drop the tenant predicate from a
+// service-role request (guardrail 3).
+const q = (v) => encodeURIComponent(String(v ?? ''))
+
 const cors = (request, env) => ({
   'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || (request.headers.get('origin') || '').trim() || '*',
   'Content-Type': 'application/json',
@@ -51,8 +56,8 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
 
   if (supplierId) {
     // Confirm the supplier belongs to this tenant BEFORE trusting the client's id.
-    const scope = user.org_id ? `org_id=eq.${user.org_id}` : `user_id=eq.${user.user_id}`
-    const res = await fetch(`${url}/rest/v1/suppliers?id=eq.${supplierId}&${scope}&select=id,name`, {
+    const scope = user.org_id ? `org_id=eq.${q(user.org_id)}` : `user_id=eq.${q(user.user_id)}`
+    const res = await fetch(`${url}/rest/v1/suppliers?id=eq.${q(supplierId)}&${scope}&select=id,name`, {
       headers: { apikey: key, Authorization: `Bearer ${key}` },
     })
     const rows = res.ok ? await res.json() : []
@@ -72,8 +77,8 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     : await learnAlias(url, key, { supplierId, alias: scanned, userId: user.user_id, orgId: user.org_id, source: 'scan_confirmed' })
 
   if (receiptId) {
-    const scope = user.org_id ? `org_id=eq.${user.org_id}` : `user_id=eq.${user.user_id}`
-    await fetch(`${url}/rest/v1/receipts?id=eq.${receiptId}&${scope}`, {
+    const scope = user.org_id ? `org_id=eq.${q(user.org_id)}` : `user_id=eq.${q(user.user_id)}`
+    await fetch(`${url}/rest/v1/receipts?id=eq.${q(receiptId)}&${scope}`, {
       method: 'PATCH',
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
       body: JSON.stringify({ supplier_id: supplierId }),

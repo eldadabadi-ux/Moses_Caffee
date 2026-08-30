@@ -37,19 +37,24 @@ export default function SupplierMergePage() {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy]       = useState(false)
-  // { [clusterIndex]: { canonical, picked: Set<name> } }
+  // { [canonicalName]: { canonical, picked: Set<name> } }
   const [choices, setChoices] = useState({})
+  // Ask-band suggestions the user explicitly accepted: { [canonicalName]: supplierId }
+  const [accepted, setAccepted] = useState({})
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const d = await authFetch('/api/suppliers/merge')
       setData(d)
-      // Pre-select the confident members only; anything in `review` starts
-      // unchecked so a borderline pair is an opt-in, never a default.
+      // Keyed by the cluster's CANONICAL NAME, not its index. Keying by index
+      // broke as soon as a junk cluster sat between two real ones: the render
+      // loop filters junk out and re-indexes, so slot i showed one cluster while
+      // reading and writing another cluster's choices — every checkbox click and
+      // rename went to the wrong place, silently.
       const init = {}
-      d.clusters.forEach((c, i) => {
-        init[i] = { canonical: c.canonical, picked: new Set(c.members.map(m => m.name)) }
+      d.clusters.forEach(c => {
+        init[c.canonical] = { canonical: c.canonical, picked: new Set(c.members.map(m => m.name)) }
       })
       setChoices(init)
     } catch (e) { toast.error(e.message) }
@@ -58,19 +63,20 @@ export default function SupplierMergePage() {
 
   useEffect(() => { load() }, [load])
 
-  const toggle = (i, name) => setChoices(prev => {
-    const cur = prev[i]
+  const toggle = (key, name) => setChoices(prev => {
+    const cur = prev[key]
+    if (!cur) return prev
     const picked = new Set(cur.picked)
     picked.has(name) ? picked.delete(name) : picked.add(name)
-    return { ...prev, [i]: { ...cur, picked } }
+    return { ...prev, [key]: { ...cur, picked } }
   })
 
-  const setCanonical = (i, canonical) => setChoices(prev => ({ ...prev, [i]: { ...prev[i], canonical } }))
+  const setCanonical = (key, canonical) => setChoices(prev => ({ ...prev, [key]: { ...prev[key], canonical } }))
 
   // Only clusters where something is actually being grouped or linked.
   const pending = useMemo(() => {
     if (!data) return []
-    return data.clusters.map((c, i) => ({ c, i, picked: choices[i]?.picked || new Set() }))
+    return data.clusters.map(c => ({ c, key: c.canonical, picked: choices[c.canonical]?.picked || new Set() }))
       .filter(({ c, picked }) => !c.junk && picked.size > 0)
   }, [data, choices])
 
@@ -85,10 +91,13 @@ export default function SupplierMergePage() {
     if (!pending.length) { toast.error('לא נבחר דבר'); return }
     setBusy(true)
     try {
-      const groups = pending.map(({ c, i, picked }) => ({
-        canonical: choices[i].canonical,
-        supplier_id: c.existing_supplier?.id || undefined,
+      const groups = pending.map(({ c, key, picked }) => ({
+        canonical: choices[key].canonical,
+        supplier_id: c.existing_supplier?.id || accepted[key] || undefined,
         aliases: [...picked],
+        // Echo back the EXACT spellings stored on the rows, so trimming
+        // differences don't leave receipts unlinked.
+        stored: c.stored,
       }))
       const r = await authFetch('/api/suppliers/merge', { method: 'POST', body: JSON.stringify({ groups }) })
       toast.success(`${r.suppliers_created} ספקים נוצרו · ${r.receipts_linked} קבלות קושרו`)
@@ -136,14 +145,15 @@ export default function SupplierMergePage() {
       </div>
 
       {/* Clusters */}
-      {data.clusters.filter(c => !c.junk).map((c, i) => {
-        const picked = choices[i]?.picked || new Set()
+      {data.clusters.filter(c => !c.junk).map(c => {
+        const key = c.canonical
+        const picked = choices[key]?.picked || new Set()
         const isMerge = [...c.members, ...c.review].length > 1
         return (
-          <div key={c.canonical + i} style={{ background: 'var(--panel)', border: `1px solid ${isMerge ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 'var(--r-card)', padding: 14 }}>
+          <div key={key} style={{ background: 'var(--panel)', border: `1px solid ${isMerge ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 'var(--r-card)', padding: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: isMerge ? 10 : 0, flexWrap: 'wrap' }}>
               <Store size={16} color="var(--accent)" style={{ flexShrink: 0 }} />
-              <input value={choices[i]?.canonical ?? c.canonical} onChange={e => setCanonical(i, e.target.value)}
+              <input value={choices[key]?.canonical ?? c.canonical} onChange={e => setCanonical(key, e.target.value)}
                 aria-label="שם הספק"
                 style={{ flex: '1 1 220px', minWidth: 0, fontSize: 15.5, fontWeight: 700, color: 'var(--text)', background: 'var(--panel-2)', border: '1px solid var(--border)', borderRadius: 8, padding: '7px 10px', fontFamily: 'var(--font-main)' }} />
               <span style={{ fontSize: 13, color: 'var(--text-mute)', whiteSpace: 'nowrap' }}>
@@ -157,6 +167,21 @@ export default function SupplierMergePage() {
               )}
             </div>
 
+            {/* A plausible-but-uncertain match with an existing supplier. Offered,
+                never applied on its own — a 65% match linked silently would fold
+                one business into another permanently. */}
+            {!c.existing_supplier && c.possible_supplier && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'var(--panel-2)' }}>
+                <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>
+                  ייתכן שזה הספק הקיים <strong>{c.possible_supplier.name}</strong> ({Math.round(c.possible_supplier.score * 100)}%)
+                </span>
+                <button onClick={() => setAccepted(a => ({ ...a, [key]: a[key] ? undefined : c.possible_supplier.id }))}
+                  style={{ padding: '4px 12px', borderRadius: 999, border: `1px solid ${accepted[key] ? 'var(--accent)' : 'var(--border)'}`, background: accepted[key] ? 'var(--accent-bg)' : 'var(--panel)', color: accepted[key] ? 'var(--accent)' : 'var(--text-mute)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  {accepted[key] ? 'כן — אותו ספק ✓' : 'כן, אותו ספק'}
+                </button>
+              </div>
+            )}
+
             {isMerge && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {[...c.members, ...c.review].map(m => {
@@ -165,7 +190,7 @@ export default function SupplierMergePage() {
                   return (
                     <label key={m.name}
                       style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', background: on ? 'var(--accent-bg)' : 'transparent' }}>
-                      <input type="checkbox" checked={on} onChange={() => toggle(i, m.name)} style={{ width: 16, height: 16, accentColor: 'var(--accent)', flexShrink: 0 }} />
+                      <input type="checkbox" checked={on} onChange={() => toggle(key, m.name)} style={{ width: 16, height: 16, accentColor: 'var(--accent)', flexShrink: 0 }} />
                       <span style={{ flex: 1, minWidth: 0, fontSize: 14.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
                       {needsReview && (
                         <span title={`ודאות ${Math.round(m.score * 100)}% — כדאי לוודא`}

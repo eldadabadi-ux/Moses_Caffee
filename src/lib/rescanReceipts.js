@@ -13,6 +13,11 @@ import { supabase } from './supabase'
 import { receiptScanImage } from './receiptImage'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+// /api/scan-receipt allows 30 requests per minute per user (see its
+// checkRateLimit call). At the old 900ms pace a bulk rescan ran at ~66/min, so
+// everything after the first 30 came back 429 and was silently counted as a
+// failure. Stay just inside the server's own limit.
+const THROTTLE_MS = 2100
 const r2 = (n) => Math.round(n * 100) / 100
 // A valid ISO date string (YYYY-MM-DD) that is also a real calendar date.
 const isValidISODate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && !Number.isNaN(Date.parse(s))
@@ -42,11 +47,21 @@ export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal
 
       const { data: { session } } = await supabase.auth.getSession()
       const token = session?.access_token
-      const res = await fetch('/api/scan-receipt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ imageBase64: uploadUrl.split(',')[1], mimeType: 'image/jpeg', vatRate }),
-      })
+      const body = JSON.stringify({ imageBase64: uploadUrl.split(',')[1], mimeType: 'image/jpeg', vatRate })
+      const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+
+      // A 429 means "too fast", not "broken" — wait out the window and retry a
+      // bounded number of times rather than counting it as a failed receipt.
+      let res = null
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        res = await fetch('/api/scan-receipt', { method: 'POST', headers, body })
+        if (res.status !== 429 || attempt === 3) break
+        const retryAfter = parseInt(res.headers.get('retry-after') || '', 10)
+        await sleep(Number.isFinite(retryAfter) ? Math.min(retryAfter, 60) * 1000 : 20000)
+        if (signal?.aborted) break
+      }
+      if (signal?.aborted) break
+
       if (res.ok) {
         const result = await res.json()
         const fx = result.fx   // foreign currency → convert to ILS with the official rate
@@ -75,9 +90,15 @@ export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal
                        orig_price: op, orig_unit_price: oup, currency: result.currency }
             })
           }
+          // The scan endpoint resolves the vendor to a canonical supplier; a
+          // confident match is worth keeping, otherwise the rescan would create
+          // suppliers server-side and link none of them.
+          const supplierPatch = result.supplier?.supplier_id
+            ? { supplier_id: result.supplier.supplier_id } : {}
           const patch = {
             amount: t,
             items: newItems,
+            ...supplierPatch,
             ...(isValidISODate(newDate) ? { receipt_date: newDate } : {}),
             amount_before_vat: before, vat_amount: vat, vat_rate: vatRate,
             ai_summary: { ...(r.ai_summary || {}), total: t, before_vat: before, vat_amount: vat, vat_rate: vatRate, rescanned_at: new Date().toISOString(),
@@ -91,7 +112,7 @@ export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal
     } catch { failed++ }
     done++
     onProgress?.({ done, total: list.length, fixed, failed })
-    await sleep(900)  // throttle so the free Gemini tier doesn't rate-limit (429)
+    await sleep(THROTTLE_MS)
   }
 
   return { total: list.length, fixed, failed, skipped, changes }

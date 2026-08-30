@@ -18,8 +18,9 @@ export function useReconcileAlerts() {
       try {
         const { data, error } = await supabase
           .from('receipts')
-          .select('id, doc_type, reconciliation, archived_at')
+          .select('id, doc_type, reconciliation, archived_at, book')
           .eq('doc_type', 'summary_invoice')
+          .eq('book', 'cafe')
           .is('archived_at', null)
         if (error || !alive) return
         setCount(openIssues(data || []).length)
