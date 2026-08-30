@@ -44,10 +44,20 @@ export async function uploadReceiptFile(userId, receiptId, file, mime) {
   return path
 }
 
-/** Short-lived signed URL for displaying/downloading a stored receipt file. */
-export async function signedReceiptUrl(path, expiresIn = 3600) {
+/**
+ * Short-lived signed URL for displaying/downloading a stored receipt file.
+ * Pass `transform` (e.g. { width: 96, height: 96, resize: 'cover', quality: 60 })
+ * for a resized thumbnail; if the project has no image-transform plan the call
+ * gracefully falls back to the original file.
+ */
+export async function signedReceiptUrl(path, expiresIn = 3600, transform = null) {
   if (!path) return null
-  const { data, error } = await supabase.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, expiresIn)
+  const opts = transform ? { transform } : undefined
+  let { data, error } = await supabase.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, expiresIn, opts)
+  if (error && transform) {
+    // image transformations may be unavailable on the current plan → serve original
+    ;({ data, error } = await supabase.storage.from(RECEIPTS_BUCKET).createSignedUrl(path, expiresIn))
+  }
   if (error) return null
   return data?.signedUrl || null
 }

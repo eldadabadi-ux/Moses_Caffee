@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useSettings } from '../hooks/useSettings'
 import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
@@ -65,6 +65,7 @@ const NAV = [
 export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut, onCollapse }) {
   const navigate = useNavigate()
   const location = useLocation()
+  const asideRef = useRef(null)
   const { settings } = useSettings()
   const reconcileCount = useReconcileAlerts()
   const activeSection = NAV.find(s => s.to === location.pathname)?.id
@@ -74,6 +75,26 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
 
   // Navigating to a tab opens that section (and closes the previous one).
   useEffect(() => { if (activeSection) setOpenId(activeSection) }, [activeSection])
+
+  // Clicking anywhere outside the menu closes it (mobile drawer AND desktop
+  // panel). `mousedown` rather than `click` so the menu is gone before the
+  // click lands on whatever is underneath — one click both dismisses and acts.
+  useEffect(() => {
+    const dismiss = onClose || onCollapse
+    if (!dismiss) return
+    function onPointerDown(e) {
+      if (asideRef.current && !asideRef.current.contains(e.target)) dismiss()
+    }
+    function onKey(e) { if (e.key === 'Escape') dismiss() }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('touchstart', onPointerDown, { passive: true })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('touchstart', onPointerDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [onClose, onCollapse])
 
   function toggle(id) { setOpenId(cur => (cur === id ? null : id)) }
 
@@ -98,7 +119,7 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
   const W = 250
 
   return (
-    <aside style={{
+    <aside ref={asideRef} style={{
       position: 'fixed', top: 0, right: 0, height: '100dvh', width: W, zIndex: 200,
       background: 'var(--panel)', borderLeft: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-main)',

@@ -19,17 +19,19 @@ import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
   CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
-  Archive, RotateCcw, AlertTriangle, FileText, ListChecks,
+  Archive, RotateCcw, AlertTriangle, ListChecks,
 } from 'lucide-react'
 import { DOC_TYPES, docTypeOf, docTypeLabel, isExpenseDoc, DOC_COL_RE } from '../lib/docTypes'
 import { openIssues } from '../lib/reconciliation'
 import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/storage'
+import { fetchLegacyInlineImage } from '../lib/receiptImage'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import DateInput from '../components/ui/DateInput'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import Badge from '../components/ui/Badge'
+import ReceiptThumb from '../components/ReceiptThumb'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +45,10 @@ const COMMON_CATEGORIES = [
 
 const fmtDate = d => d ? d.split('-').reverse().join('.') : ''
 const fmtILS  = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2 })}`
+
+// All receipt columns EXCEPT the heavy base64 receipt_image — the list never
+// pulls image bytes; thumbnails load lazily from storage_path (audit C1).
+const RECEIPT_COLS = 'id, user_id, vendor_name, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation'
 // Foreign-currency helpers (for receipts from abroad)
 const CUR_SYMBOL = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'Fr', AUD: 'A$', CAD: 'C$', ILS: '₪' }
 const fmtCur = (n, code) => {
@@ -176,7 +182,7 @@ function CameraModal({ onCapture, onClose, multi = false, onFiles }) {
               <div style={{ color: '#fff', fontSize: 13.5, fontWeight: 600, marginBottom: pages.length ? 8 : 0, textAlign: 'center' }}>
                 {pages.length === 0
                   ? 'צלם את הקבלה — אפשר להוסיף כמה עמודים'
-                  : `צולמו ${pages.length} עמודים · "המשך סריקה" לעמוד נוסף, "המשך" לסיום`}
+                  : `צולמו ${pages.length} עמודים · "המשך סריקה" לעמוד נוסף, "סיום" לסיום הסריקה`}
               </div>
               {pages.length > 0 && (
                 <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
@@ -210,7 +216,7 @@ function CameraModal({ onCapture, onClose, multi = false, onFiles }) {
             {multi ? (
               <button onClick={finish} disabled={!pages.length}
                 style={{ minWidth: 64, height: 52, padding: '0 16px', borderRadius: 26, background: pages.length ? '#16a34a' : 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: pages.length ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', fontFamily: 'var(--font-main)', flexShrink: 0 }}>
-                המשך{pages.length ? ` (${pages.length})` : ''}
+                סיום{pages.length ? ` (${pages.length})` : ''}
               </button>
             ) : <div style={{ width: 52 }} />}
           </div>
@@ -381,7 +387,7 @@ function CropModal({ src, onConfirm, onCancel }) {
 function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 18, onClose, onExported }) {
   const [opts, setOpts] = useState({ excel: true, pdf: true, images: true })
   const [busy, setBusy] = useState(false)
-  const nImages = receipts.filter(r => r.receipt_image).length
+  const nImages = receipts.filter(r => r.storage_path || r.receipt_image).length
   const noneSelected = !opts.excel && !opts.pdf && !opts.images
   const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent) || window.innerWidth < 768
   const selectedCount = [opts.excel, opts.pdf, opts.images && nImages > 0].filter(Boolean).length
@@ -573,7 +579,7 @@ export default function ReceiptsPage() {
     if (!hasCached('receipts')) setLoading(true)
     try {
       const { data, error } = await supabase
-        .from('receipts').select('*').is('archived_at', null)
+        .from('receipts').select(RECEIPT_COLS).is('archived_at', null)
         .order('receipt_date', { ascending: false })
       if (error) throw error
       setReceipts(data || [])
@@ -957,9 +963,9 @@ export default function ReceiptsPage() {
           }
         }
       } catch (upErr) { console.warn('[approveScan] bucket upload failed, keeping inline image:', upErr?.message); storagePath = null }
-      // Thumbnail for the list when the original is safely in the bucket; otherwise
-      // fall back to the full inline image (legacy behaviour).
-      const thumbImage = storagePath ? await downscaleForUpload(finalImage, 256, 0.55) : finalImage
+      // Full image is safely in the bucket → keep NO base64 in the row (audit C1);
+      // only if the upload failed do we fall back to an inline image so none is lost.
+      const thumbImage = storagePath ? null : finalImage
       const uploadedExtras = storagePath && extraPaths.length === extraPages.length
 
       // Amounts are entered in the ORIGINAL currency; for a foreign receipt we
@@ -1065,11 +1071,21 @@ export default function ReceiptsPage() {
         if (created) { category_id = created.id; loadCategories() }
       } catch { /* category row optional — category_text still drives display */ }
     }
+    // Route a newly-attached photo to Storage — never base64 in the row (audit C1).
+    // An unchanged edit keeps imagePreview as a signed URL / null → image untouched.
+    let imgPatch = {}
+    if (imagePreview && imagePreview.startsWith('data:')) {
+      try {
+        const blob = dataUrlToBlob(imagePreview)
+        const path = await uploadReceiptFile(user.id, `manual_${Math.random().toString(36).slice(2, 10)}`, blob, blob?.type || 'image/jpeg')
+        imgPatch = { storage_path: path, receipt_image: null }
+      } catch { imgPatch = { receipt_image: imagePreview } }   // offline fallback: keep inline
+    }
     const payload = {
       user_id: user.id, vendor_name: form.vendor_name || null,
       receipt_date: form.receipt_date || new Date().toISOString().slice(0, 10),
       amount: totalAmt, currency: 'ILS',
-      category_text: catName, category_id, receipt_image: imagePreview || null,
+      category_text: catName, category_id, ...imgPatch,
       items: cleanItems.length ? cleanItems : null,
     }
     const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
@@ -1146,72 +1162,27 @@ export default function ReceiptsPage() {
     } finally { setBulkBusy(false) }
   }
 
-  // ── Inbound-receipt preview hydration ─────────────────────────────────────
-  // Email receipts arrive with only the ORIGINAL file in the private bucket
-  // (PDFs have no inline image). Render it to a compressed preview image and
-  // save it on the row — from then on they behave EXACTLY like camera scans
-  // (thumbnail + floating zoomable viewer). One-time per receipt.
-  async function hydratePreview(r) {
-    try {
-      const url = await signedReceiptUrl(r.storage_path)
-      if (!url) return null
-      const blob = await fetch(url).then(x => (x.ok ? x.blob() : null))
-      if (!blob) return null
-      let dataUrl = null
-      if (/\.pdf$/i.test(r.storage_path)) {
-        // pdf.js first-page render — already a compressed JPEG data URL (same as
-        // camera PDF uploads). NOTE: no fetch(dataUrl) here — CSP connect-src
-        // blocks data: URLs, which silently killed the previous version.
-        const pages = await pdfToImages(blob, { maxPages: 1 })
-        dataUrl = pages[0] || null
-      } else {
-        // Image file: camera-profile compression straight from the blob.
-        const file = new File([blob], 'receipt.jpg', { type: blob.type || 'image/jpeg' })
-        try { ({ dataUrl } = await compressImage(file)) } catch {}
-      }
-      if (!dataUrl) return null
-      const { error } = await supabase.from('receipts').update({ receipt_image: dataUrl }).eq('id', r.id)
-      if (!error) setReceipts(prev => { const next = prev.map(x => x.id === r.id ? { ...x, receipt_image: dataUrl } : x); setCached('receipts', next); return next })
-      return dataUrl
-    } catch { return null }
-  }
-
-  // Auto-hydrate a few at a time whenever un-previewed inbound receipts are visible.
-  const hydratingRef = useRef(new Set())
-  useEffect(() => {
-    if (archiveView) return
-    const todo = receipts.filter(r => !r.receipt_image && r.storage_path && !hydratingRef.current.has(r.id)).slice(0, 3)
-    if (!todo.length) return
-    todo.forEach(r => hydratingRef.current.add(r.id))
-    ;(async () => { for (const r of todo) await hydratePreview(r) })()
-  }, [receipts, archiveView])
-
-  // Click on a not-yet-hydrated inbound receipt: hydrate now, then open the
-  // floating viewer (fallback to the raw file in a new tab if rendering fails).
-  async function openStoredFile(r) {
-    const t = toast.loading('טוען קבלה…')
-    const dataUrl = await hydratePreview(r)
-    toast.dismiss(t)
-    if (dataUrl) { setLightboxUrl(dataUrl); return }
-    const url = await signedReceiptUrl(r.storage_path)
-    if (url) window.open(url, '_blank', 'noopener')
-    else toast.error('הקובץ המקורי לא זמין')
-  }
+  // (audit C1) Thumbnails now load straight from Storage via <ReceiptThumb>, so we
+  // no longer render a preview back into receipt_image — nothing to hydrate here.
 
   // Open the FULL-resolution original from the private bucket via a short-lived
   // signed URL — WITHOUT writing it back into the row (keeps full images out of
   // the DB, A.8.24). The list shows only a small thumbnail; this is the zoom.
   async function viewFull(r) {
-    if (!r.storage_path) { if (r.receipt_image) setLightboxUrl(r.receipt_image); return }
     const t = toast.loading('טוען קבלה…')
     try {
-      const url = await signedReceiptUrl(r.storage_path)
+      if (r.storage_path) {
+        const url = await signedReceiptUrl(r.storage_path)
+        if (url && /\.pdf$/i.test(r.storage_path)) { toast.dismiss(t); window.open(url, '_blank', 'noopener'); return }
+        if (url) { toast.dismiss(t); setLightboxUrl(url); return }
+      }
+      // Not in the bucket yet (pre-backfill row): pull the legacy inline image
+      // for THIS receipt only — the list query never loads that column.
+      const legacy = r.receipt_image || await fetchLegacyInlineImage(r.id)
       toast.dismiss(t)
-      if (url && /\.pdf$/i.test(r.storage_path)) { window.open(url, '_blank', 'noopener'); return }
-      if (url) { setLightboxUrl(url); return }
-      if (r.receipt_image) setLightboxUrl(r.receipt_image)
+      if (legacy) setLightboxUrl(legacy)
       else toast.error('הקובץ המקורי לא זמין')
-    } catch { toast.dismiss(t); if (r.receipt_image) setLightboxUrl(r.receipt_image); else toast.error('שגיאה בטעינה') }
+    } catch { toast.dismiss(t); toast.error('שגיאה בטעינה') }
   }
 
   // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
@@ -1229,7 +1200,7 @@ export default function ReceiptsPage() {
     setArchivedLoading(true)
     try {
       const { data, error } = await supabase
-        .from('receipts').select('*').not('archived_at', 'is', null)
+        .from('receipts').select(RECEIPT_COLS).not('archived_at', 'is', null)
         .order('archived_at', { ascending: false })
       if (error) throw error
       setArchived(data || [])
@@ -1291,7 +1262,14 @@ export default function ReceiptsPage() {
       items: Array.isArray(r.items) ? r.items.map(it => ({ ...it })) : [],
       doc_type: docTypeOf(r),
     })
-    setImagePreview(r.receipt_image||null)
+    // Preview loads from Storage (no base64 in the row); for a row that hasn't
+    // been backfilled yet, pull its legacy inline image by id (single row only).
+    setImagePreview(r.receipt_image || null)
+    if (r.storage_path && !/\.pdf$/i.test(r.storage_path)) {
+      signedReceiptUrl(r.storage_path).then(u => { if (u) setImagePreview(u) })
+    } else if (!r.receipt_image && !r.storage_path) {
+      fetchLegacyInlineImage(r.id).then(img => { if (img) setImagePreview(img) })
+    }
     setShowModal(true)
   }
 
@@ -1561,21 +1539,13 @@ export default function ReceiptsPage() {
                   {isSel && <CheckCircle2 size={14} color="white" />}
                 </div>
               )}
-              {/* Thumbnail */}
-              {r.receipt_image ? (
-                <button onClick={selecting ? undefined : () => (r.storage_path ? viewFull(r) : setLightboxUrl(r.receipt_image))} title={r.storage_path ? 'הצג קבלה מלאה' : undefined} style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border)', background:'var(--panel-2)', flexShrink:0, cursor:'pointer', padding:0 }}>
-                  <img src={r.receipt_image} alt="קבלה" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
-                </button>
-              ) : r.storage_path ? (
-                <button onClick={selecting ? undefined : () => openStoredFile(r)} title="פתח את הקובץ המקורי מהמייל"
-                  style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', border:'1px solid var(--accent)', background:'var(--accent-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, cursor:'pointer', padding:0 }}>
-                  <FileText size={17} style={{ color:'var(--accent)' }} />
-                </button>
-              ) : (
-                <div style={{ width: isMobile ? 40 : 44, height: isMobile ? 40 : 44, borderRadius:'8px', background:'var(--panel-2)', border:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                  <Receipt size={16} style={{ color:'var(--text-mute)' }} />
-                </div>
-              )}
+              {/* Thumbnail — lazy-loaded from Storage; no base64 in the list (audit C1) */}
+              <ReceiptThumb
+                storagePath={r.storage_path} inlineImage={r.receipt_image}
+                size={isMobile ? 40 : 44}
+                title="הצג קבלה מלאה"
+                onClick={selecting ? undefined : () => viewFull(r)}
+              />
 
               {/* Details */}
               <div style={{ flex:1, minWidth:0 }}>
