@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
-import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X } from 'lucide-react'
+import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X, Store } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
@@ -86,6 +86,7 @@ export default function DashboardPage() {
   const [year,        setYear]        = useState(thisYear)
   const [compareYear, setCompareYear] = useState(null)
   const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
+  const [filterVendor, setFilterVendor] = useState(null) // supplier filter (client request #7)
   const [distMode,    setDistMode]    = useState('cat') // distribution donut: 'cat' | 'vendor'
   const [selVendor,   setSelVendor]   = useState(null)  // highlighted vendor slice (local)
   const [selCat,      setSelCat]      = useState(null)  // highlighted category slice (local — NO filtering)
@@ -119,7 +120,7 @@ export default function DashboardPage() {
         // the column doesn't exist → retry without it.
         let { data: recs, error: recsErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, items, doc_type')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year}-01-01`)
           .lte('receipt_date', `${year}-12-31`)
@@ -138,7 +139,7 @@ export default function DashboardPage() {
         // Previous year (for YoY)
         let { data: prevRecs, error: prevErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, doc_type')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, doc_type')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year - 1}-01-01`)
           .lte('receipt_date', `${year - 1}-12-31`)
@@ -182,11 +183,18 @@ export default function DashboardPage() {
     load()
   }, [user, year])
 
-  // ── Active receipts (applying the category filter) ───────────────────────────
+  // ── Active receipts (category + supplier filters) ────────────────────────────
+  // The supplier filter matches on the canonical supplier_id once a receipt has
+  // been linked, and on the scanned name for rows that predate the merge.
   const active = useMemo(() => receipts.filter(r => {
     if (filterCat && r.category_text !== filterCat) return false
+    if (filterVendor) {
+      const linked = filterVendor.id && r.supplier_id === filterVendor.id
+      const byName = !r.supplier_id && (r.vendor_name || '').trim() === filterVendor.name
+      if (!linked && !byName) return false
+    }
     return true
-  }), [receipts, filterCat])
+  }), [receipts, filterCat, filterVendor])
 
   const total     = useMemo(() => active.reduce((s, r) => s + amt(r), 0), [active, settings.showWithVat])
   const totalPrev = useMemo(() => prevReceipts.reduce((s, r) => s + amt(r), 0), [prevReceipts, settings.showWithVat])
@@ -308,6 +316,19 @@ export default function DashboardPage() {
     return [...set].sort((a, b) => a.localeCompare(b, 'he'))
   }, [receipts])
 
+  // Supplier options for the dashboard filter — one entry per canonical supplier
+  // (falling back to the scanned name for receipts not yet linked).
+  const vendorFilterOptions = useMemo(() => {
+    const map = new Map()
+    for (const r of receipts) {
+      const name = (r.vendor_name || '').trim()
+      if (!name) continue
+      const key = r.supplier_id || `name:${name}`
+      if (!map.has(key)) map.set(key, { id: r.supplier_id || null, name })
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'he'))
+  }, [receipts])
+
   // Flattened items for the whole year (ignores filters) — drives product picking.
   const flatAll = useMemo(() => flattenItems(receipts), [receipts])
   const compA = useMemo(() => vendorA ? vendorComposition(flatAll, vendorA) : null, [vendorA, flatAll])
@@ -341,7 +362,7 @@ export default function DashboardPage() {
       .sort((x, y) => (y.a + y.b) - (x.a + x.b))
   }, [selProdsA, selProdsB, compA, compB])
 
-  const hasFilters = filterCat
+  const hasFilters = filterCat || filterVendor
 
   // ── Distribution donut/ranking: switchable between category and vendor ────────
   const isVendorDist = distMode === 'vendor'
@@ -408,9 +429,22 @@ export default function DashboardPage() {
                 {l1DataAll.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </div>
+            {/* Supplier filter (client request #7) */}
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <Store size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
+              <select value={filterVendor ? (filterVendor.id || `name:${filterVendor.name}`) : ''}
+                onChange={e => {
+                  const v = e.target.value
+                  setFilterVendor(v ? vendorFilterOptions.find(o => (o.id || `name:${o.name}`) === v) || null : null)
+                }}
+                style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: `1px solid ${filterVendor ? 'var(--accent)' : 'var(--border)'}`, background: filterVendor ? 'var(--accent-bg)' : 'var(--panel)', color: filterVendor ? 'var(--accent)' : 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer', maxWidth: 190 }}>
+                <option value="">כל הספקים</option>
+                {vendorFilterOptions.map(o => <option key={o.id || o.name} value={o.id || `name:${o.name}`}>{o.name}</option>)}
+              </select>
+            </div>
             {/* Clear filters */}
             {hasFilters && (
-              <button onClick={() => { setFilterCat(null) }}
+              <button onClick={() => { setFilterCat(null); setFilterVendor(null) }}
                 style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid var(--danger)', background: '#fef2f2', color: 'var(--danger)', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}>
                 <X size={12} /> נקה
               </button>
@@ -418,13 +452,21 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Active filter pill */}
-        {filterCat && (
+        {/* Active filter pills */}
+        {(filterCat || filterVendor) && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
-              <Tag size={10} /> {filterCat}
-              <button onClick={() => setFilterCat(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
-            </span>
+            {filterCat && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
+                <Tag size={10} /> {filterCat}
+                <button onClick={() => setFilterCat(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
+              </span>
+            )}
+            {filterVendor && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
+                <Store size={10} /> {filterVendor.name}
+                <button onClick={() => setFilterVendor(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -5,7 +5,7 @@ import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive,
+  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge,
 } from 'lucide-react'
 
 // Navigation tree — every section + its options.
@@ -37,7 +37,8 @@ const NAV = [
   {
     id: 'suppliers', label: 'ספקים', icon: Store, to: '/suppliers',
     children: [
-      { label: 'הוסף ספק', icon: Plus, action: 'suppliers-add' },
+      { label: 'הוסף ספק',   icon: Plus,  action: 'suppliers-add' },
+      { label: 'איחוד ספקים', icon: Merge, to: '/suppliers/merge' },
     ],
   },
   {
@@ -106,6 +107,8 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
   }
 
   function goChild(parent, child) {
+    // A child may be a real sub-route of its own, an in-page anchor, or an event.
+    if (child.to) { navigate(child.to); onNavigate?.(); return }
     const needNav = location.pathname !== parent.to
     navigate(parent.to)
     const run = () => {

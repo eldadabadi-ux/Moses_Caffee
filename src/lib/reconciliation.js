@@ -9,22 +9,14 @@
  * accountant document is regenerable and the state survives reloads.
  */
 import { docTypeOf } from './docTypes'
+// Vendor-name normalization is SSOT in supplierMatch (guardrail 2).
+import { normalizeVendor } from './supplierMatch'
+export { normalizeVendor }
 
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100
 
 /** Rounding tolerance (₪): differences up to this count as 'rounding', not a mismatch. */
 export const TOLERANCE = 1.0
-
-/** Normalize a vendor name for matching (OCR variations: quotes, בע"מ, spacing). */
-export function normalizeVendor(name) {
-  return String(name || '')
-    .normalize('NFC')
-    .replace(/["'`״׳]/g, '')
-    .replace(/\s*בעמ\s*$/,'')     // trailing בע"מ (quotes already stripped)
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-}
 
 /** Doc numbers compare by digits only ("ת. 00123" === "123"). */
 export function normalizeDocNum(s) {

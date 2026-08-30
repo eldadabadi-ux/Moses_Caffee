@@ -3,14 +3,16 @@
  *
  * POST body:  { imageBase64?: string, imagesBase64?: string[], mimeType: string, vatRate?: number }
  *             (imagesBase64 = several pages of one receipt → combined result)
- * Response:   { vendor_name, receipt_date, total_amount, currency, items[], fx, ... }
+ * Response:   { vendor_name, receipt_date, total_amount, currency, items[], fx,
+ *               supplier: { outcome, supplier_id, supplier_name, suggestion }, ... }
  *
  * Thin authenticated wrapper around the shared extraction core (extractReceipt),
  * which is also reused by /api/inbound/email and /api/import/link.
  */
 
-import { requireUser, wrapAuthErrors } from './_lib/auth.js'
-import { extractReceipt } from './_lib/extractReceipt.js'
+import { requireMember, wrapAuthErrors } from './_lib/auth.js'
+import { extractReceipt, getSupabaseUrl } from './_lib/extractReceipt.js'
+import { resolveSupplier } from './_lib/supplierResolve.js'
 import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
 import { errorResponse } from './_lib/response.js'
 
@@ -34,7 +36,7 @@ export async function onRequestOptions(context) {
 }
 
 export const onRequestPost = wrapAuthErrors(async (context) => {
-  const user = await requireUser(context.request, context.env)
+  const user = await requireMember(context.request, context.env)
   const CORS = corsHeaders(context.request, context.env)
 
   // Throttle expensive Gemini OCR per user (A.8.12) — fail-open if KV unbound.
@@ -63,6 +65,20 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
 
   try {
     const result = await extractReceipt({ images, mimeType, env: context.env, userId: user.user_id, vatRate })
+
+    // ── Resolve the scanned vendor to a CANONICAL supplier (audit R1) ────────
+    // The model rewrites the vendor string on every scan, so without this step
+    // one supplier splits into many. A confident match links silently; an
+    // uncertain one comes back as `suggestion` for the user to confirm — the
+    // scan is never blocked and a supplier is never invented over a likely match.
+    result.supplier = await resolveSupplier({
+      vendorName: result.vendor_name,
+      url: getSupabaseUrl(context.env),
+      key: context.env.SUPABASE_SERVICE_ROLE_KEY,
+      userId: user.user_id,
+      orgId: user.org_id,
+    })
+
     return Response.json(result, { headers: CORS })
   } catch (err) {
     // Full upstream detail is logged server-side with a correlation id (A.8.28);

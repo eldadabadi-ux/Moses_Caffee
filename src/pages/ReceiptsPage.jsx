@@ -19,12 +19,13 @@ import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
   CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
-  Archive, RotateCcw, AlertTriangle, ListChecks,
+  Archive, RotateCcw, AlertTriangle, ListChecks, Store,
 } from 'lucide-react'
 import { DOC_TYPES, docTypeOf, docTypeLabel, isExpenseDoc, DOC_COL_RE } from '../lib/docTypes'
 import { openIssues } from '../lib/reconciliation'
 import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/storage'
 import { fetchLegacyInlineImage } from '../lib/receiptImage'
+import { vendorSimilarity, AUTO_THRESHOLD } from '../lib/supplierMatch'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -48,7 +49,7 @@ const fmtILS  = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumF
 
 // All receipt columns EXCEPT the heavy base64 receipt_image — the list never
 // pulls image bytes; thumbnails load lazily from storage_path (audit C1).
-const RECEIPT_COLS = 'id, user_id, vendor_name, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation'
+const RECEIPT_COLS = 'id, user_id, vendor_name, supplier_id, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation'
 // Foreign-currency helpers (for receipts from abroad)
 const CUR_SYMBOL = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'Fr', AUD: 'A$', CAD: 'C$', ILS: '₪' }
 const fmtCur = (n, code) => {
@@ -512,6 +513,9 @@ export default function ReceiptsPage() {
   const [reviewDocNumber, setReviewDocNumber] = useState('')      // printed doc number (if detected)
   const [reviewDocRefs, setReviewDocRefs] = useState([])          // summary invoice: itemized delivery-note refs
   const [docFilter, setDocFilter]       = useState('all')         // list filter by doc type
+  // Supplier filter — arrives as ?supplier=<id>&supplierName=<name> from the
+  // suppliers screen (client requests #4 / #8).
+  const [supplierFilter, setSupplierFilter] = useState(null)      // { id, name } | null
   const [selectMode, setSelectMode]     = useState(false)         // bulk classification mode
   const [selectedIds, setSelectedIds]   = useState(() => new Set())
   const [bulkBusy, setBulkBusy]         = useState(false)
@@ -555,6 +559,19 @@ export default function ReceiptsPage() {
     if (q) {
       setSearch(q)
       const u = new URL(window.location.href); u.searchParams.delete('q')
+      window.history.replaceState({}, '', u.toString())
+    }
+  }, [])
+
+  // ── Supplier filter via ?supplier= / ?supplierName= (from the suppliers screen) ──
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const id = params.get('supplier')
+    const nm = params.get('supplierName')
+    if (id || nm) {
+      setSupplierFilter({ id: id || null, name: nm || '' })
+      const u = new URL(window.location.href)
+      u.searchParams.delete('supplier'); u.searchParams.delete('supplierName')
       window.history.replaceState({}, '', u.toString())
     }
   }, [])
@@ -615,8 +632,20 @@ export default function ReceiptsPage() {
     }
     const date = r.receipt_date || ''
     const matchDoc = docFilter === 'all' || docTypeOf(r) === docFilter
-    return matchSearch && matchDoc && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
-  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter])
+    // Supplier match: by canonical id once the receipt is linked, and by name
+    // similarity for rows that predate the merge — so the filter is complete
+    // either way and never silently drops receipts.
+    let matchSupplier = true
+    if (supplierFilter) {
+      matchSupplier = supplierFilter.id
+        ? r.supplier_id === supplierFilter.id
+        : false
+      if (!matchSupplier && !r.supplier_id && supplierFilter.name) {
+        matchSupplier = vendorSimilarity(r.vendor_name, supplierFilter.name) >= AUTO_THRESHOLD
+      }
+    }
+    return matchSearch && matchDoc && matchSupplier && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
+  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter])
 
   // Existing top-level (L1) category names — used to flag AI-proposed NEW
   // categories in the scan review + drive the category autocomplete.
@@ -1331,7 +1360,7 @@ export default function ReceiptsPage() {
 
   if (loading && receipts.length === 0) return <LoadingSpinner />
 
-  const hasActiveFilter = search || filterFrom || filterTo || docFilter !== 'all'
+  const hasActiveFilter = search || filterFrom || filterTo || docFilter !== 'all' || supplierFilter
 
   return (
     <div className="animate-fade-in" style={{ display:'flex', flexDirection:'column', gap: isMobile ? '14px' : '20px' }} dir="rtl">
@@ -1453,11 +1482,26 @@ export default function ReceiptsPage() {
             <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>עד:</span>
             <DateInput value={filterTo} onChange={e => setFilterTo(e.target.value)} style={{ flex:'1 1 130px', maxWidth:'180px', height:'36px', fontSize:'13px' }} clearable />
             {hasActiveFilter && (
-              <button onClick={() => { setSearch(''); setFilterFrom(''); setFilterTo(''); setDocFilter('all'); setShowFilters(false) }}
+              <button onClick={() => { setSearch(''); setFilterFrom(''); setFilterTo(''); setDocFilter('all'); setSupplierFilter(null); setShowFilters(false) }}
                 style={{ padding:'6px 12px', background:'none', border:'1px solid var(--border)', borderRadius:'6px', fontSize:'12px', color:'var(--text-mute)', cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
                 נקה הכל
               </button>
             )}
+          </div>
+        )}
+
+        {/* Active supplier filter — always visible, never a hidden filter */}
+        {supplierFilter && (
+          <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+            <span style={{ display:'flex', alignItems:'center', gap:6, padding:'5px 12px', borderRadius:999, background:'var(--accent-bg)', border:'1px solid var(--accent)', color:'var(--accent)', fontSize:'13px', fontWeight:700, maxWidth:'100%' }}>
+              <Store size={13} style={{ flexShrink:0 }} />
+              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{supplierFilter.name || 'ספק'}</span>
+              <button onClick={() => setSupplierFilter(null)} aria-label="בטל סינון ספק"
+                style={{ border:'none', background:'none', cursor:'pointer', color:'var(--accent)', padding:0, display:'flex', flexShrink:0 }}>
+                <X size={13} />
+              </button>
+            </span>
+            <span style={{ fontSize:'12.5px', color:'var(--text-mute)' }}>{filtered.length} מסמכים</span>
           </div>
         )}
 
