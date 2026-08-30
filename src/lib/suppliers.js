@@ -5,6 +5,7 @@
 import { supabase } from './supabase'
 import { flattenItems, vendorComposition } from './itemAggregation'
 import { isExpenseDoc } from './docTypes'
+import { isCafeBook } from './books'
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
@@ -58,7 +59,8 @@ export function deriveVendorStats(receipts, contacts = []) {
   const curYM = `${curY}-${String(now.getMonth() + 1).padStart(2, '0')}`
   // Summary invoices (חשבונית מרכזת) are excluded — they aggregate delivery
   // notes that are already counted, so including them would double the spend.
-  const active = (receipts || []).filter(r => !r.archived_at && isExpenseDoc(r))
+  // Catering events are a separate book and never colour café supplier costs.
+  const active = (receipts || []).filter(r => !r.archived_at && isExpenseDoc(r) && isCafeBook(r))
   const flat = flattenItems(active)
 
   const nameById = {}

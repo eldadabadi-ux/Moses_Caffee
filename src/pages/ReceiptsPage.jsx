@@ -26,6 +26,7 @@ import { openIssues } from '../lib/reconciliation'
 import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/storage'
 import { fetchLegacyInlineImage } from '../lib/receiptImage'
 import { vendorSimilarity, AUTO_THRESHOLD } from '../lib/supplierMatch'
+import { BOOKS, DEFAULT_BOOK, bookOf, bookLabel } from '../lib/books'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -49,7 +50,7 @@ const fmtILS  = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumF
 
 // All receipt columns EXCEPT the heavy base64 receipt_image — the list never
 // pulls image bytes; thumbnails load lazily from storage_path (audit C1).
-const RECEIPT_COLS = 'id, user_id, vendor_name, supplier_id, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation'
+const RECEIPT_COLS = 'id, user_id, vendor_name, supplier_id, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation, book'
 // Foreign-currency helpers (for receipts from abroad)
 const CUR_SYMBOL = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'Fr', AUD: 'A$', CAD: 'C$', ILS: '₪' }
 const fmtCur = (n, code) => {
@@ -516,6 +517,12 @@ export default function ReceiptsPage() {
   // Supplier filter — arrives as ?supplier=<id>&supplierName=<name> from the
   // suppliers screen (client requests #4 / #8).
   const [supplierFilter, setSupplierFilter] = useState(null)      // { id, name } | null
+  // Which ledger the list shows. Catering events are catalogued apart from the
+  // café and stay out of every statistic (client request #17). The choice is
+  // remembered so a catering session doesn't have to re-pick it per scan.
+  const [bookView, setBookView] = useState(() => {
+    try { return localStorage.getItem('moses_book_view') || DEFAULT_BOOK } catch { return DEFAULT_BOOK }
+  })
   const [selectMode, setSelectMode]     = useState(false)         // bulk classification mode
   const [selectedIds, setSelectedIds]   = useState(() => new Set())
   const [bulkBusy, setBulkBusy]         = useState(false)
@@ -525,6 +532,7 @@ export default function ReceiptsPage() {
   const [scanSource, setScanSource]     = useState('')        // diagnostic: which engine produced the data
   // Canonical-supplier resolution for the scanned vendor (audit R1 / request #3).
   // { outcome:'linked'|'ask'|'created'|'skipped', supplier_id, supplier_name, suggestion }
+  const [reviewBook, setReviewBook]     = useState(DEFAULT_BOOK)   // ledger for the scan under review
   const [scanSupplier, setScanSupplier] = useState(null)
   const [supplierBusy, setSupplierBusy] = useState(false)
   const [reviewCategory, setReviewCategory] = useState('שונות')
@@ -593,6 +601,8 @@ export default function ReceiptsPage() {
     }
   }, [])
 
+  useEffect(() => { try { localStorage.setItem('moses_book_view', bookView) } catch {} }, [bookView])
+
   useEffect(() => { loadData() }, [])
   useEffect(() => { loadCategories() }, [])
 
@@ -636,6 +646,7 @@ export default function ReceiptsPage() {
     }
     const date = r.receipt_date || ''
     const matchDoc = docFilter === 'all' || docTypeOf(r) === docFilter
+    const matchBook = bookOf(r) === bookView
     // Supplier match: by canonical id once the receipt is linked, and by name
     // similarity for rows that predate the merge — so the filter is complete
     // either way and never silently drops receipts.
@@ -648,8 +659,8 @@ export default function ReceiptsPage() {
         matchSupplier = vendorSimilarity(r.vendor_name, supplierFilter.name) >= AUTO_THRESHOLD
       }
     }
-    return matchSearch && matchDoc && matchSupplier && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
-  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter])
+    return matchSearch && matchDoc && matchBook && matchSupplier && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
+  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter, bookView])
 
   // Existing top-level (L1) category names — used to flag AI-proposed NEW
   // categories in the scan review + drive the category autocomplete.
@@ -900,6 +911,7 @@ export default function ReceiptsPage() {
       setReviewDocRefs(Array.isArray(result.doc_refs) ? result.doc_refs : [])
       setReviewCurrency(result.currency || 'ILS')
       setScanSupplier(result.supplier || null)   // canonical supplier match / question
+      setReviewBook(bookView)                    // file it where the user is working
       setReviewFx(result.fx || null)   // foreign-currency receipts: { rate, date, source, currency }
       setReviewPages(pages)
       setReviewImage(pages[0])
@@ -1027,6 +1039,7 @@ export default function ReceiptsPage() {
       const base = {
         user_id: user.id, vendor_name: reviewVendor,
         supplier_id: scanSupplier?.supplier_id || null,
+        book: reviewBook,
         receipt_date: reviewDate || new Date().toISOString().slice(0, 10),
         amount: totalAmt, currency: 'ILS',
         category_id, category_text: normalizeCategoryName(reviewCategory) || 'שונות',
@@ -1071,6 +1084,7 @@ export default function ReceiptsPage() {
       setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
       setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null)
       setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([]); setScanSupplier(null)
+      setReviewBook(bookView)
       loadData()
     } catch (err) {
       toast.error('שגיאה בשמירה: ' + (err?.message || ''))
@@ -1504,6 +1518,29 @@ export default function ReceiptsPage() {
           </div>
         )}
 
+        {/* Book of account — the café and the catering events are separate ledgers,
+            so the switch is a top-level tab, not a filter chip. */}
+        {!archiveView && (
+          <div style={{ display:'flex', gap:6 }}>
+            {BOOKS.map(b => {
+              const on = bookView === b.value
+              const n = (receipts || []).filter(r => bookOf(r) === b.value).length
+              return (
+                <button key={b.value} onClick={() => setBookView(b.value)}
+                  style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:10, border:`1.5px solid ${on ? 'var(--accent)' : 'var(--border)'}`, background: on ? 'var(--accent-bg)' : 'var(--panel)', color: on ? 'var(--accent)' : 'var(--text-mute)', fontSize:'13.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+                  <span>{b.icon}</span>{b.label}
+                  <span style={{ fontSize:'12px', fontWeight:600, opacity:0.75, fontVariantNumeric:'tabular-nums' }}>{n}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {bookView === 'events' && (
+          <div style={{ fontSize:'12.5px', color:'var(--text-mute)', lineHeight:1.6 }}>
+            🎪 ספר האירועים מנוהל בנפרד — המסמכים כאן אינם נספרים בדשבורד, בקטגוריות, בעלויות הספקים או בתובנות של בית הקפה.
+          </div>
+        )}
+
         {/* Active supplier filter — always visible, never a hidden filter */}
         {supplierFilter && (
           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
@@ -1765,6 +1802,24 @@ export default function ReceiptsPage() {
                 הסכומים הם ב-{reviewCurrency} — נא להזין/לתקן את הערך בשקלים ידנית לפני שמירה.
               </div>
             )}
+            {/* Book of account — orthogonal to document type (client request #17) */}
+            <div>
+              <label style={LS}>ספר חשבונות</label>
+              <div style={{ display:'flex', gap:'6px' }}>
+                {BOOKS.map(b => (
+                  <button key={b.value} type="button" onClick={() => setReviewBook(b.value)}
+                    style={{ flex:1, padding:'10px 6px', borderRadius:'10px', border:`1.5px solid ${reviewBook === b.value ? 'var(--accent)' : 'var(--border)'}`, background: reviewBook === b.value ? 'var(--accent-bg)' : 'var(--panel)', color: reviewBook === b.value ? 'var(--accent)' : 'var(--text-mute)', fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+                    {b.icon} {b.label}
+                  </button>
+                ))}
+              </div>
+              {reviewBook === 'events' && (
+                <div style={{ marginTop:8, fontSize:'12.5px', color:'var(--text-mute)', lineHeight:1.6 }}>
+                  🎪 מסמך של אירוע נשמר בנפרד ו<strong>לא נכנס</strong> לסטטיסטיקות, לתובנות ולהשוואות של בית הקפה.
+                </div>
+              )}
+            </div>
+
             {/* Document type — detected by the AI, user can override */}
             <div>
               <label style={LS}>סוג מסמך</label>

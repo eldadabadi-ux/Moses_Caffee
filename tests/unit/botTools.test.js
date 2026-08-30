@@ -201,3 +201,71 @@ test('a database failure surfaces as data, not as an exception', async () => {
   const out = await runTool('query_receipts', {}, CTX)
   assert.ok(out.error)
 })
+
+// ── books of account (client request #17) ────────────────────────────────────
+// Catering events are a separate ledger; the café's numbers must never include
+// them unless a caller explicitly asks.
+const EVENT_RECEIPT = {
+  id: 'e1', vendor_name: 'ספק קייטרינג', supplier_id: null, receipt_date: '2026-07-15',
+  amount: 8000, doc_type: 'delivery_note', book: 'events', archived_at: null,
+  category_text: 'מוצרי מזון ומכולת',
+  items: [{ item_name: 'חלב טרי', quantity: 50, unit: "יח'", price: 8000,
+            price_per_base_unit: 160, base_unit: 'l' }],
+}
+
+function installStubWithEvents() {
+  lastUrls = []
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    lastUrls.push(u)
+    if (u.includes('/rest/v1/suppliers')) return json(SUPPLIERS)
+    if (u.includes('/rest/v1/receipts')) return json([...RECEIPTS, EVENT_RECEIPT])
+    return json([])
+  }
+}
+
+test('events are invisible to the café by default', async () => {
+  installStubWithEvents()
+  const out = await runTool('query_receipts', {}, CTX)
+  assert.equal(out.found, 4)                       // the 4 café rows only
+  assert.ok(!out.receipts.some(r => r.supplier === 'ספק קייטרינג'))
+  assert.equal(out.book, 'בית הקפה')
+})
+
+test('the events book is reachable when asked for by name', async () => {
+  installStubWithEvents()
+  const out = await runTool('query_receipts', { book: 'events' }, CTX)
+  assert.equal(out.found, 1)
+  assert.equal(out.receipts[0].supplier, 'ספק קייטרינג')
+  assert.equal(out.book, 'אירועים')
+})
+
+test('an events purchase never distorts a café price comparison', async () => {
+  installStubWithEvents()
+  const out = await runTool('compare_product_prices', { product: 'חלב' }, CTX)
+  const p = out.products[0]
+  // ₪160/l from the catering job would otherwise become "most expensive".
+  assert.ok(!p.most_expensive.includes('קייטרינג'))
+  assert.equal(p.difference_pct, 30)
+})
+
+test('a supplier report stays inside one book', async () => {
+  installStubWithEvents()
+  const cafe = await runTool('supplier_report', {}, CTX)
+  assert.equal(cafe.documents, 3)
+  assert.equal(cafe.book, 'בית הקפה')
+  const events = await runTool('supplier_report', { book: 'events' }, CTX)
+  assert.equal(events.documents, 1)
+  assert.match(events.total, /8,000/)
+})
+
+test('orientation reports that an events book exists without mixing it in', async () => {
+  installStubWithEvents()
+  const o = await buildOrientation(CTX)
+  assert.equal(o.documents, 4)                     // café only
+  assert.equal(o.events_documents, 1)
+  // Café spend is r1+r2+r3 = 372 (the archived one counts); the ₪8,000
+  // catering job is absent — it would otherwise have made this 8,372.
+  assert.match(o.total_spend, /372/)
+  assert.ok(!o.total_spend.includes('8,372'))
+})

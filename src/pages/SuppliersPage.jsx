@@ -32,7 +32,7 @@ export default function SuppliersPage() {
       // doc_type is needed so summary invoices don't double-count supplier spend;
       // pre-migration the column doesn't exist → retry without it.
       let [{ data: recs, error: recsErr }, sup] = await Promise.all([
-        supabase.from('receipts').select('id, vendor_name, supplier_id, receipt_date, amount, category_text, items, archived_at, created_at, doc_type').eq('user_id', user.id),
+        supabase.from('receipts').select('id, vendor_name, supplier_id, receipt_date, amount, category_text, items, archived_at, created_at, doc_type, book').eq('user_id', user.id),
         loadSuppliers(user.id),
       ])
       if (recsErr) {

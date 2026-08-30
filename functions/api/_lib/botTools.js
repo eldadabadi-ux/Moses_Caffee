@@ -16,10 +16,15 @@
  * Archived receipts are INCLUDED by default: archiving means "sent to the
  * accountant", not "forget it" — statistics and period comparisons must still
  * see them (client request #10).
+ *
+ * Catering events are EXCLUDED by default: they are a separate book of account
+ * and must not colour the café's numbers (client request #17). A caller has to
+ * ask for them by name.
  */
 import { normalizeVendor, vendorSimilarity, ASK_THRESHOLD } from './supplierMatch.js'
 import { unitLabel } from './units.js'
 import { docTypeOf, isExpenseDoc } from './docTypes.js'
+import { bookOf, DEFAULT_BOOK, bookLabel } from './books.js'
 
 const MAX_ROWS = 4000          // hard cap on receipts pulled for one tool call
 const MAX_LIST = 60            // rows returned to the model in a listing
@@ -29,7 +34,7 @@ const ils = (n) => `₪${(Math.round((Number(n) || 0) * 100) / 100).toLocaleStri
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
 const RECEIPT_FIELDS =
-  'id,vendor_name,supplier_id,receipt_date,amount,currency,category_text,items,doc_type,archived_at,created_at'
+  'id,vendor_name,supplier_id,receipt_date,amount,currency,category_text,items,doc_type,book,archived_at,created_at'
 
 // ── data access ──────────────────────────────────────────────────────────────
 
@@ -45,15 +50,23 @@ async function sbGet(url, key, path) {
   return res.json()
 }
 
-/** Receipts for the tenant, optionally narrowed by date, capped and flagged. */
-async function loadReceipts(ctx, { from, to } = {}) {
+/**
+ * Receipts for the tenant, optionally narrowed by date, capped and flagged.
+ *
+ * `book` defaults to the café: catering events are a separate ledger and must
+ * never leak into the café's numbers. Pass book:'events' for the catering book,
+ * or book:'all' to deliberately span both.
+ */
+async function loadReceipts(ctx, { from, to, book } = {}) {
   const filters = [scopeOf(ctx)]
   if (from) filters.push(`receipt_date=gte.${from}`)
   if (to) filters.push(`receipt_date=lte.${to}`)
   const rows = await sbGet(ctx.url, ctx.key,
     `receipts?${filters.join('&')}&select=${RECEIPT_FIELDS}&order=receipt_date.desc.nullslast&limit=${MAX_ROWS + 1}`)
   const truncated = rows.length > MAX_ROWS
-  return { rows: truncated ? rows.slice(0, MAX_ROWS) : rows, truncated }
+  const wanted = book === 'all' ? null : (book === 'events' ? 'events' : DEFAULT_BOOK)
+  const scoped = wanted ? rows.filter(r => bookOf(r) === wanted) : rows
+  return { rows: truncated ? scoped.slice(0, MAX_ROWS) : scoped, truncated, book: wanted }
 }
 
 /** Canonical supplier catalogue, id → name. */
@@ -158,6 +171,7 @@ export const TOOL_DEFS = [
         category: { type: 'string', description: 'קטגוריה ראשית' },
         doc_type: { type: 'string', enum: ['receipt', 'delivery_note', 'summary_invoice'] },
         include_items: { type: 'boolean', description: 'להחזיר את שורות המוצרים (ברירת מחדל: false)' },
+        book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ספר החשבונות — cafe (ברירת מחדל) / events (קייטרינג) / all' },
         limit: { type: 'integer', description: `מקסימום מסמכים להחזרה (ברירת מחדל ${MAX_LIST})` },
       },
     },
@@ -171,6 +185,7 @@ export const TOOL_DEFS = [
       type: 'object',
       properties: {
         product: { type: 'string', description: 'שם המוצר; השאר ריק לקבלת כל המוצרים שנקנו מ-2+ ספקים' },
+        book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ספר החשבונות — cafe (ברירת מחדל) / events (קייטרינג) / all' },
         from: { type: 'string' }, to: { type: 'string' },
         limit: { type: 'integer' },
       },
@@ -186,6 +201,7 @@ export const TOOL_DEFS = [
       properties: {
         supplier: { type: 'string', description: 'שם ספק; ריק = כל הספקים' },
         granularity: { type: 'string', enum: ['month', 'quarter', 'year'], description: 'ברירת מחדל: month' },
+        book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ספר החשבונות — cafe (ברירת מחדל) / events (קייטרינג) / all' },
         from: { type: 'string' }, to: { type: 'string' },
       },
     },
@@ -200,6 +216,7 @@ export const TOOL_DEFS = [
       properties: {
         supplier: { type: 'string' },
         min_change_pct: { type: 'number', description: 'שינוי מינימלי באחוזים (ברירת מחדל 8)' },
+        book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ספר החשבונות — cafe (ברירת מחדל) / events (קייטרינג) / all' },
         from: { type: 'string' }, to: { type: 'string' },
         limit: { type: 'integer' },
       },
@@ -210,7 +227,8 @@ export const TOOL_DEFS = [
 // ── executors ────────────────────────────────────────────────────────────────
 
 async function toolQueryReceipts(ctx, args) {
-  const { rows, truncated } = await loadReceipts(ctx, args)
+  const loaded = await loadReceipts(ctx, args)
+  const { rows, truncated } = loaded
   const suppliers = await loadSuppliers(ctx)
   const byId = Object.fromEntries(suppliers.map(s => [s.id, s.name]))
   const filter = args.supplier ? resolveSupplierFilter(args.supplier, suppliers, rows) : null
@@ -228,6 +246,7 @@ async function toolQueryReceipts(ctx, args) {
 
   const total = matched.filter(isExpenseDoc).reduce((s, r) => s + (num(r.amount) || 0), 0)
   return {
+    book: bookLabel(loaded.book) || 'הכל',
     found: matched.length,
     total_spend: ils(total),
     note: truncated ? `הוצגו ${MAX_ROWS} המסמכים האחרונים בלבד` : undefined,
@@ -304,7 +323,8 @@ async function toolComparePrices(ctx, args) {
 }
 
 async function toolSupplierReport(ctx, args) {
-  const { rows } = await loadReceipts(ctx, args)
+  const loaded = await loadReceipts(ctx, args)
+  const { rows } = loaded
   const suppliers = await loadSuppliers(ctx)
   const byId = Object.fromEntries(suppliers.map(s => [s.id, s.name]))
   const gran = ['month', 'quarter', 'year'].includes(args.granularity) ? args.granularity : 'month'
@@ -334,6 +354,7 @@ async function toolSupplierReport(ctx, args) {
 
   return {
     supplier: filter?.name || 'כל הספקים',
+    book: bookLabel(loaded.book) || 'הכל',
     granularity: gran,
     documents: docs,
     total: ils(total),
@@ -421,7 +442,9 @@ export async function runTool(name, args, ctx) {
  * ask for. Deliberately not the data itself — that is what the tools are for.
  */
 export async function buildOrientation(ctx) {
-  const [{ rows }, suppliers] = await Promise.all([loadReceipts(ctx), loadSuppliers(ctx)])
+  const [{ rows }, all, suppliers] = await Promise.all([
+    loadReceipts(ctx), loadReceipts(ctx, { book: 'all' }), loadSuppliers(ctx),
+  ])
   const expense = rows.filter(isExpenseDoc)
   const dates = rows.map(r => r.receipt_date).filter(Boolean).sort()
   const total = expense.reduce((s, r) => s + (num(r.amount) || 0), 0)
@@ -433,6 +456,7 @@ export async function buildOrientation(ctx) {
 
   return {
     documents: rows.length,
+    events_documents: all.rows.filter(r => bookOf(r) === 'events').length,
     archived: rows.filter(r => r.archived_at).length,
     delivery_notes: rows.filter(r => docTypeOf(r) === 'delivery_note').length,
     summary_invoices: rows.filter(r => docTypeOf(r) === 'summary_invoice').length,

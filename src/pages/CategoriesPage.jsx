@@ -72,9 +72,11 @@ export default function CategoriesPage() {
   // match the dashboard (archived still count in stats).
   async function loadAnalytics() {
     try {
+      // Café book only — catering events are catalogued separately and must not
+      // appear in the café's category analytics (client request #17).
       const { data } = await supabase.from('receipts')
-        .select('id, vendor_name, amount, receipt_date, category_text, category_id, items, archived_at')
-        .eq('user_id', user.id)
+        .select('id, vendor_name, amount, receipt_date, category_text, category_id, items, archived_at, book')
+        .eq('user_id', user.id).eq('book', 'cafe')
       if (data) { setAnaReceipts(data); setCached('cat-analytics', data) }
     } catch (e) { console.warn('[categories] analytics load:', e?.message) }
   }
@@ -131,7 +133,7 @@ export default function CategoriesPage() {
   async function syncMissingCategories() {
     try {
       const [{ data: recs }, { data: cats }] = await Promise.all([
-        supabase.from('receipts').select('vendor_name, category_text, items').is('archived_at', null),
+        supabase.from('receipts').select('vendor_name, category_text, items, book').is('archived_at', null).eq('book', 'cafe'),
         supabase.from('categories').select('id, name, parent_id, level'),
       ])
       const all = (cats || []).slice()

@@ -14,6 +14,7 @@ import ProductCompareChart from '../components/charts/ProductCompareChart'
 import ShekelSign from '../components/icons/ShekelSign'
 import { flattenItems, vendorComposition } from '../lib/itemAggregation'
 import { isExpenseDoc } from '../lib/docTypes'
+import { isCafeBook } from '../lib/books'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
@@ -120,7 +121,7 @@ export default function DashboardPage() {
         // the column doesn't exist → retry without it.
         let { data: recs, error: recsErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type, book')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year}-01-01`)
           .lte('receipt_date', `${year}-12-31`)
@@ -134,12 +135,13 @@ export default function DashboardPage() {
             .lte('receipt_date', `${year}-12-31`)
             .order('receipt_date'))
         }
-        recs = (recs || []).filter(isExpenseDoc)
+        // Catering events are a separate book — the café dashboard never shows them.
+        recs = (recs || []).filter(r => isExpenseDoc(r) && isCafeBook(r))
 
         // Previous year (for YoY)
         let { data: prevRecs, error: prevErr } = await supabase
           .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, doc_type')
+          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, doc_type, book')
           .eq('user_id', user.id)
           .gte('receipt_date', `${year - 1}-01-01`)
           .lte('receipt_date', `${year - 1}-12-31`)
@@ -151,7 +153,7 @@ export default function DashboardPage() {
             .gte('receipt_date', `${year - 1}-01-01`)
             .lte('receipt_date', `${year - 1}-12-31`))
         }
-        prevRecs = (prevRecs || []).filter(isExpenseDoc)
+        prevRecs = (prevRecs || []).filter(r => isExpenseDoc(r) && isCafeBook(r))
 
         // Categories
         const { data: cats } = await supabase
