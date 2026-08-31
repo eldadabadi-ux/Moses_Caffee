@@ -53,7 +53,7 @@ export async function scanGmail(conn, env, { vatRate = 18 } = {}) {
   // reach a PostgREST in-list — no interpolation of unvalidated provider input.
   const ids = (list.messages || []).map(m => m.id).filter(id => /^[A-Za-z0-9_-]+$/.test(id || ''))
   if (!ids.length) {
-    await db.patch('mail_connections', `id=eq.${conn.id}`, { last_scan_at: new Date().toISOString(), status: 'active', last_error: null })
+    await db.patch('mail_connections', `id=eq.${conn.id}`, { last_scan_at: new Date().toISOString(), status: 'active', last_error: null, error_since: null })
     return { imported: 0, scanned: 0, more: false, lastInternalDate: lastMs }
   }
 
@@ -92,6 +92,6 @@ export async function scanGmail(conn, env, { vatRate = 18 } = {}) {
   }
   if (newIds.length > examined) more = true
 
-  await db.patch('mail_connections', `id=eq.${conn.id}`, { last_internal_date: maxInternal, last_scan_at: new Date().toISOString(), status: 'active', last_error: null })
+  await db.patch('mail_connections', `id=eq.${conn.id}`, { last_internal_date: maxInternal, last_scan_at: new Date().toISOString(), status: 'active', last_error: null, error_since: null })
   return { imported, scanned: examined, more, lastInternalDate: maxInternal }
 }

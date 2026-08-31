@@ -44,14 +44,24 @@ export async function onRequestGet({ request, env }) {
       }
     } catch {}
 
+    // The address identifies the mailbox now that several can be connected, so a
+    // connection we cannot name is refused rather than saved as an anonymous row
+    // that would collide with the next one.
+    if (!email) return back(origin, 'noemail')
+
     const enc = await encryptToken(tok.refresh_token, env.MAIL_TOKEN_KEY)
     const url = getSupabaseUrl(env), key = env.SUPABASE_SERVICE_ROLE_KEY
-    await fetch(`${url}/rest/v1/mail_connections?on_conflict=user_id,provider`, {
+    // Upsert on (user_id, provider, email): reconnecting the SAME address
+    // refreshes its token; a DIFFERENT address is added alongside (request #14).
+    await fetch(`${url}/rest/v1/mail_connections?on_conflict=user_id,provider,email`, {
       method: 'POST',
       headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
-      body: JSON.stringify({ user_id: st.uid, org_id: st.oid || null, provider, email, refresh_token_enc: enc, status: 'active', last_error: null }),
+      body: JSON.stringify({
+        user_id: st.uid, org_id: st.oid || null, provider, email, refresh_token_enc: enc,
+        status: 'active', last_error: null, error_since: null, last_notified_at: null,
+      }),
     })
-    await writeAudit(env, { orgId: st.oid || null, userId: st.uid, action: 'mailbox_connected', target: provider, meta: { provider } })
+    await writeAudit(env, { orgId: st.oid || null, userId: st.uid, action: 'mailbox_connected', target: provider, meta: { provider, email } })
     return back(origin, 'connected')
   } catch {
     return back(origin, 'error')

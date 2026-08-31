@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
+import { useMailAlerts } from '../hooks/useMailAlerts'
 import { useTenant } from '../hooks/useTenant'
 import { useSettings } from '../hooks/useSettings'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
@@ -475,6 +476,7 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 1
 // ── Main ReceiptsPage ─────────────────────────────────────────────────────────
 export default function ReceiptsPage() {
   const { user } = useAuth()
+  const brokenMailboxes = useMailAlerts()
   const { orgId } = useTenant()
   const { settings, displayAmount, toggleVatDisplay } = useSettings()
   const isMobile = useIsMobile()
@@ -1449,6 +1451,27 @@ export default function ReceiptsPage() {
           <button onClick={approveAllPending}
             style={{ display:'flex', alignItems:'center', gap:6, padding:'8px 14px', borderRadius:9, border:'none', background:'linear-gradient(135deg,#16a34a,#15803d)', color:'white', fontSize:'13px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap', boxShadow:'0 2px 8px rgba(22,163,74,0.35)' }}>
             <CheckCircle2 size={14} /> אשר הכל ({pendingCount})
+          </button>
+        </div>
+      )}
+
+      {/* ── Expired mailbox connection ────────────────────────────────────────
+          A dead refresh token stops imports silently: mail keeps arriving and
+          simply never becomes a receipt. Say so where the receipts are. */}
+      {!archiveView && brokenMailboxes.length > 0 && (
+        <div style={{ display:'flex', alignItems:'center', gap:10, background:'var(--danger-tint-1, #fef2f2)', border:'1px solid var(--danger)', borderRadius:'var(--r-card)', padding:'11px 14px', flexWrap:'wrap' }}>
+          <AlertTriangle size={17} style={{ color:'var(--danger)', flexShrink:0 }} />
+          <span style={{ flex:1, minWidth:180, fontSize:'13.5px', color:'var(--text)', lineHeight:1.5 }}>
+            {brokenMailboxes.length === 1 ? (
+              <>החיבור לתיבה <strong>{brokenMailboxes[0].email}</strong> פג — קבלות שמגיעות אליה במייל <strong>לא נקלטות</strong>
+              {brokenMailboxes[0].days > 0 && ` כבר ${brokenMailboxes[0].days} ימים`}.</>
+            ) : (
+              <><strong>{brokenMailboxes.length}</strong> תיבות מייל מנותקות — קבלות שמגיעות אליהן <strong>לא נקלטות</strong>.</>
+            )}
+          </span>
+          <button onClick={() => navigate('/settings#set-mail')}
+            style={{ padding:'8px 14px', borderRadius:9, border:'none', background:'var(--danger)', color:'white', fontSize:'13px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+            חבר מחדש
           </button>
         </div>
       )}

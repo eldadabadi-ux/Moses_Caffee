@@ -56,7 +56,12 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
       // Best-effort status update — must not itself crash the request (a failing
       // PATCH here, e.g. when already at the subrequest limit, previously 500'd).
       try {
-        await fetch(`${url}/rest/v1/mail_connections?id=eq.${conn.id}`, { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ status: err?.code === 'AUTH' ? 'error' : conn.status, last_error: raw.slice(0, 200) }) })
+        const isAuth = err?.code === 'AUTH'
+        await fetch(`${url}/rest/v1/mail_connections?id=eq.${conn.id}`, { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({
+          status: isAuth ? 'error' : conn.status,
+          last_error: raw.slice(0, 200),
+          ...(isAuth && !conn.error_since ? { error_since: new Date().toISOString() } : {}),
+        }) })
       } catch {}
     }
   }

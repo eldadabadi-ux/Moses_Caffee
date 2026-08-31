@@ -45,9 +45,12 @@ export default function MailConnectCard() {
     try { const { url } = await authFetch(`/api/mail/connect?provider=${provider}`, 'POST'); window.location.href = url }
     catch (e) { toast.error(e.message); setBusy(false) }
   }
-  async function disconnect(provider) {
+  async function disconnect(provider, email) {
     setBusy(true)
-    try { await authFetch(`/api/mail/disconnect?provider=${provider}`, 'POST'); toast.success('המייל נותק'); await refresh() }
+    // The address says WHICH mailbox; without it the server refuses when several
+    // of the same provider are connected, rather than dropping an arbitrary one.
+    const q = `provider=${encodeURIComponent(provider)}${email ? `&email=${encodeURIComponent(email)}` : ''}`
+    try { await authFetch(`/api/mail/disconnect?${q}`, 'POST'); toast.success('התיבה נותקה'); await refresh() }
     catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
   async function scanNow() {
@@ -78,7 +81,12 @@ export default function MailConnectCard() {
   const providers = Object.entries(state.providers || {}).filter(([, on]) => on).map(([p]) => p)
   const connections = state.connections || []
   if (providers.length === 0 && connections.length === 0) return null   // integration not configured yet
-  const connOf = (p) => connections.find(c => c.provider === p)
+  // Several mailboxes per provider are supported (client request #14), so this
+  // returns a LIST — picking "the" connection silently hid the others.
+  const connsOf = (p) => connections.filter(c => c.provider === p)
+  const brokenDays = (c) => (c.error_since
+    ? Math.max(0, Math.floor((Date.now() - new Date(c.error_since).getTime()) / 86400000))
+    : null)
 
   const btn = (extra) => ({ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)', border: 'none', ...extra })
 
@@ -95,17 +103,41 @@ export default function MailConnectCard() {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {providers.map(p => {
-            const c = connOf(p)
-            return c ? (
-              <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, background: c.status === 'error' ? '#fef2f2' : 'var(--accent-bg)', border: `1px solid ${c.status === 'error' ? 'var(--danger)' : 'var(--accent)'}`, flexWrap: 'wrap' }}>
-                {c.status === 'error' ? <AlertTriangle size={16} color="var(--danger)" /> : <Check size={16} color="var(--ok)" />}
-                <span style={{ fontSize: 14, color: 'var(--text)', flex: 1, minWidth: 0 }}>{LABEL[p]}: <strong>{c.email || 'מחובר'}</strong>{c.status === 'error' && ' — צריך חידוש'}</span>
-                <button onClick={() => disconnect(p)} disabled={busy} style={btn({ background: 'var(--panel)', color: 'var(--text-dim)', border: '1px solid var(--border)', padding: '7px 12px' })}><X size={14} /> נתק</button>
+            const list = connsOf(p)
+            return (
+              <div key={p} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {list.map(c => {
+                  const broken = c.status === 'error' || c.status === 'revoked'
+                  const days = brokenDays(c)
+                  return (
+                    <div key={c.id || c.email} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, background: broken ? '#fef2f2' : 'var(--accent-bg)', border: `1px solid ${broken ? 'var(--danger)' : 'var(--accent)'}`, flexWrap: 'wrap' }}>
+                      {broken ? <AlertTriangle size={16} color="var(--danger)" /> : <Check size={16} color="var(--ok)" />}
+                      <span style={{ fontSize: 14, color: 'var(--text)', flex: 1, minWidth: 0 }}>
+                        {LABEL[p]}: <strong>{c.email || 'מחובר'}</strong>
+                        {broken && (
+                          <span style={{ color: 'var(--danger)' }}>
+                            {' '}— החיבור פג, הקליטה מהתיבה הזו הופסקה
+                            {days > 0 && ` כבר ${days} ימים`}
+                          </span>
+                        )}
+                      </span>
+                      {broken && (
+                        <button onClick={() => connect(p)} disabled={busy}
+                          style={btn({ background: 'var(--danger)', color: '#fff', padding: '7px 12px' })}>
+                          <Plug size={14} /> חבר מחדש
+                        </button>
+                      )}
+                      <button onClick={() => disconnect(p, c.email)} disabled={busy} style={btn({ background: 'var(--panel)', color: 'var(--text-dim)', border: '1px solid var(--border)', padding: '7px 12px' })}><X size={14} /> נתק</button>
+                    </div>
+                  )
+                })}
+                <button onClick={() => connect(p)} disabled={busy}
+                  style={btn(list.length
+                    ? { background: 'var(--panel)', color: 'var(--accent)', border: '1px solid var(--accent)', width: 'fit-content' }
+                    : { background: 'var(--accent)', color: '#fff', width: 'fit-content' })}>
+                  <Plug size={16} /> {list.length ? `חבר תיבה נוספת של ${LABEL[p]}` : `חבר את ${LABEL[p]}`}
+                </button>
               </div>
-            ) : (
-              <button key={p} onClick={() => connect(p)} disabled={busy} style={btn({ background: 'var(--accent)', color: '#fff', width: 'fit-content' })}>
-                <Plug size={16} /> חבר את {LABEL[p]}
-              </button>
             )
           })}
         </div>

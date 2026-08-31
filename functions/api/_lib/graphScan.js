@@ -66,6 +66,6 @@ export async function scanGraph(conn, env, { vatRate = 18 } = {}) {
   }
   if (msgs.length > examined && more === false && msgs.length >= MAX_LIST) more = true
 
-  await db.patch('mail_connections', `id=eq.${conn.id}`, { last_internal_date: maxMs, last_scan_at: new Date().toISOString(), status: 'active', last_error: null })
+  await db.patch('mail_connections', `id=eq.${conn.id}`, { last_internal_date: maxMs, last_scan_at: new Date().toISOString(), status: 'active', last_error: null, error_since: null })
   return { imported, scanned: examined, more, lastInternalDate: maxMs }
 }
