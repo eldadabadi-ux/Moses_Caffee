@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useMailAlerts } from '../hooks/useMailAlerts'
+import { useFeatureFlags } from '../lib/flags'
 import { useTenant } from '../hooks/useTenant'
 import { useSettings } from '../hooks/useSettings'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
@@ -477,6 +478,7 @@ function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 1
 export default function ReceiptsPage() {
   const { user } = useAuth()
   const brokenMailboxes = useMailAlerts()
+  const flags = useFeatureFlags()
   const { orgId } = useTenant()
   const { settings, displayAmount, toggleVatDisplay } = useSettings()
   const isMobile = useIsMobile()
@@ -648,7 +650,9 @@ export default function ReceiptsPage() {
     }
     const date = r.receipt_date || ''
     const matchDoc = docFilter === 'all' || docTypeOf(r) === docFilter
-    const matchBook = bookOf(r) === bookView
+    // With the ledger switched off there is one book, so the filter must not
+    // quietly hide anything.
+    const matchBook = !flags.events_book || bookOf(r) === bookView
     // Supplier match: by canonical id once the receipt is linked, and by name
     // similarity for rows that predate the merge — so the filter is complete
     // either way and never silently drops receipts.
@@ -662,7 +666,7 @@ export default function ReceiptsPage() {
       }
     }
     return matchSearch && matchDoc && matchBook && matchSupplier && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
-  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter, bookView])
+  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter, bookView, flags.events_book])
 
   // Existing top-level (L1) category names — used to flag AI-proposed NEW
   // categories in the scan review + drive the category autocomplete.
@@ -1543,7 +1547,7 @@ export default function ReceiptsPage() {
 
         {/* Book of account — the café and the catering events are separate ledgers,
             so the switch is a top-level tab, not a filter chip. */}
-        {(
+        {flags.events_book && (
           <div style={{ display:'flex', gap:6 }}>
             {BOOKS.map(b => {
               const on = bookView === b.value
@@ -1559,7 +1563,7 @@ export default function ReceiptsPage() {
             })}
           </div>
         )}
-        {bookView === 'events' && (
+        {flags.events_book && bookView === 'events' && (
           <div style={{ fontSize:'12.5px', color:'var(--text-mute)', lineHeight:1.6 }}>
             🎪 ספר האירועים מנוהל בנפרד — המסמכים כאן אינם נספרים בדשבורד, בקטגוריות, בעלויות הספקים או בתובנות של בית הקפה.
           </div>
@@ -1827,7 +1831,7 @@ export default function ReceiptsPage() {
               </div>
             )}
             {/* Book of account — orthogonal to document type (client request #17) */}
-            <div>
+            {flags.events_book && <div>
               <label style={LS}>ספר חשבונות</label>
               <div style={{ display:'flex', gap:'6px' }}>
                 {BOOKS.map(b => (
@@ -1842,7 +1846,7 @@ export default function ReceiptsPage() {
                   🎪 מסמך של אירוע נשמר בנפרד ו<strong>לא נכנס</strong> לסטטיסטיקות, לתובנות ולהשוואות של בית הקפה.
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* Document type — detected by the AI, user can override */}
             <div>
@@ -1878,7 +1882,7 @@ export default function ReceiptsPage() {
                     <CheckCircle2 size={13} /> שויך לספק: {scanSupplier.supplier_name}
                   </div>
                 )}
-                {scanSupplier?.outcome === 'ask' && scanSupplier.suggestion?.candidates?.length > 0 && (
+                {flags.supplier_confirm && scanSupplier?.outcome === 'ask' && scanSupplier.suggestion?.candidates?.length > 0 && (
                   <div style={{ marginTop:8, padding:'10px 12px', borderRadius:10, background:'var(--accent-bg)', border:'1px solid var(--accent)' }}>
                     <div style={{ fontSize:'13px', color:'var(--text)', marginBottom:8, lineHeight:1.5 }}>
                       נסרק <strong>{scanSupplier.suggestion.scanned}</strong> — האם זה אותו ספק?

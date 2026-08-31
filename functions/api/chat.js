@@ -24,6 +24,7 @@ import { checkRateLimit, rateLimitedResponse } from './_lib/rateLimit.js'
 import { errorResponse } from './_lib/response.js'
 import { getSupabaseUrl } from './_lib/extractReceipt.js'
 import { TOOL_DEFS, runTool, buildOrientation } from './_lib/botTools.js'
+import { loadFlags } from './_lib/flags.js'
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6'
 const MAX_TOKENS   = 2048
@@ -138,6 +139,18 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     return errorResponse('טעינת הנתונים נכשלה — נסה שוב', 502, { code: 'data_failed', headers: CORS })
   }
 
+  // Flags decide which tools this tenant gets. A tool that is off is not offered
+  // at all rather than offered and refused — the model cannot cite data it was
+  // never able to fetch, which is the failure mode the tool-use rewrite exists
+  // to prevent.
+  const flags = await loadFlags(SUPABASE_URL, sk, { orgId: user.org_id })
+  if (!flags.bot_tools) {
+    return Response.json({
+      reply: 'העוזר החכם כבוי כרגע במערכת. אפשר להדליק אותו בהגדרות המערכת.',
+    }, { headers: CORS })
+  }
+  const tools = TOOL_DEFS.filter(t => t.name !== 'price_changes' || flags.price_alerts)
+
   const system = buildSystemPrompt({
     orientation,
     vatRate: userSettings?.vat_rate ?? 18,
@@ -157,7 +170,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
       const data = await callAnthropic(context.env, {
         model: CLAUDE_MODEL,
         max_tokens: MAX_TOKENS,
-        tools: TOOL_DEFS,
+        tools,
         // The system block is identical request-to-request within a conversation,
         // so it is prompt-cached; the volatile screen note rides outside it.
         system: [

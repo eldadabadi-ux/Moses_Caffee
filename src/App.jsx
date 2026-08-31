@@ -6,6 +6,7 @@ import { SettingsProvider, useSettings } from './hooks/useSettings'
 import { TenantProvider, useBrand } from './hooks/useTenant'
 import { useAppUpdate } from './hooks/useAppUpdate'
 import { clearPageCache } from './lib/pageCache'
+import { useFeatureFlags } from './lib/flags'
 import { prefetchAllPages } from './lib/prefetch'
 import LoadingSpinner from './components/ui/LoadingSpinner'
 import MonthlyExportPrompt from './components/MonthlyExportPrompt'
@@ -16,6 +17,16 @@ import CookieConsent from './components/CookieConsent'
 import Sidebar from './components/Sidebar'
 import MfaGate from './components/MfaGate'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
+
+/**
+ * A route behind a feature flag. Sends the user home rather than rendering a
+ * screen the tenant has switched off — a bookmarked URL must not be a way past
+ * a rollout gate.
+ */
+function FlagGate({ flag, children }) {
+  const flags = useFeatureFlags()
+  return flags[flag] ? children : <Navigate to="/" replace />
+}
 
 const LoginPage          = lazy(() => import('./pages/LoginPage'))
 const ResetPasswordPage  = lazy(() => import('./pages/ResetPasswordPage'))
@@ -321,7 +332,7 @@ function AppShell() {
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/suppliers"  element={<SuppliersPage />} />
             <Route path="/suppliers/merge" element={<SupplierMergePage />} />
-            <Route path="/events/quotes" element={<EventQuotesPage />} />
+            <Route path="/events/quotes" element={<FlagGate flag="events_book"><EventQuotesPage /></FlagGate>} />
             <Route path="/reconcile"  element={<ReconciliationPage />} />
             <Route path="/archive"    element={<ArchivePage />} />
             <Route path="/settings"   element={<SettingsPage />} />

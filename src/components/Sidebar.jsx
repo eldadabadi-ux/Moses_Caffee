@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useFeatureFlags } from '../lib/flags'
 import { useSettings } from '../hooks/useSettings'
 import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
@@ -73,6 +74,7 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
   const navigate = useNavigate()
   const location = useLocation()
   const asideRef = useRef(null)
+  const flags = useFeatureFlags()
   const { settings } = useSettings()
   const reconcileCount = useReconcileAlerts()
   const activeSection = NAV.find(s => s.to === location.pathname)?.id
@@ -155,7 +157,7 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
 
       {/* Nav tree */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 8px' }}>
-        {NAV.map(s => {
+        {NAV.filter(s => s.id !== 'events' || flags.events_book).map(s => {
           const isActive = location.pathname === s.to
           const isOpen = openId === s.id
           const Icon = s.icon
