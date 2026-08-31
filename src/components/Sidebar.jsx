@@ -5,7 +5,7 @@ import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge,
+  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText,
 } from 'lucide-react'
 
 // Navigation tree — every section + its options.
@@ -25,6 +25,12 @@ const NAV = [
       { label: 'סריקת קבלה',  icon: Camera,          action: 'receipts-scan' },
       { label: 'הוספה ידנית', icon: Plus,            action: 'receipts-add' },
       { label: 'ייצוא לרו"ח', icon: FileSpreadsheet, action: 'receipts-export' },
+    ],
+  },
+  {
+    id: 'events', label: 'אירועים', icon: FileText, to: '/events/quotes',
+    children: [
+      { label: 'הצעות מחיר', icon: FileText, to: '/events/quotes' },
     ],
   },
   {
