@@ -20,8 +20,18 @@ import { withUnitPricing } from './units.js'
 
 // Model chain — flash models work on the free tier and are fast + accurate.
 // gemini-2.5-pro is intentionally NOT used: it returns 429 (quota) on the free tier.
-const GEMINI_PRIMARY  = 'gemini-2.5-flash'
-const GEMINI_FALLBACK = 'gemini-flash-latest'
+//
+// Overridable per environment (client request #9, "check whether a better model
+// exists"): set GEMINI_MODEL to trial a candidate without a code change, and
+// GEMINI_FALLBACK_MODEL for its fallback. `npm run eval:scan -- --model=<id>`
+// scores a candidate against the fixture corpus before it goes anywhere near
+// production.
+const DEFAULT_PRIMARY  = 'gemini-2.5-flash'
+const DEFAULT_FALLBACK = 'gemini-flash-latest'
+const modelsFor = (env) => [
+  (env?.GEMINI_MODEL || '').trim() || DEFAULT_PRIMARY,
+  (env?.GEMINI_FALLBACK_MODEL || '').trim() || DEFAULT_FALLBACK,
+]
 
 export function getSupabaseUrl(env) {
   return env.VITE_SUPABASE_URL || env.SUPABASE_URL || 'https://dsoucojqjrodxozcbicf.supabase.co'
@@ -137,7 +147,8 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
 
   // ── Call Gemini with retry across models ──────────────────────────────────
   let result = null, lastError = null, usedModel = null
-  for (const model of [GEMINI_PRIMARY, GEMINI_FALLBACK]) {
+  const [primaryModel, fallbackModel] = modelsFor(env)
+  for (const model of [primaryModel, fallbackModel]) {
     try {
       result = await callGemini(GEMINI_API_KEY, model, imgs, mimeType, prompt)
       if (result && (result.total_amount > 0 || result.vendor_name)) { usedModel = model; break }
@@ -151,7 +162,7 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
   if (result && (!result.total_amount || result.total_amount === 0)) {
     console.warn('[extractReceipt] Amount missing — retrying with focused prompt')
     try {
-      const retryResult = await callGemini(GEMINI_API_KEY, GEMINI_PRIMARY, imgs, mimeType, buildRetryPrompt(result))
+      const retryResult = await callGemini(GEMINI_API_KEY, primaryModel, imgs, mimeType, buildRetryPrompt(result))
       if (retryResult?.total_amount > 0) result = { ...result, ...retryResult }
     } catch (retryErr) {
       console.warn('[extractReceipt] Retry failed:', retryErr?.message)

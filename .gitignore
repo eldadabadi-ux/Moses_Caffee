@@ -26,3 +26,6 @@ Thumbs.db
 
 # Abandoned local-only cron workflow (GITHUB_TOKEN lacks 'workflow' scope → push rejected)
 .github/workflows/mail-scan.yml
+
+# generated eval receipt images (regenerate with: npm run eval:scan -- --render-only)
+tests/eval/.images/
