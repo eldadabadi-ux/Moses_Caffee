@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -14,13 +13,13 @@ import ImageViewer from '../components/ImageViewer'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload, dataUrlToBlob } from '../lib/imageUtils'
 import { isPdf, pdfToImages } from '../lib/pdfUtils'
-import { buildExcelBlob, pdfBlob as buildPdfBlob, buildImagesZip, combineZip, buildReconciliationRows, buildReconciliationHtml } from '../lib/receiptExport'
+import { buildExcelBlob, pdfBlob as buildPdfBlob } from '../lib/receiptExport'
 import ReceiptScanAnimation from '../components/ReceiptScanAnimation'
 import toast from 'react-hot-toast'
 import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
   Sparkles, FileSpreadsheet, CheckCircle2, Image as ImageIcon,
-  CalendarDays, Filter, ChevronDown, Receipt as ReceiptIcon, Files,
+  CalendarDays, Filter, Files,
   Archive, RotateCcw, AlertTriangle, ListChecks, Store,
 } from 'lucide-react'
 import { DOC_TYPES, docTypeOf, docTypeLabel, isExpenseDoc, DOC_COL_RE } from '../lib/docTypes'
@@ -28,7 +27,7 @@ import { openIssues } from '../lib/reconciliation'
 import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/storage'
 import { fetchLegacyInlineImage } from '../lib/receiptImage'
 import { vendorSimilarity, AUTO_THRESHOLD } from '../lib/supplierMatch'
-import { BOOKS, DEFAULT_BOOK, bookOf, bookLabel } from '../lib/books'
+import { BOOKS, DEFAULT_BOOK, bookOf } from '../lib/books'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -36,6 +35,10 @@ import DateInput from '../components/ui/DateInput'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import Badge from '../components/ui/Badge'
 import ReceiptThumb from '../components/ReceiptThumb'
+import CameraModal from '../components/receipts/CameraModal'
+import CropModal from '../components/receipts/CropModal'
+import ExportDialog from '../components/receipts/ExportDialog'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -61,420 +64,8 @@ const fmtCur = (n, code) => {
   return sym ? `${sym}${v}` : `${v} ${code}`
 }
 
-function useIsMobile() {
-  const [v, setV] = useState(() => window.innerWidth < 768)
-  useEffect(() => {
-    const h = () => setV(window.innerWidth < 768)
-    window.addEventListener('resize', h)
-    return () => window.removeEventListener('resize', h)
-  }, [])
-  return v
-}
 
-async function buildStyledExcel(rows) {
-  const XLSXs = (await import('xlsx-js-style')).default
-  const thin   = { style: 'thin', color: { rgb: 'CCCCCC' } }
-  const border = { top: thin, bottom: thin, left: thin, right: thin }
-  const ws = XLSXs.utils.aoa_to_sheet(rows)
-  const range = XLSXs.utils.decode_range(ws['!ref'] || 'A1')
-  for (let R = range.s.r; R <= range.e.r; R++) {
-    for (let C = range.s.c; C <= range.e.c; C++) {
-      const addr = XLSXs.utils.encode_cell({ r: R, c: C })
-      if (!ws[addr]) ws[addr] = { v: '', t: 's' }
-      const isHeader = R === 0, isTotal = R === range.e.r
-      ws[addr].s = {
-        font:      { bold: isHeader || isTotal, name: 'Arial', sz: 10 },
-        fill:      isHeader ? { patternType: 'solid', fgColor: { rgb: 'E8E8E8' } } : { patternType: 'none' },
-        border,
-        alignment: { horizontal: 'right', readingOrder: 2 },
-      }
-    }
-  }
-  ws['!cols']  = [{ wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 15 }, { wch: 13 }, { wch: 17 }]
-  ws['!views'] = [{ rightToLeft: true }]
-  const wb = XLSXs.utils.book_new()
-  XLSXs.utils.book_append_sheet(wb, ws, 'קבלות')
-  return { XLSXs, wb }
-}
 
-// ── CameraModal ────────────────────────────────────────────────────────────────
-function CameraModal({ onCapture, onClose, multi = false, onFiles }) {
-  const videoRef  = useRef(null)
-  const streamRef = useRef(null)
-  const filesInputRef = useRef(null)
-  const [ready, setReady] = useState(false)
-  const [err,   setErr]   = useState(null)
-  const [pages, setPages] = useState([])   // multi-page: [{ file, url }]
-  const pagesRef = useRef([])
-  useEffect(() => { pagesRef.current = pages }, [pages])
-
-  useEffect(() => {
-    let cancelled = false
-    navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      audio: false,
-    })
-    .then(stream => {
-      if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
-      streamRef.current = stream
-      if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}) }
-      setReady(true)
-    })
-    .catch(e => { if (!cancelled) setErr(e?.name === 'NotAllowedError' ? 'אין הרשאת מצלמה. אפשר הרשאה בהגדרות.' : 'שגיאה בפתיחת מצלמה') })
-    return () => { cancelled = true; streamRef.current?.getTracks().forEach(t => t.stop()) }
-  }, [])
-
-  // Revoke thumbnail object URLs only on unmount (not on every capture)
-  useEffect(() => () => { pagesRef.current.forEach(p => URL.revokeObjectURL(p.url)) }, [])
-
-  function grabFrame() {
-    const video = videoRef.current; if (!video || !ready) return null
-    const canvas = document.createElement('canvas')
-    canvas.width  = video.videoWidth  || 1280
-    canvas.height = video.videoHeight || 720
-    canvas.getContext('2d').drawImage(video, 0, 0)
-    return canvas
-  }
-  function stopStream() { streamRef.current?.getTracks().forEach(t => t.stop()) }
-
-  function capture() {
-    const canvas = grabFrame(); if (!canvas) return
-    canvas.toBlob(blob => {
-      if (!blob) return
-      const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' })
-      if (multi) {
-        setPages(p => [...p, { file, url: URL.createObjectURL(blob) }])  // keep stream alive
-      } else {
-        stopStream()
-        onCapture([file])
-      }
-    }, 'image/jpeg', 0.92)
-  }
-
-  function finish() {
-    stopStream()
-    onCapture(pages.map(p => p.file))
-  }
-  function removePage(i) {
-    setPages(p => { const n = [...p]; URL.revokeObjectURL(n[i].url); n.splice(i, 1); return n })
-  }
-
-  return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 99995, background: '#000', display: 'flex', flexDirection: 'column', fontFamily: 'var(--font-main)' }}>
-      {err ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20, color: '#fff', padding: '32px' }}>
-          <span style={{ fontSize: 15, textAlign: 'center' }}>{err}</span>
-          <button onClick={onClose} style={{ padding: '12px 32px', borderRadius: 12, background: '#fff', color: '#000', fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 15 }}>סגור</button>
-        </div>
-      ) : (
-        <>
-          <video ref={videoRef} playsInline muted autoPlay style={{ flex: 1, width: '100%', objectFit: 'cover', display: 'block' }} />
-          {!ready && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: '#fff', fontSize: 14 }}>מאתחל מצלמה…</div>}
-
-          {/* Pick from files (images or PDF) instead of the camera */}
-          <button onClick={() => filesInputRef.current?.click()}
-            style={{ position: 'absolute', top: 'calc(12px + env(safe-area-inset-top))', left: 12, zIndex: 3, display: 'flex', alignItems: 'center', gap: 6, padding: '8px 13px', borderRadius: 999, background: 'rgba(255,255,255,0.18)', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-main)', cursor: 'pointer', WebkitBackdropFilter: 'blur(4px)', backdropFilter: 'blur(4px)' }}>
-            <Files size={15} /> מהקבצים / PDF
-          </button>
-          <input ref={filesInputRef} type="file" accept="image/*,application/pdf" multiple
-            onChange={(e) => { const f = Array.from(e.target.files || []); e.target.value = ''; if (f.length) { stopStream(); onFiles?.(f) } }}
-            style={{ display: 'none' }} />
-
-          {/* Multi-page banner + captured thumbnails */}
-          {multi && (
-            <div dir="rtl" style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: 'calc(10px + env(safe-area-inset-top)) 12px 10px', background: 'linear-gradient(rgba(0,0,0,0.55), transparent)' }}>
-              <div style={{ color: '#fff', fontSize: 13.5, fontWeight: 600, marginBottom: pages.length ? 8 : 0, textAlign: 'center' }}>
-                {pages.length === 0
-                  ? 'צלם את הקבלה — אפשר להוסיף כמה עמודים'
-                  : `צולמו ${pages.length} עמודים · "המשך סריקה" לעמוד נוסף, "סיום" לסיום הסריקה`}
-              </div>
-              {pages.length > 0 && (
-                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
-                  {pages.map((p, i) => (
-                    <div key={p.url} style={{ position: 'relative', flexShrink: 0 }}>
-                      <img src={p.url} alt={`עמ' ${i + 1}`} style={{ width: 48, height: 64, objectFit: 'cover', borderRadius: 7, border: '2px solid rgba(255,255,255,0.8)' }} />
-                      <span style={{ position: 'absolute', bottom: 2, right: 2, background: 'rgba(0,0,0,0.7)', color: '#fff', fontSize: 10, fontWeight: 700, borderRadius: 4, padding: '0 4px' }}>{i + 1}</span>
-                      <button onClick={() => removePage(i)} aria-label="הסר" style={{ position: 'absolute', top: -6, left: -6, width: 20, height: 20, borderRadius: '50%', background: '#dc2626', color: '#fff', border: '2px solid #000', cursor: 'pointer', fontSize: 11, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '24px 20px calc(36px + env(safe-area-inset-bottom))', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', background: 'linear-gradient(transparent, rgba(0,0,0,0.5))' }}>
-            <button onClick={() => { stopStream(); onClose() }} style={{ width: 52, height: 52, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 22, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', flexShrink: 0 }}>✕</button>
-            {/* Shutter + caption */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-              <button onClick={capture} disabled={!ready}
-                style={{ width: 76, height: 76, borderRadius: '50%', background: ready ? '#fff' : '#666', border: '4px solid rgba(255,255,255,0.5)', cursor: ready ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation' }}>
-                <div style={{ width: 58, height: 58, borderRadius: '50%', background: ready ? '#fff' : '#888', border: '3px solid #000' }} />
-              </button>
-              {multi && (
-                <span style={{ color: '#fff', fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--font-main)', textShadow: '0 1px 4px rgba(0,0,0,0.7)', whiteSpace: 'nowrap' }}>
-                  {pages.length ? 'המשך סריקה' : 'צלם קבלה'}
-                </span>
-              )}
-            </div>
-            {/* Continue/finish button (multi only) */}
-            {multi ? (
-              <button onClick={finish} disabled={!pages.length}
-                style={{ minWidth: 64, height: 52, padding: '0 16px', borderRadius: 26, background: pages.length ? '#16a34a' : 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', fontSize: 15, fontWeight: 700, cursor: pages.length ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', fontFamily: 'var(--font-main)', flexShrink: 0 }}>
-                סיום{pages.length ? ` (${pages.length})` : ''}
-              </button>
-            ) : <div style={{ width: 52 }} />}
-          </div>
-        </>
-      )}
-    </div>,
-    document.body
-  )
-}
-
-// ── CropModal ─────────────────────────────────────────────────────────────────
-function CropModal({ src, onConfirm, onCancel }) {
-  const imgRef = useRef(null)
-  const [nat,  setNat]  = useState(null)
-  const [vw,   setVw]   = useState(() => window.innerWidth)
-  const [vh,   setVh]   = useState(() => window.innerHeight)
-  const [safeBot, setSafeBot] = useState(0)
-  const [crop, setCrop] = useState({ x: 0, y: 0, w: 1, h: 1 })
-  const dragRef = useRef(null), dispRef = useRef(null), cropRef = useRef(crop)
-  useEffect(() => { cropRef.current = crop }, [crop])
-
-  const TOP_H = 48, BOT_H = 76, MIN_PX = 40
-
-  useEffect(() => {
-    const pb = document.body.style.overflow, ph = document.documentElement.style.overflow
-    document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = pb; document.documentElement.style.overflow = ph }
-  }, [])
-
-  useEffect(() => {
-    function measure() {
-      setVw(window.innerWidth); setVh(window.innerHeight)
-      const tmp = document.createElement('div')
-      tmp.style.cssText = 'position:fixed;bottom:0;left:0;width:1px;height:env(safe-area-inset-bottom,0px);pointer-events:none;visibility:hidden'
-      document.body.appendChild(tmp); setSafeBot(tmp.offsetHeight || 0); document.body.removeChild(tmp)
-    }
-    measure(); window.addEventListener('resize', measure); window.addEventListener('orientationchange', measure)
-    return () => { window.removeEventListener('resize', measure); window.removeEventListener('orientationchange', measure) }
-  }, [])
-
-  const totalBot = BOT_H + safeBot
-  const disp = useMemo(() => {
-    if (!nat) return null
-    const availW = vw, availH = vh - TOP_H - totalBot
-    const scale = Math.min(availW / nat.w, availH / nat.h)
-    const imgW = Math.floor(nat.w * scale), imgH = Math.floor(nat.h * scale)
-    return { x: Math.floor((availW - imgW) / 2), y: TOP_H + Math.floor((availH - imgH) / 2), w: imgW, h: imgH }
-  }, [nat, vw, vh, totalBot])
-  useEffect(() => { dispRef.current = disp }, [disp])
-
-  useEffect(() => {
-    function getPoint(ev) { const t = ev.touches?.[0] ?? ev.changedTouches?.[0] ?? ev; return { x: t.clientX, y: t.clientY } }
-    function onMove(ev) {
-      const d = dragRef.current, disp = dispRef.current; if (!d || !disp) return
-      ev.preventDefault()
-      const { x: px, y: py } = getPoint(ev)
-      const W = disp.w, H = disp.h, dx = (px - d.sx) / W, dy = (py - d.sy) / H
-      const c = d.crop, minW = MIN_PX / W, minH = MIN_PX / H
-      let n = { ...c }
-      if      (d.type === 'move')   { n = { ...c, x: c.x + dx, y: c.y + dy } }
-      else if (d.type === 'br')     { n = { ...c, w: Math.max(minW, c.w + dx), h: Math.max(minH, c.h + dy) } }
-      else if (d.type === 'bl')     { const nw = Math.max(minW, c.w - dx); n = { x: c.x + c.w - nw, y: c.y, w: nw, h: Math.max(minH, c.h + dy) } }
-      else if (d.type === 'tr')     { const nh = Math.max(minH, c.h - dy); n = { x: c.x, y: c.y + c.h - nh, w: Math.max(minW, c.w + dx), h: nh } }
-      else if (d.type === 'tl')     { const nw = Math.max(minW, c.w - dx), nh = Math.max(minH, c.h - dy); n = { x: c.x + c.w - nw, y: c.y + c.h - nh, w: nw, h: nh } }
-      else if (d.type === 'top')    { const nh = Math.max(minH, c.h - dy); n = { ...c, y: c.y + c.h - nh, h: nh } }
-      else if (d.type === 'bottom') { n = { ...c, h: Math.max(minH, c.h + dy) } }
-      else if (d.type === 'left')   { const nw = Math.max(minW, c.w - dx); n = { ...c, x: c.x + c.w - nw, w: nw } }
-      else if (d.type === 'right')  { n = { ...c, w: Math.max(minW, c.w + dx) } }
-      const fw = Math.max(minW, Math.min(n.w, 1)), fh = Math.max(minH, Math.min(n.h, 1))
-      setCrop({ x: Math.max(0, Math.min(n.x, 1 - fw)), y: Math.max(0, Math.min(n.y, 1 - fh)), w: fw, h: fh })
-    }
-    function onUp() { dragRef.current = null }
-    window.addEventListener('pointermove', onMove, { passive: false }); window.addEventListener('pointerup', onUp)
-    window.addEventListener('touchmove', onMove, { passive: false }); window.addEventListener('touchend', onUp)
-    return () => {
-      window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', onUp)
-    }
-  }, [])
-
-  function startDrag(ev, type) {
-    ev.preventDefault(); ev.stopPropagation()
-    const pt = ev.touches?.[0] ?? ev
-    dragRef.current = { type, sx: pt.clientX, sy: pt.clientY, crop: { ...cropRef.current } }
-  }
-  async function confirmCrop() {
-    const img = imgRef.current; if (!img) return
-    const { x, y, w, h } = crop
-    const sx = Math.max(0, Math.round(x * img.naturalWidth)), sy = Math.max(0, Math.round(y * img.naturalHeight))
-    const sw = Math.max(1, Math.min(img.naturalWidth - sx, Math.round(w * img.naturalWidth)))
-    const sh = Math.max(1, Math.min(img.naturalHeight - sy, Math.round(h * img.naturalHeight)))
-    const canvas = document.createElement('canvas'); canvas.width = sw; canvas.height = sh
-    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-    onConfirm(canvas.toDataURL('image/jpeg', 0.9), 'image/jpeg')
-  }
-
-  function Handle({ corner }) {
-    if (!disp) return null
-    const { x, y, w, h } = crop, isR = corner === 'tr' || corner === 'br', isB = corner === 'bl' || corner === 'br'
-    const hx = disp.x + (isR ? (x + w) : x) * disp.w, hy = disp.y + (isB ? (y + h) : y) * disp.h
-    const HIT = 72, BAR = 38, THK = 5
-    return (
-      <div onPointerDown={ev => startDrag(ev, corner)} onTouchStart={ev => startDrag(ev, corner)}
-        style={{ position: 'fixed', left: hx - HIT/2, top: hy - HIT/2, width: HIT, height: HIT, zIndex: 10005, touchAction: 'none', cursor: (corner==='tl'||corner==='br') ? 'nwse-resize' : 'nesw-resize' }}>
-        <div style={{ position: 'absolute', background: '#fff', height: THK, width: BAR, borderRadius: 3, top: isB ? HIT-THK : 0, left: isR ? HIT-BAR : 0 }}/>
-        <div style={{ position: 'absolute', background: '#fff', width: THK, height: BAR, borderRadius: 3, top: isB ? HIT-BAR : 0, left: isR ? HIT-THK : 0 }}/>
-      </div>
-    )
-  }
-  function EdgeHandle({ edge }) {
-    if (!disp) return null
-    const { x, y, w, h } = crop
-    const lx = disp.x + x * disp.w, ly = disp.y + y * disp.h, rw = w * disp.w, rh = h * disp.h
-    const HIT = 44, CORNER = 56
-    let s = {}
-    if (edge === 'top')    s = { left: lx + CORNER/2, top: ly - HIT/2,        width: rw - CORNER, height: HIT, cursor: 'ns-resize' }
-    if (edge === 'bottom') s = { left: lx + CORNER/2, top: ly + rh - HIT/2,   width: rw - CORNER, height: HIT, cursor: 'ns-resize' }
-    if (edge === 'left')   s = { left: lx - HIT/2,    top: ly + CORNER/2,     width: HIT, height: rh - CORNER, cursor: 'ew-resize' }
-    if (edge === 'right')  s = { left: lx + rw - HIT/2, top: ly + CORNER/2,   width: HIT, height: rh - CORNER, cursor: 'ew-resize' }
-    return <div onPointerDown={ev => startDrag(ev, edge)} onTouchStart={ev => startDrag(ev, edge)} style={{ position: 'fixed', zIndex: 10004, touchAction: 'none', ...s }} />
-  }
-
-  const { x, y, w, h } = crop
-  const cx = disp ? disp.x + x * disp.w : 0, cy = disp ? disp.y + y * disp.h : 0
-  const cw = disp ? w * disp.w : 0, ch = disp ? h * disp.h : 0
-
-  return createPortal(
-    <div style={{ position: 'fixed', inset: 0, zIndex: 99990, fontFamily: 'var(--font-main)' }}>
-      <div style={{ position: 'absolute', inset: 0, background: '#111', touchAction: 'none' }}/>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: TOP_H, background: '#000', borderBottom: '1px solid rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2 }}>
-        <span style={{ color: '#fff', fontWeight: 700, fontSize: '15px' }}>חיתוך תמונה</span>
-      </div>
-      <img ref={imgRef} src={src} alt="קבלה" onLoad={() => { const i = imgRef.current; if (i) setNat({ w: i.naturalWidth, h: i.naturalHeight }) }}
-        style={{ position: 'absolute', zIndex: 1, display: 'block', pointerEvents: 'none', userSelect: 'none', top: disp ? disp.y : '50%', left: disp ? disp.x : '50%', width: disp ? disp.w : 1, height: disp ? disp.h : 1, opacity: disp ? 1 : 0 }} />
-      {!nat && <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 3, color: 'rgba(255,255,255,0.7)', fontSize: '15px' }}>טוען תמונה…</div>}
-      {disp && nat && (<>
-        {cy > disp.y+1            && <div style={{ position: 'absolute', top: disp.y, left: disp.x, width: disp.w, height: cy-disp.y, zIndex: 2, background: 'rgba(0,0,0,0.6)', pointerEvents: 'none' }}/>}
-        {cy+ch < disp.y+disp.h-1  && <div style={{ position: 'absolute', top: cy+ch, left: disp.x, width: disp.w, height: (disp.y+disp.h)-(cy+ch), zIndex: 2, background: 'rgba(0,0,0,0.6)', pointerEvents: 'none' }}/>}
-        {cx > disp.x+1            && <div style={{ position: 'absolute', top: cy, left: disp.x, width: cx-disp.x, height: ch, zIndex: 2, background: 'rgba(0,0,0,0.6)', pointerEvents: 'none' }}/>}
-        {cx+cw < disp.x+disp.w-1  && <div style={{ position: 'absolute', top: cy, left: cx+cw, width: (disp.x+disp.w)-(cx+cw), height: ch, zIndex: 2, background: 'rgba(0,0,0,0.6)', pointerEvents: 'none' }}/>}
-      </>)}
-      {disp && nat && (
-        <div onPointerDown={ev => startDrag(ev, 'move')} onTouchStart={ev => startDrag(ev, 'move')}
-          style={{ position: 'absolute', top: cy, left: cx, width: cw, height: ch, zIndex: 3, border: '2.5px solid rgba(255,255,255,0.9)', boxSizing: 'border-box', cursor: 'move', touchAction: 'none' }}>
-          {[33.3, 66.6].map(p => <div key={`h${p}`} style={{ position: 'absolute', top: `${p}%`, left: 0, right: 0, borderTop: '1px solid rgba(255,255,255,0.2)', pointerEvents: 'none' }}/>)}
-          {[33.3, 66.6].map(p => <div key={`v${p}`} style={{ position: 'absolute', left: `${p}%`, top: 0, bottom: 0, borderLeft: '1px solid rgba(255,255,255,0.2)', pointerEvents: 'none' }}/>)}
-        </div>
-      )}
-      {disp && nat && ['top','bottom','left','right'].map(e => <EdgeHandle key={e} edge={e}/>)}
-      {disp && nat && ['tl','tr','bl','br'].map(c => <Handle key={c} corner={c}/>)}
-      <div dir="rtl" style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
-        background: '#000', borderTop: '1px solid rgba(255,255,255,0.15)',
-        display: 'flex', alignItems: 'center', gap: '8px',
-        padding: '10px 12px',
-        paddingBottom: safeBot > 0 ? `${safeBot + 10}px` : '14px',
-      }}>
-        <button onClick={onCancel} style={{ flex: 1, height: 50, borderRadius: '12px', border: '1.5px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: '14px', fontWeight: 600, cursor: 'pointer', touchAction: 'manipulation' }}>ביטול</button>
-        <button onClick={() => setCrop({ x:0, y:0, w:1, h:1 })} disabled={!nat} style={{ flex: 1.5, height: 50, borderRadius: '12px', border: '1.5px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.08)', color: '#cce', fontSize: '14px', fontWeight: 600, cursor: nat ? 'pointer' : 'default', touchAction: 'manipulation', opacity: nat ? 1 : 0.4 }}>מצב קודם</button>
-        <button onClick={confirmCrop} disabled={!nat} style={{ flex: 2, height: 50, borderRadius: '12px', border: 'none', background: nat ? '#2563eb' : '#444', color: '#fff', fontSize: '14px', fontWeight: 700, cursor: nat ? 'pointer' : 'default', touchAction: 'manipulation', opacity: nat ? 1 : 0.5 }}>שמור וסרוק →</button>
-      </div>
-    </div>,
-    document.body
-  )
-}
-
-// ── ExportDialog ──────────────────────────────────────────────────────────────
-function ExportDialog({ receipts, totalAmount, filterFrom, filterTo, vatRate = 18, onClose, onExported }) {
-  const [opts, setOpts] = useState({ excel: true, pdf: true, images: true })
-  const [busy, setBusy] = useState(false)
-  const nImages = receipts.filter(r => r.storage_path || r.receipt_image).length
-  const noneSelected = !opts.excel && !opts.pdf && !opts.images
-  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent) || window.innerWidth < 768
-  const selectedCount = [opts.excel, opts.pdf, opts.images && nImages > 0].filter(Boolean).length
-  const useZip = !isMobile && selectedCount > 1
-
-  async function doExport() {
-    if (busy) return
-    setBusy(true)
-    try {
-      const dateStr = new Date().toISOString().slice(0, 10)
-      const excelBlob  = opts.excel ? await buildExcelBlob(receipts, vatRate) : null
-      const pdfFile    = opts.pdf   ? buildPdfBlob(receipts, { filterFrom, filterTo, vatRate }) : null
-      const imagesBlob = (opts.images && nImages > 0) ? await buildImagesZip(receipts) : null
-      // Reconciliation document — included when the set has delivery notes /
-      // summary invoices (goes in the accountant folder next to the report).
-      const reconFile = buildReconciliationRows(receipts).length
-        ? new Blob([buildReconciliationHtml(receipts)], { type: 'text/html;charset=utf-8' }) : null
-
-      if (useZip) {
-        const blob = await combineZip([
-          { name: 'קבלות.xlsx',         blob: excelBlob },
-          { name: 'דוח_קבלות.html',     blob: pdfFile },
-          { name: 'דוח_התאמות.html',    blob: reconFile },
-          { name: 'תמונות_קבלות.zip',   blob: imagesBlob },
-        ])
-        await downloadFile({ blob, filename: `קבלות_לרו"ח_${dateStr}.zip` })
-      } else {
-        if (excelBlob)  await downloadFile({ blob: excelBlob,  filename: `קבלות_${dateStr}.xlsx` })
-        if (pdfFile)    await downloadFile({ blob: pdfFile,    filename: `דוח_קבלות_${dateStr}.html` })
-        if (imagesBlob) await downloadFile({ blob: imagesBlob, filename: `תמונות_קבלות_${dateStr}.zip` })
-      }
-      toast.success('הייצוא הושלם!')
-      onClose()
-      onExported?.(receipts)   // offer to move the exported receipts to the archive
-    } catch (err) {
-      toast.error('שגיאה בייצוא: ' + (err?.message || ''))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const checkStyle = (active) => ({
-    display:'flex', alignItems:'flex-start', gap:'12px', padding:'12px 14px',
-    borderRadius:'10px', cursor:'pointer', transition:'all 120ms', marginBottom:'10px',
-    background: active ? 'var(--accent-bg)' : 'var(--panel-2)',
-    border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
-  })
-
-  return (
-    <Modal isOpen={true} onClose={onClose} title={`ייצוא לרו"ח · ${receipts.length} קבלות`} size="sm">
-      <div style={{ display:'flex', flexDirection:'column', gap:'14px' }} dir="rtl">
-        <p style={{ margin:0, fontSize:'13px', color:'var(--text-mute)' }}>סה"כ {fmtILS(totalAmount)}</p>
-        <div>
-          <p style={{ margin:'0 0 10px', fontSize:'11px', fontWeight:600, color:'var(--text-mute)', textTransform:'uppercase', letterSpacing:'0.07em' }}>מה לכלול</p>
-          {[
-            { key:'excel', icon:'📊', label:'Excel לרואה חשבון',   sub:'.xlsx עם כל הקבלות' },
-            { key:'pdf',   icon:'📄', label:'דוח להדפסה (PDF)',    sub:'קובץ HTML → הדפס → שמור PDF' },
-            { key:'images',icon:'🖼',  label:'תמונות קבלות',        sub:`${nImages} קבלות עם תמונה` },
-          ].map(({ key, icon, label, sub }) => (
-            <label key={key} style={checkStyle(opts[key])}>
-              <input type="checkbox" checked={!!opts[key]} onChange={() => setOpts(p => ({ ...p, [key]: !p[key] }))} style={{ accentColor:'var(--accent)', width:'18px', height:'18px', marginTop:'1px', cursor:'pointer', flexShrink:0 }} />
-              <span style={{ fontSize:'20px' }}>{icon}</span>
-              <div>
-                <p style={{ margin:0, fontWeight:600, fontSize:'14px', color:'var(--text)' }}>{label}</p>
-                <p style={{ margin:'2px 0 0', fontSize:'12px', color:'var(--text-mute)' }}>{sub}</p>
-              </div>
-            </label>
-          ))}
-        </div>
-        <div style={{ display:'flex', gap:'10px', paddingTop:'4px', paddingBottom:'4px' }}>
-          <button onClick={onClose} disabled={busy} style={{ flex:1, padding:'13px', borderRadius:'var(--r-btn)', border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-dim)', fontSize:'14px', cursor:'pointer', fontFamily:'var(--font-main)' }}>ביטול</button>
-          <button onClick={doExport} disabled={busy || noneSelected}
-            style={{ flex:2, display:'flex', alignItems:'center', justifyContent:'center', gap:'8px', padding:'13px', borderRadius:'var(--r-btn)', border:'none', fontSize:'14px', fontWeight:700, fontFamily:'var(--font-main)', cursor:(busy||noneSelected)?'default':'pointer', background:(busy||noneSelected)?'var(--panel-2)':'linear-gradient(135deg,#2563eb,#1d4ed8)', color:(busy||noneSelected)?'var(--text-mute)':'white' }}>
-            <Download size={15} />
-            {busy ? 'מייצא...' : useZip ? 'ייצא ZIP לרו"ח' : 'ייצא'}
-          </button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-// ── Main ReceiptsPage ─────────────────────────────────────────────────────────
 export default function ReceiptsPage() {
   const { user } = useAuth()
   const brokenMailboxes = useMailAlerts()
