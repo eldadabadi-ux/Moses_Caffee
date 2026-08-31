@@ -35,6 +35,9 @@ const sh = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim()
 function diagnose(out) {
   if (/Host not in allowlist|ENOTFOUND|EAI_AGAIN|fetch failed|ECONNREFUSED/i.test(out))
     return 'Could not reach Supabase. Check your connection and .env.test - this is not a code problem.'
+  if (/PENDING|pending,/.test(out))
+    return 'A database migration has not been applied yet. Run it in the Supabase SQL editor,'
+         + '\n      then: npm run migrations -- --mark=<file>.sql'
   if (/Missing SUPABASE|SUPABASE_SERVICE_ROLE_KEY/i.test(out))
     return 'Missing environment variables in .env.test (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY).'
   const fails = out.split('\n').filter(l => /^not ok /.test(l.trim())).slice(0, 8)
@@ -83,8 +86,12 @@ console.log(c.b('Checks'))
 step('unit tests        ', 'npm run test:unit')
 
 if (existsSync('.env.test')) {
+  // A pending migration is an outage that no test catches: the tests pass
+  // against a database where someone happened to run the SQL by hand.
+  step('migrations        ', 'npm run migrations -- --check')
   step('security tests    ', 'npm run test:security')
 } else {
+  console.log('  ' + c.y('migrations         - skipped (no .env.test)'))
   console.log('  ' + c.y('security tests     - skipped (no .env.test)'))
 }
 

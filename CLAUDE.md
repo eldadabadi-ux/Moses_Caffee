@@ -46,6 +46,28 @@ proves neither can read or write the other's receipts, categories, suppliers, al
 their org, or reach their files. **A new tenant table, or a new endpoint that reads one, requires a test
 here before it ships.**
 
+## Migrations
+
+Schema changes are loose `supabase_*.sql` files in the repo root, each written to
+be idempotent, applied by hand in the Supabase SQL editor. `schema_migrations` is
+the ledger of which ones actually ran, and `npm run ship` refuses to release when
+a file on disk has not been recorded — shipping code whose migration is still
+pending is an outage no test catches, because the tests run against a database
+where someone happened to run the SQL.
+
+```
+npm run migrations                          # applied / pending / changed
+npm run migrations -- --mark=<file>.sql     # after running it in the SQL editor
+```
+
+The runner deliberately does NOT execute SQL: applying DDL needs a privileged
+connection, and an RPC that runs arbitrary SQL would be a far worse hole than the
+problem it solves. Moving to `supabase db push` is the eventual fix; it needs the
+CLI linked with the database password.
+
+`supabase/migrations/20260609_multi_tenant.sql` was never applied and references
+tables that do not exist (July audit). It is dead — delete it rather than run it.
+
 ## Known debt (see `docs/ARCHITECTURE-AUDIT-2026.md`)
 - ~~Receipt images are base64 in the DB row~~ — closed (C1): images live in Storage, the list carries no
   image bytes. Legacy rows still hold base64 until `npm run cleanup` runs.
