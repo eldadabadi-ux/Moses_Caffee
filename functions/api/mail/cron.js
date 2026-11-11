@@ -1,6 +1,6 @@
 /**
  * /api/mail/cron — scan ALL active mailbox connections (every customer). Called
- * by the scheduled cron Worker (mail-scan-worker). Protected by a shared secret
+ * by the Supabase pg_cron job (supabase_mail_cron.sql). Protected by a shared secret
  * (env.CRON_SECRET) — NOT a user JWT. Reuses the same scan core + Pages env as
  * the on-demand /api/mail/scan, so no secrets are duplicated.
  */

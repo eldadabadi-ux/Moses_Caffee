@@ -29,8 +29,7 @@ and in local `.env` / `.env.test` files that are git-ignored.
 | `GEMINI_API_KEY` | `functions/api/_lib/extractReceipt.js` | receipt OCR/extraction |
 | `GEMINI_MODEL` | `extractReceipt.js` | optional primary-model override |
 | `GEMINI_FALLBACK_MODEL` | `extractReceipt.js` | optional fallback-model override |
-| `CRON_SECRET` | `functions/api/mail/cron.js` | shared secret the scheduler must present |
-| `CRON_TARGET` | `mail-scan-worker/src/index.js` | URL the worker pings (worker secret) |
+| `CRON_SECRET` | `functions/api/mail/cron.js` | shared secret the scheduler (Supabase pg_cron) must present |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | `functions/api/mail/connect.js`, `callback.js` | Gmail OAuth app |
 | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | same | Outlook/Graph OAuth app |
 | `MAIL_REDIRECT_URI` | `mail/connect.js` | pinned OAuth redirect (falls back to `${origin}/api/mail/callback`) |

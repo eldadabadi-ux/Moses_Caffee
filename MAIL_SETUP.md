@@ -68,13 +68,13 @@ Settings → Environment variables (Production **וגם** Preview), הצפן כ-
 
 ## 5) סריקה אוטומטית (Cron)
 
-Cloudflare **Pages** לא תומך ב-cron. שלוש חלופות (בחר אחת):
+Cloudflare **Pages** לא תומך ב-cron. **המתזמן היחיד בפרודקשן הוא Supabase pg_cron**
+(`supabase_mail_cron.sql`) — משימה בתוך ה-DB ששולחת כל 30 דקות POST ל-`/api/mail/cron`
+עם הכותרת `x-cron-secret: <CRON_SECRET>`.
 
-1. **Supabase pg_cron** (מומלץ, פועל כבר בתוך ה-DB) — `supabase_mail_cron.sql`.
-2. **Cloudflare Worker** — תיקיית `mail-scan-worker/` (דורש טוקן עם הרשאת Workers Scripts; `wrangler deploy`).
-3. **GitHub Actions** — workflow מתוזמן שקורא ל-`/api/mail/cron` (דורש טוקן עם הרשאת `workflow`).
-
-כולם פשוט שולחים POST ל-`/api/mail/cron` עם הכותרת `x-cron-secret: <CRON_SECRET>`.
+> היסטוריה (11.11.26): בעבר הוכנו גם Cloudflare Worker (`mail-scan-worker/`) ו-GitHub
+> Action מתוזמן. אף אחד מהם לא נפרס בפועל, ושניהם נמחקו מהריפו כדי שלא יהיו שני
+> מתזמנים לאותה סריקה. אם אי-פעם עוזבים את Supabase — זה הקוד שצריך לשחזר מה-git.
 
 ---
 
