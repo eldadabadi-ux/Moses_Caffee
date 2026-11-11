@@ -49,8 +49,13 @@ async function renderAll() {
       const extra = degradeCss(fx.render)
       await page.setContent(receiptHtml(fx) + (extra ? `<style>${extra}</style>` : ''))
       // Clip to the document itself — a page of blank paper below it teaches the
-      // model nothing and costs tokens on every run.
+      // model nothing and costs tokens on every run. The viewport must first be
+      // grown to the document height: a clip taller than the viewport silently
+      // captures only the visible part, which cut every receipt taller than
+      // 600px mid-table (long-item-list lost its last rows AND its totals block,
+      // and every model was blamed for the missing lines).
       const box = await page.locator('body').boundingBox()
+      await page.setViewportSize({ width: 800, height: Math.ceil(box.height) + 16 })
       await page.screenshot({
         path: join(OUT, `${fx.id}.png`),
         clip: { x: 0, y: 0, width: Math.ceil(box.width), height: Math.ceil(box.height) + 8 },
