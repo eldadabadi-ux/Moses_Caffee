@@ -77,6 +77,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
       key: context.env.SUPABASE_SERVICE_ROLE_KEY,
       userId: user.user_id,
       orgId: user.org_id,
+      // Never create a supplier without the user's say-so (client issue #2):
+      // a clear miss comes back as an empty-candidates question instead of a
+      // silently-created row from a possibly mangled OCR name.
+      autoCreate: false,
     })
 
     return Response.json(result, { headers: CORS })

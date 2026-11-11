@@ -28,6 +28,7 @@ import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/s
 import { fetchLegacyInlineImage } from '../lib/receiptImage'
 import { vendorSimilarity, AUTO_THRESHOLD } from '../lib/supplierMatch'
 import { BOOKS, DEFAULT_BOOK, bookOf } from '../lib/books'
+import SupplierConfirmQueue from '../components/receipts/SupplierConfirmQueue'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
@@ -655,6 +656,9 @@ export default function ReceiptsPage() {
           doc_type: reviewDocType,
           ...(reviewDocNumber ? { doc_number: reviewDocNumber } : {}),
           ...(reviewDocRefs?.length ? { doc_refs: reviewDocRefs } : {}),
+          // Saved without answering "is this the same supplier?" — keep the
+          // question on the receipt so the confirmation queue re-asks it.
+          ...(scanSupplier?.outcome === 'ask' && scanSupplier.suggestion?.scanned ? { supplier_suggestion: scanSupplier.suggestion } : {}),
           ...(fx ? { currency: reviewCurrency, fx_rate: rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
       }
       const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
@@ -1160,6 +1164,11 @@ export default function ReceiptsPage() {
           </div>
         )}
 
+        {/* Suppliers waiting for confirmation — scans saved unanswered + email ingest */}
+        {flags.supplier_confirm && !archiveView && (
+          <SupplierConfirmQueue receipts={receipts} onResolved={loadData} />
+        )}
+
         {/* Active supplier filter — always visible, never a hidden filter */}
         {supplierFilter && (
           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
@@ -1473,13 +1482,15 @@ export default function ReceiptsPage() {
                     <CheckCircle2 size={13} /> שויך לספק: {scanSupplier.supplier_name}
                   </div>
                 )}
-                {flags.supplier_confirm && scanSupplier?.outcome === 'ask' && scanSupplier.suggestion?.candidates?.length > 0 && (
+                {flags.supplier_confirm && scanSupplier?.outcome === 'ask' && scanSupplier.suggestion?.scanned && (
                   <div style={{ marginTop:8, padding:'10px 12px', borderRadius:10, background:'var(--accent-bg)', border:'1px solid var(--accent)' }}>
                     <div style={{ fontSize:'13px', color:'var(--text)', marginBottom:8, lineHeight:1.5 }}>
-                      נסרק <strong>{scanSupplier.suggestion.scanned}</strong> — האם זה אותו ספק?
+                      {scanSupplier.suggestion.candidates?.length > 0
+                        ? <>נסרק <strong>{scanSupplier.suggestion.scanned}</strong> — האם זה אותו ספק?</>
+                        : <>הספק <strong>{scanSupplier.suggestion.scanned}</strong> אינו מוכר עדיין — ליצור אותו? (אפשר לתקן את השם למעלה לפני)</>}
                     </div>
                     <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                      {scanSupplier.suggestion.candidates.map(c => (
+                      {(scanSupplier.suggestion.candidates || []).map(c => (
                         <button key={c.id} onClick={() => answerSupplier(c.id)} disabled={supplierBusy}
                           title={`התאמה ${Math.round(c.score * 100)}%`}
                           style={{ padding:'6px 12px', borderRadius:999, border:'1px solid var(--accent)', background:'var(--panel)', color:'var(--accent)', fontSize:'13px', fontWeight:600, cursor: supplierBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
@@ -1487,12 +1498,12 @@ export default function ReceiptsPage() {
                         </button>
                       ))}
                       <button onClick={() => answerSupplier(null)} disabled={supplierBusy}
-                        style={{ padding:'6px 12px', borderRadius:999, border:'1px solid var(--border)', background:'var(--panel)', color:'var(--text-mute)', fontSize:'13px', fontWeight:600, cursor: supplierBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
-                        לא — ספק חדש
+                        style={{ padding:'6px 12px', borderRadius:999, border:`1px solid ${scanSupplier.suggestion.candidates?.length ? 'var(--border)' : 'var(--accent)'}`, background:'var(--panel)', color: scanSupplier.suggestion.candidates?.length ? 'var(--text-mute)' : 'var(--accent)', fontSize:'13px', fontWeight:600, cursor: supplierBusy ? 'default' : 'pointer', fontFamily:'var(--font-main)' }}>
+                        {scanSupplier.suggestion.candidates?.length ? 'לא — ספק חדש' : 'צור ספק חדש'}
                       </button>
                     </div>
                     <div style={{ fontSize:'11.5px', color:'var(--text-mute)', marginTop:7 }}>
-                      התשובה נשמרת — לא נשאל שוב על האיות הזה.
+                      התשובה נשמרת — לא נשאל שוב על האיות הזה. אפשר גם לשמור בלי לענות — נשאל שוב במסך הקבלות.
                     </div>
                   </div>
                 )}

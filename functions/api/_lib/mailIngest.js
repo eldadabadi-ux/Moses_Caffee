@@ -4,6 +4,7 @@
  * OCR → store-file → insert logic lives in ONE place.
  */
 import { extractReceipt, getSupabaseUrl } from './extractReceipt.js'
+import { resolveSupplier } from './supplierResolve.js'
 
 const rnd = () => Math.random().toString(36).slice(2, 10)
 
@@ -59,6 +60,22 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
   console.warn(`[mailIngest] OCR result for msg ${meta?.message_id || '?'}: total=${result?.total_amount || 0}`)
   if (!result || !(result.total_amount > 0 || result.vendor_name)) return false
 
+  // ── Canonical supplier (client issue #2) ───────────────────────────────────
+  // This path used to write the raw vendor_name with no supplier_id at all, so
+  // every emailed receipt became a fresh free-text vendor — the single biggest
+  // source of duplicate suppliers. Same SSOT as /api/scan-receipt: a confident
+  // match links; an uncertain one is stored as a suggestion the review queue
+  // asks about; nothing is ever created without the user (autoCreate: false).
+  let supplier = null
+  try {
+    supplier = await resolveSupplier({
+      vendorName: result.vendor_name,
+      url: getSupabaseUrl(env), key: env.SUPABASE_SERVICE_ROLE_KEY,
+      userId: conn.user_id, orgId: conn.org_id || null,
+      autoCreate: false,
+    })
+  } catch (e) { console.warn('[mailIngest] supplier resolve failed:', e?.message) }
+
   const ext = mimeType.includes('pdf') ? 'pdf' : (mimeType.split('/')[1] || 'bin')
   const storagePath = `${conn.user_id}/email_${rnd()}.${ext}`
   let bytes; try { bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)) } catch { bytes = null }
@@ -88,6 +105,7 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
   const row = {
     user_id: conn.user_id, org_id: conn.org_id || null,
     vendor_name: result.vendor_name || 'ספק לא ידוע',
+    supplier_id: supplier?.outcome === 'linked' ? supplier.supplier_id : null,
     receipt_date: result.receipt_date || new Date(fallbackDateMs || Date.now()).toISOString().slice(0, 10),
     amount: total,
     currency: fx ? 'ILS' : (result.currency || 'ILS'),
@@ -103,6 +121,9 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
       doc_type: result.doc_type || 'receipt',
       ...(result.doc_number ? { doc_number: result.doc_number } : {}),
       ...(result.doc_refs?.length ? { doc_refs: result.doc_refs } : {}),
+      // An uncertain supplier match waits here for the confirmation queue in
+      // ReceiptsPage — the user answers once and the spelling is learned.
+      ...(supplier?.outcome === 'ask' && supplier.suggestion?.scanned ? { supplier_suggestion: supplier.suggestion } : {}),
       ...(fx ? { currency: result.currency, fx_rate: fx.rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
     source: 'email',
     status: 'pending',

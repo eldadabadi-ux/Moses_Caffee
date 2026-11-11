@@ -150,7 +150,17 @@ export async function resolveSupplier({ vendorName, url, key, userId, orgId, cat
     }
   }
 
-  if (!autoCreate) return { ...miss, outcome: 'skipped' }
+  if (!autoCreate) {
+    // The caller wants a human in the loop before anything is created (client
+    // issue #2 — silent creation is exactly how one supplier became many).
+    // Surface the miss as a question with no candidates: "unknown supplier —
+    // create it?". The user's answer flows through /api/suppliers/resolve,
+    // which creates the supplier and learns the spelling.
+    return {
+      outcome: 'ask', supplier_id: null, supplier_name: null, score: 0,
+      suggestion: { scanned: String(vendorName || '').trim(), candidates: [] },
+    }
+  }
 
   const created = await createSupplier(url, key, { name: String(vendorName).trim(), userId, orgId, createdFrom: 'scan' })
   if (!created) return miss
