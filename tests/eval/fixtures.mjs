@@ -125,6 +125,9 @@ export const FIXTURES = [
       vendor: 'Anthropic, PBC', currency: 'USD', symbol: '$',
       dateText: '01/08/2026', docType: 'INVOICE', docNumber: 'INV-2026-08',
       ltr: true,
+      // A US invoice carries no Israeli VAT — the fixture used to print an 18%
+      // block while expecting total 20, an unwinnable assertion.
+      vatMode: 'exempt',
       items: [line('Claude Pro subscription', 1, 'unit', 20)],
     },
     expect: {
@@ -217,6 +220,76 @@ export const FIXTURES = [
     },
   },
 
+  // ── 11. Consumer receipt — line prices INCLUDE VAT ──────────────────────────
+  {
+    id: 'consumer-vat-inclusive',
+    why: 'Line prices on a consumer receipt already include VAT; the pipeline used to add 18% on top (client issue #9). The printed address must not leak into the vendor name.',
+    doc: {
+      vendor: 'סופר הכפר בע"מ',
+      address: 'רחוב הדקל 12, רמת גן · טל׳ 03-5551234 · ח.פ 514477221',
+      dateText: '02/09/2026', docType: 'חשבונית מס/קבלה', docNumber: '118822',
+      vatMode: 'inclusive',
+      items: [
+        line('חלב 3% קרטון', 6, 'יח\'', 6.9),
+        line('לחם אחיד פרוס', 4, 'יח\'', 7.1),
+        line('גבינה לבנה 5%', 3, 'יח\'', 5.5),
+        line('שמן זית כתית 750 מ"ל', 1, 'יח\'', 54.9),
+      ],
+    },
+    expect: {
+      vendor_name: 'סופר הכפר בע"מ',
+      receipt_date: '2026-09-02',
+      doc_type: 'receipt',
+      item_count: 4,
+      // The decisive assertion comes from totalsOf('inclusive'):
+      // total == the sum of the lines, NOT sum × 1.18.
+    },
+  },
+
+  // ── 12. VAT-exempt supplier — no VAT may be fabricated ──────────────────────
+  {
+    id: 'vat-exempt',
+    why: 'An עוסק פטור document has 0% VAT; reconcileVat used to invent an 18% split for it.',
+    doc: {
+      vendor: 'ירון משק חקלאי',
+      dateText: '14/09/2026', docType: 'קבלה — עוסק פטור', docNumber: '301',
+      vatMode: 'exempt',
+      items: [
+        line('ביצי חופש L', 10, 'מארז', 32),
+        line('דבש טבעי 1 ק"ג', 2, 'יח\'', 65),
+      ],
+    },
+    expect: {
+      vendor_name: 'ירון משק חקלאי',
+      receipt_date: '2026-09-14',
+      item_count: 2,
+      // total == before_vat == the line sum; vat is zero by construction.
+    },
+  },
+
+  // ── 13. Address-heavy letterhead — the name/address confusion case ─────────
+  {
+    id: 'address-heavy-header',
+    why: 'The client reported the supplier name coming back as the address. A busy letterhead (address, phone, ח.פ) must still yield the business name.',
+    doc: {
+      vendor: 'מידן שיווק ומסחר בע"מ',
+      address: 'שד׳ ההסתדרות 88, מפרץ חיפה · ת.ד 2210 · טל׳ 04-8771122 · ח.פ 512233445',
+      dateText: '21/09/2026', docType: 'תעודת משלוח', docNumber: '77314',
+      items: [
+        line('קמח לחם 25 ק"ג', 2, 'שק', 92.5),
+        line('סוכר לבן 1 ק"ג', 12, 'יח\'', 5.4),
+        line('שמרים טריים', 4, 'ק"ג', 18.7),
+      ],
+    },
+    expect: {
+      vendor_name: 'מידן שיווק ומסחר בע"מ',
+      receipt_date: '2026-09-21',
+      doc_type: 'delivery_note',
+      doc_number: '77314',
+      item_count: 3,
+    },
+  },
+
   // ── 10. A faint, rotated scan — the realistic camera case ──────────────────
   {
     id: 'noisy-scan',
@@ -239,9 +312,23 @@ export const FIXTURES = [
   },
 ]
 
-/** Totals implied by a fixture, computed — never hand-typed. */
+/**
+ * Totals implied by a fixture, computed — never hand-typed.
+ * vatMode controls what the line amounts mean (all three exist in real paperwork):
+ *   'net'       (default) — B2B style: lines are pre-VAT, VAT added at the bottom.
+ *   'inclusive' — consumer style: line prices already include VAT.
+ *   'exempt'    — עוסק פטור / 0% VAT: no VAT anywhere.
+ */
 export function totalsOf(fx) {
-  const net = sum(fx.doc.items)
-  const vat = r2(net * VAT_RATE / 100)
-  return { before_vat: net, vat_amount: vat, total: r2(net + vat) }
+  const s = sum(fx.doc.items)
+  const mode = fx.doc.vatMode || 'net'
+  if (mode === 'inclusive') {
+    const before = r2(s / (1 + VAT_RATE / 100))
+    return { before_vat: before, vat_amount: r2(s - before), total: s, mode }
+  }
+  if (mode === 'exempt') {
+    return { before_vat: s, vat_amount: 0, total: s, mode }
+  }
+  const vat = r2(s * VAT_RATE / 100)
+  return { before_vat: s, vat_amount: vat, total: r2(s + vat), mode }
 }

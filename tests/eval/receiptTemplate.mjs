@@ -46,6 +46,7 @@ export function receiptHtml(fx) {
   .head { display: flex; justify-content: space-between; align-items: flex-start;
           border-bottom: 2px solid #111; padding-bottom: 10px; }
   .vendor { font-size: 25px; font-weight: 700; }
+  .addr { font-size: 13px; color: #333; margin-top: 3px; }
   .doctype { font-size: 15px; margin-top: 3px; letter-spacing: .5px; }
   .meta { font-size: 14px; line-height: 1.9; text-align: ${rtl ? 'left' : 'right'}; white-space: nowrap; }
   table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 14.5px; }
@@ -68,6 +69,7 @@ export function receiptHtml(fx) {
   <div class="head">
     <div>
       <div class="vendor">${esc(d.vendor)}</div>
+      ${d.address ? `<div class="addr">${esc(d.address)}</div>` : ''}
       <div class="doctype">${esc(d.docType || '')}</div>
     </div>
     <div class="meta">
@@ -86,10 +88,18 @@ export function receiptHtml(fx) {
     <tbody>${rows}</tbody>
   </table>
   ${refs}
-  <div class="totals">
+  <div class="totals">${
+    t.mode === 'inclusive' ? `
+    <div class="grand"><span>${L.grand}</span><span>${money(t.total, sym)}</span></div>
+    <div><span>${rtl ? `המחירים כוללים מע"מ · מע"מ ${VAT_RATE}% הכלול` : `Prices include VAT · VAT ${VAT_RATE}% included`}</span><span>${money(t.vat_amount, sym)}</span></div>`
+    : t.mode === 'exempt' ? `
+    <div class="grand"><span>${L.grand}</span><span>${money(t.total, sym)}</span></div>
+    <div><span>${rtl ? 'עוסק פטור — העסקה פטורה ממע"מ (מע"מ 0%)' : 'VAT exempt (0%)'}</span><span>${money(0, sym)}</span></div>`
+    : `
     <div><span>${L.net}</span><span>${money(t.before_vat, sym)}</span></div>
     <div><span>${L.vat}</span><span>${money(t.vat_amount, sym)}</span></div>
-    <div class="grand"><span>${L.grand}</span><span>${money(t.total, sym)}</span></div>
+    <div class="grand"><span>${L.grand}</span><span>${money(t.total, sym)}</span></div>`
+  }
   </div>
   <div class="foot">${rtl ? 'מסמך שנוצר לבדיקות בלבד — אינו מסמך אמיתי' : 'Synthetic document — test fixture only'}</div>
 </body></html>`

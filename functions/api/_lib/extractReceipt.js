@@ -171,6 +171,13 @@ export async function extractReceipt({ images, mimeType, env, userId, vatRate = 
 
   if (!result) { const e = new Error('AI processing failed'); e.code = 'AI_FAILED'; e.detail = lastError?.message || 'all models unavailable'; throw e }
 
+  // ── Vendor sanity — an address is not a supplier name ─────────────────────
+  result = sanitizeVendorFields(result)
+
+  // ── Line-math sanity — repair swapped money columns, flag impossible lines ─
+  // Runs BEFORE the totals cross-check so corrected line totals feed the sum.
+  result = validateLineMath(result)
+
   // ── Cross-check the total against the sum of line items ───────────────────
   // On dense delivery notes / invoices the model often misreads the grand total
   // (e.g. grabs one line). If the items clearly sum to more, trust the items.
@@ -256,17 +263,45 @@ export function sanitizeReceiptDate(raw, now = new Date()) {
 }
 
 /**
- * Ensure total_amount, amount_before_vat, and vat_amount are consistent.
- *  1. If the receipt explicitly listed a base + VAT, trust those.
- *  2. Otherwise derive base + VAT from the total using the user's vatRate.
+ * Line-math sanity (client issue #9 — wrong prices): on every line that carries
+ * quantity × unit_price, the printed line total must agree. The common OCR
+ * failure is the two money columns read swapped (unit price as the line total
+ * and vice versa) — repaired when, and only when, swapping makes the math exact.
+ * An unrepairable mismatch is flagged (_math_mismatch on the item, _needs_review
+ * on the result) rather than guessed, so the review screen asks the user.
  */
+export function validateLineMath(result) {
+  const items = Array.isArray(result.items) ? result.items : []
+  if (!items.length) return result
+  const close = (a, b) => Math.abs(a - b) <= 0.02 + Math.abs(b) * 0.001
+  let mismatch = false
+  const out = items.map(it => {
+    const qty = Number(it.quantity) || 0
+    const unitPrice = Number(it.unit_price) || 0
+    const price = Number(it.price) || 0
+    if (qty <= 0 || unitPrice <= 0 || price <= 0) return it
+    if (close(qty * unitPrice, price)) return it
+    if (close(qty * price, unitPrice)) {
+      return { ...it, unit_price: price, price: unitPrice, _columns_swapped: true }
+    }
+    mismatch = true
+    return { ...it, _math_mismatch: true }
+  })
+  return { ...result, items: out, ...(mismatch ? { _needs_review: true } : {}) }
+}
+
 /**
  * Cross-check the stated total against the sum of the line items. On multi-item
  * delivery notes / invoices the model frequently misreads the grand total (often
  * grabbing a single line). When the items clearly sum to MORE than the stated
- * total — or no total was read — trust the items. Line "סה"כ" amounts on Israeli
- * B2B delivery notes are net (pre-VAT), so we treat the sum as the base and add
- * VAT. Only triggers on a clear discrepancy, so correct simple receipts are
+ * total — or no total was read — trust the items.
+ *
+ * Whether the line amounts carry VAT is decided by the model's items_include_vat
+ * flag, NOT assumed: consumer receipts print VAT-inclusive line prices, Israeli
+ * B2B paperwork prints net lines with VAT added at the bottom. The old version
+ * hard-assumed net and inflated every rescued consumer total by the VAT rate —
+ * the exact "mixes prices with and without VAT" defect the client reported.
+ * Only triggers on a clear discrepancy, so correct simple receipts are
  * untouched. Sets _total_from_items for transparency.
  */
 export function reconcileTotalFromItems(result, vatRate) {
@@ -276,8 +311,23 @@ export function reconcileTotalFromItems(result, vatRate) {
   const itemsSum = r2(items.reduce((s, it) => s + (parseFloat(it.price) || 0), 0))
   const stated = Number(result.total_amount) || 0
   if (itemsSum <= 0) return result
+  const factor = 1 + (Number(vatRate) || 0) / 100
+  const tol = Math.max(1, stated * 0.02)
+
+  // Lines ≈ stated total → gross lines under a correctly-read total. Keep both.
+  if (stated > 0 && Math.abs(itemsSum - stated) <= tol) return result
+  // Lines + VAT ≈ stated total → net lines under a correctly-read gross total:
+  // the two readings agree, so pin the breakdown instead of re-deriving it.
+  if (stated > 0 && Math.abs(r2(itemsSum * factor) - stated) <= tol) {
+    return { ...result, amount_before_vat: itemsSum, vat_amount: r2(stated - itemsSum) }
+  }
+
   if (stated <= 0 || itemsSum > stated * 1.1) {
-    const factor = 1 + (Number(vatRate) || 0) / 100
+    if (result.items_include_vat === true) {
+      const total = itemsSum
+      const before = r2(total / factor)
+      return { ...result, amount_before_vat: before, vat_amount: r2(total - before), total_amount: total, _total_from_items: true }
+    }
     const before = itemsSum
     const total  = r2(before * factor)
     return { ...result, amount_before_vat: before, vat_amount: r2(total - before), total_amount: total, _total_from_items: true }
@@ -285,13 +335,23 @@ export function reconcileTotalFromItems(result, vatRate) {
   return result
 }
 
+/**
+ * Ensure total_amount, amount_before_vat and vat_amount are consistent.
+ *  1. An explicit, internally-consistent printed breakdown is kept verbatim —
+ *     INCLUDING vat = 0 with before = total, which is how a VAT-exempt (עוסק
+ *     פטור / 0%) document legitimately reads. The old version fabricated an
+ *     18% split onto exempt documents (client issue #9).
+ *  2. Otherwise derive the missing side from the user's vatRate.
+ */
 export function reconcileVat(result, vatRate) {
   const factor = 1 + vatRate / 100
   let total  = Number(result.total_amount) || 0
   let before = Number(result.amount_before_vat) || 0
   let vat    = Number(result.vat_amount) || 0
 
-  if (before > 0 && before < total) {
+  if (total > 0 && before > 0 && vat >= 0 && Math.abs(before + vat - total) <= 0.02) {
+    vat = Math.round((total - before) * 100) / 100
+  } else if (before > 0 && before < total) {
     vat = Math.round((total - before) * 100) / 100
   } else if (total > 0) {
     before = Math.round((total / factor) * 100) / 100
@@ -302,6 +362,35 @@ export function reconcileVat(result, vatRate) {
   }
 
   return { ...result, total_amount: total, amount_before_vat: before, vat_amount: vat, vat_rate: vatRate }
+}
+
+// Street-address markers that must never be a supplier's name. A "vendor" that
+// is mostly digits (a street number, phone, or ח.פ the model grabbed) is caught
+// by the digit-ratio check.
+const ADDRESS_MARKERS = /(^|\s)(רחוב|רח'|רח\.|שדרות|שד'|שד\.|ת\.ד\.?|דרך|סמטת|סמ')\s/
+/** True when a scanned vendor_name is actually an address / number, not a business name. */
+export function looksLikeAddress(name) {
+  const s = String(name || '').trim()
+  if (!s) return false
+  if (ADDRESS_MARKERS.test(s)) return true
+  const compact = s.replace(/\s/g, '')
+  const digitCount = (compact.match(/\d/g) || []).length
+  return digitCount >= 4 && digitCount / compact.length > 0.4
+}
+
+/**
+ * Vendor sanity (client issue #9 — "מבלבל בין כתובת לשם הספק"): an address in
+ * vendor_name becomes a phantom supplier downstream. Move it to vendor_address
+ * and blank the name — a blank name skips supplier resolution and the review
+ * screen asks the user, which beats silently filing under "רחוב הדקל 12".
+ */
+export function sanitizeVendorFields(result) {
+  const out = { ...result, vendor_address: String(result.vendor_address || '').trim() }
+  if (looksLikeAddress(out.vendor_name)) {
+    if (!out.vendor_address) out.vendor_address = String(out.vendor_name).trim()
+    out.vendor_name = ''
+  }
+  return out
 }
 
 // ── Main extraction prompt ─────────────────────────────────────────────────────
@@ -325,12 +414,17 @@ ${multiPageNote}
 
 ## חוקי חילוץ חובה
 
-### שם הספק (vendor_name):
+### שם הספק (vendor_name) — להפריד שם מכתובת (קריטי!):
 - שם החברה / הספק כפי שמופיע בראש הקבלה (בדרך כלל שורה 1-3)
-- לא כתובת, לא מספר טלפון, לא ח.פ
+- **לא כתובת, לא מספר טלפון, לא ח.פ / עוסק מורשה** — אלה שדות נפרדים שמודפסים ליד השם.
+- מבחן פשוט: שם ספק הוא שם של עסק ("מחסני השוק", "קטיף ירקות בע\\"מ"). שורה עם רחוב/שד'/ת.ד/מספר בית/עיר היא **כתובת** — היא שייכת ל-vendor_address, לעולם לא ל-vendor_name.
+- אם בראש הקבלה מופיעים גם שם וגם כתובת (לפעמים באותה שורה) — הפרד: השם ב-vendor_name, הכתובת ב-vendor_address.
 - אם מופיע שם עסק גדול (כגון "מחסני השוק", "חברת עמינח") — זה הספק
 - אם הקבלה היא ממסעדה/קפה — שם המסעדה הוא הספק
 - אם אין שם ברור — כתוב "ספק לא ידוע"
+
+### כתובת הספק (vendor_address):
+- הכתובת המודפסת של הספק (רחוב, מספר, עיר, ת.ד, מיקוד) — אם מופיעה. אם לא — החזר "".
 
 ### תאריך (receipt_date):
 - פורמט פלט: YYYY-MM-DD
@@ -376,7 +470,14 @@ ${multiPageNote}
 - **amount_before_vat** = הסכום לפני המע"מ (אם מופיע במפורש בקבלה)
 - **vat_amount** = סכום המע"מ עצמו (אם מופיע במפורש בקבלה)
 - אם הקבלה **לא** מציגה פירוט מע"מ — החזר 0 בשני השדות (המערכת תחשב לבד)
+- **עסקה פטורה ממע"מ / מע"מ 0%** (מודפס "פטור ממע"מ", "עוסק פטור", "מע"מ 0%"): החזר amount_before_vat = total_amount ו-vat_amount = 0 — אל תמציא מע"מ.
 - ודא ש: amount_before_vat + vat_amount = total_amount
+
+### האם מחירי השורות כוללים מע"מ? (items_include_vat) — חובה!
+קבע האם הסכומים בשורות הפריטים (unit_price, price) **כוללים** מע"מ:
+- קבלה צרכנית (סופרמרקט, מסעדה, קופה רושמת, תחנת דלק): המחירים בדרך כלל **כוללים** מע"מ → **true**
+- תעודת משלוח / חשבונית B2B שבה "סכום לפני מע"מ" ומע"מ מתווספים בתחתית: מחירי השורות **לפני** מע"מ → **false**
+- מבחן מכריע לפי המסמך עצמו: אם סכום כל השורות ≈ "סה"כ לתשלום" → true. אם סכום השורות ≈ "סכום לפני מע"מ" → false.
 
 ### מטבע (currency) — חשוב לקבלות מחו"ל:
 - זהה את מטבע הקבלה לפי הסמל ($, €, £, ¥) או הקוד (USD, EUR, GBP…) או טקסט (Dollar, Euro).
@@ -450,7 +551,8 @@ ${multiPageNote}
 ## פורמט תשובה — JSON בלבד, ללא הסברים
 
 {
-  "vendor_name": "שם הספק",
+  "vendor_name": "שם הספק (שם העסק בלבד — לא כתובת)",
+  "vendor_address": "כתובת הספק אם מודפסת, אחרת ריק",
   "receipt_date": "YYYY-MM-DD או ריק",
   "doc_type": "receipt או delivery_note או summary_invoice",
   "doc_number": "מספר התעודה/החשבונית או ריק",
@@ -458,6 +560,7 @@ ${multiPageNote}
   "total_amount": מספר כולל מע"מ (לא 0 אם יש מספרים בקבלה),
   "amount_before_vat": מספר לפני מע"מ (0 אם לא מופיע בקבלה),
   "vat_amount": סכום המע"מ (0 אם לא מופיע בקבלה),
+  "items_include_vat": true אם מחירי השורות כוללים מע"מ אחרת false,
   "currency": "קוד מטבע — ILS אם שקלים, אחרת USD/EUR/GBP וכו'",
   "original_amount": total_amount,
   "category": "הקטגוריה הראשית של הקבלה כולה לפי סוג הספק (למשל: תחבורה ודלק / מסעדות ואירוח / מוצרי מזון ומכולת)",
@@ -510,10 +613,12 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
         type: 'OBJECT',
         properties: {
           vendor_name:       { type: 'STRING' },
+          vendor_address:    { type: 'STRING' },
           receipt_date:      { type: 'STRING' },
           total_amount:      { type: 'NUMBER' },
           amount_before_vat: { type: 'NUMBER' },
           vat_amount:        { type: 'NUMBER' },
+          items_include_vat: { type: 'BOOLEAN' },
           currency:          { type: 'STRING' },
           original_amount:   { type: 'NUMBER' },
           category:          { type: 'STRING' },
@@ -551,7 +656,7 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
             },
           },
         },
-        required: ['vendor_name', 'total_amount', 'items'],
+        required: ['vendor_name', 'total_amount', 'items', 'items_include_vat'],
       },
       temperature: 0.05,   // Very low — deterministic extraction
       maxOutputTokens: 8192,                   // room for many line items (dense delivery notes)
