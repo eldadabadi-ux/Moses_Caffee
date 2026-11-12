@@ -152,26 +152,35 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   const groups = Array.isArray(body?.groups) ? body.groups : null
   if (!groups?.length) return errorResponse('לא נבחרו קבוצות למיזוג', 400, { code: 'bad_input', headers: CORS })
 
-  let created = 0, aliases = 0, linked = 0
+  let created = 0, aliases = 0, linked = 0, absorbed = 0
   const problems = []
 
+  // Load the tenant's existing supplier rows once, up front (not per group), so
+  // we can fold duplicate SUPPLIER rows — not just relink receipts — without a
+  // lookup inside the loop. Linking receipts alone left the old duplicate rows
+  // in the table, and SuppliersPage lists every supplier row, so the duplicates
+  // still showed and the merge looked like it did nothing (client report).
+  const catalogue = (await loadSupplierCatalogue(url, key, { orgId: user.org_id, userId: user.user_id })) || []
+  const supplierByNorm = new Map()
+  for (const s of catalogue) supplierByNorm.set(normalizeVendor(s.name), s.id)
+
   // Cloudflare allows a bounded number of subrequests per invocation. Each group
-  // now costs ~3 (find/create + alias insert + receipts PATCH), but a tenant with
-  // many groups could still exceed the cap. Stop short and report the remainder:
-  // the merge is idempotent, so the user just runs it again to finish.
+  // now costs ~4 (find/create + alias insert + receipts PATCH + fold-duplicates),
+  // plus the one catalogue read above. Stop short and report the remainder: the
+  // merge is idempotent, so the user just runs it again to finish.
   const SUBREQUEST_BUDGET = 45
-  let used = 0
+  let used = 2   // the catalogue read (suppliers + aliases)
   const remaining = []   // canonicals NOT processed this run — the client resends ONLY these
 
   for (const g of groups) {
     const canonical = String(g?.canonical || '').trim()
     if (!normalizeVendor(canonical)) { problems.push(`שם ריק — דולג`); continue }
 
-    // ~3 subrequests per group — leave the loop before we can overshoot, and
+    // ~4 subrequests per group — leave the loop before we can overshoot, and
     // name the groups left so the caller resends exactly those (not the whole
     // list again, which would re-spend the budget on already-merged groups and
     // never reach the tail).
-    if (used + 3 > SUBREQUEST_BUDGET) { remaining.push(canonical); continue }
+    if (used + 4 > SUBREQUEST_BUDGET) { remaining.push(canonical); continue }
 
     // Find or create the canonical supplier, verifying tenant ownership when the
     // client supplied an id.
@@ -230,16 +239,38 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
         linked += Number.isFinite(total) ? total : 0
       } else problems.push(`עדכון קבלות נכשל: ${canonical}`)
     }
+
+    // Fold the duplicate SUPPLIER rows into the canonical one. Each spelling that
+    // already had its own supplier row (created at scan time) is stamped
+    // merged_into=canonical, so loadSuppliers (which filters merged_into is null)
+    // stops listing it — this is what actually makes the duplicates disappear from
+    // the suppliers screen. Receipts were already repointed by the PATCH above.
+    const dupIds = [...new Set(
+      spellings.map(s => supplierByNorm.get(normalizeVendor(s))).filter(Boolean)
+    )].filter(dupId => dupId !== supplierId)
+    if (dupIds.length) {
+      used++
+      const res = await fetch(
+        `${url}/rest/v1/suppliers?id=${inList(dupIds)}&${scopeOf(user)}&merged_into=is.null`,
+        { method: 'PATCH',
+          headers: { ...sbh(key), Prefer: 'return=minimal,count=exact' },
+          body: JSON.stringify({ merged_into: supplierId }) })
+      if (res.ok) {
+        const total = parseInt((res.headers.get('content-range') || '').split('/')[1], 10)
+        absorbed += Number.isFinite(total) ? total : dupIds.length
+      } else problems.push(`מיזוג שורות ספק נכשל: ${canonical}`)
+    }
   }
 
   await writeAudit(context.env, {
     orgId: user.org_id || null, userId: user.user_id,
     action: 'suppliers_merged', target: null,
-    meta: { groups: groups.length, suppliers_created: created, aliases_learned: aliases, receipts_linked: linked },
+    meta: { groups: groups.length, suppliers_created: created, aliases_learned: aliases, receipts_linked: linked, suppliers_absorbed: absorbed },
   })
 
   return Response.json({
     suppliers_created: created, aliases_learned: aliases, receipts_linked: linked,
+    suppliers_absorbed: absorbed,
     // Canonicals left for a follow-up run so one request never exceeds the
     // subrequest cap. The merge is idempotent; the client resends ONLY these.
     deferred: remaining.length || undefined,

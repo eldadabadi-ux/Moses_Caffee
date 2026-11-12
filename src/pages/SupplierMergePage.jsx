@@ -131,7 +131,7 @@ export default function SupplierMergePage() {
       // on already-merged groups and the tail would never be reached). Looping
       // here means the user clicks once and we drive it to completion.
       let queue = allGroups
-      let created = 0, linked = 0, aliasesLearned = 0
+      let created = 0, linked = 0, aliasesLearned = 0, absorbed = 0
       const problems = []
       const progress = toast.loading('ממזג ספקים…')
       try {
@@ -142,6 +142,7 @@ export default function SupplierMergePage() {
           created += r.suppliers_created || 0
           linked += r.receipts_linked || 0
           aliasesLearned += r.aliases_learned || 0
+          absorbed += r.suppliers_absorbed || 0
           if (r.problems?.length) problems.push(...r.problems)
 
           const remaining = r.remaining || []
@@ -153,7 +154,7 @@ export default function SupplierMergePage() {
           queue = queue.filter(g => remaining.includes(g.canonical))
           if (queue.length) toast.loading(`ממזג… נותרו ${queue.length} קבוצות`, { id: progress })
         }
-        toast.success(`${created} ספקים נוצרו · ${linked} קבלות קושרו${aliasesLearned ? ` · ${aliasesLearned} כינויים` : ''}`, { id: progress })
+        toast.success(`${linked} קבלות קושרו${absorbed ? ` · ${absorbed} ספקים כפולים אוחדו` : ''}${created ? ` · ${created} ספקים נוצרו` : ''}`, { id: progress })
         if (problems.length) toast.error(`${problems.length} בעיות — ראה קונסול`)
         if (problems.length) console.warn('[merge] problems:', problems)
         // The review banner recomputes against the reloaded data + fresh choices
