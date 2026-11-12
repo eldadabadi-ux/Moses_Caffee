@@ -189,6 +189,26 @@ test('junk vendor names are flagged, not treated as businesses', () => {
   assert.equal(c.junk, true)
 })
 
+test('"ספק לא ידוע" and other unknown sentinels are junk, never a merge anchor', () => {
+  assert.equal(isJunkVendor('ספק לא ידוע'), true)
+  assert.equal(isJunkVendor('לא ידוע'), true)
+  assert.equal(isJunkVendor('unknown'), true)
+  // A high-count "unknown" row must NOT pull real suppliers into a cluster with
+  // it as the canonical (the live-café bug: "unknown" with 43 receipts). It still
+  // appears as its OWN junk cluster (for manual correction), just never a target.
+  const clusters = clusterVendors([
+    { name: 'ספק לא ידוע', count: 43 },
+    { name: 'ספקטרום מזון בע"מ', count: 3 },
+    { name: 'ספקטרום מזון', count: 2 },
+  ])
+  const unknown = clusters.find(c => normalizeVendor(c.canonical) === normalizeVendor('ספק לא ידוע'))
+  assert.ok(unknown && unknown.junk, 'unknown-supplier is its own cluster and flagged junk')
+  assert.equal([...unknown.members, ...unknown.review].length, 1, 'no real supplier attached to unknown')
+  // The two real spellings still cluster together on their own, non-junk.
+  const real = clusters.find(c => c.canonical.includes('ספקטרום'))
+  assert.ok(real && !real.junk && [...real.members, ...real.review].length === 2, 'real supplier spellings still group')
+})
+
 test('clustering is stable and loses nothing', () => {
   const rows = [
     { name: 'א', count: 1 }, { name: 'קטיף ירקות קצוצים בע"מ', count: 9 },

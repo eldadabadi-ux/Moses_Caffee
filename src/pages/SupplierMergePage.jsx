@@ -193,15 +193,15 @@ export default function SupplierMergePage() {
         ))}
       </div>
 
-      {/* Caution banner — review-band spellings are pre-checked for merge, but a
-          partial match could be two different businesses, so invite a quick look. */}
+      {/* Caution banner — review-band spellings are NOT auto-selected (a partial
+          match can be two different businesses); the user confirms each. */}
       {reviewClusters.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '12px 14px', borderRadius: 'var(--r-card)', background: 'var(--warn-bg, #fef3c7)', border: '1px solid var(--warn, #d97706)' }}>
           <AlertTriangle size={17} style={{ color: 'var(--warn, #92400e)', flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13.5, color: 'var(--warn, #92400e)', lineHeight: 1.6 }}>
-            <strong>סימנו עבורך איותים דומים לאיחוד</strong> (מודגשים בצהוב, למשל מידן / מיזן).
-            ברוב המקרים זה אותו ספק — פשוט לחץ "אשר איחוד". אם איות מסוים הוא דווקא עסק אחר,
-            בטל את הסימון שלו לפני האישור.
+            <strong>{reviewClusters.length} ספקים כוללים איות דומה שדורש את אישורך</strong> (מודגש בצהוב).
+            התאמה חלקית עלולה להיות דווקא עסק אחר, לכן איננו מסמנים אותה אוטומטית — סמן ידנית
+            (או "סמן את כל הדומים") רק את מה שבאמת אותו ספק, ואז "אשר איחוד".
           </div>
         </div>
       )}
@@ -254,11 +254,11 @@ export default function SupplierMergePage() {
             {hasReview && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                 <span style={{ fontSize: 12.5, color: 'var(--warn, #92400e)', fontWeight: 600 }}>
-                  {c.review.length} איותים דומים סומנו לאיחוד — בטל סימון למה שאינו שייך:
+                  {c.review.length} איותים דומים — סמן את מה ששייך לספק הזה:
                 </span>
                 <button onClick={() => setAllInCluster(c, !allPicked)}
                   style={{ padding: '4px 12px', borderRadius: 999, border: '1px solid var(--accent)', background: allPicked ? 'var(--accent-bg)' : 'var(--panel)', color: 'var(--accent)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
-                  {allPicked ? 'השאר רק זהים' : 'סמן את כל הדומים'}
+                  {allPicked ? 'נקה הכול' : 'סמן את כל הדומים'}
                 </button>
               </div>
             )}

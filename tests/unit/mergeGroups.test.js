@@ -23,28 +23,35 @@ const clusters = () => [{
   ],
 }]
 
-test('initialChoices pre-checks every spelling, review band included', () => {
+test('initialChoices pre-checks the near-certain members, NOT the review band', () => {
   const ch = initialChoices(clusters())
   const picked = ch['מידן סחר'].picked
-  assert.equal(picked.size, 3)
-  assert.ok(picked.has('מיזן סחר'), 'the review-band duplicate must be pre-checked')
+  assert.equal(picked.size, 2, 'only the two members are pre-checked')
+  assert.ok(!picked.has('מיזן סחר'), 'the uncertain review-band spelling must NOT be auto-selected')
 })
 
-test('default (all picked) → every spelling in aliases, every stored value included', () => {
+test('members-only default → only members in aliases/stored (review excluded until ticked)', () => {
   const ch = initialChoices(clusters())
+  const [g] = buildMergeGroups(clusters(), ch)
+  assert.deepEqual(g.aliases.sort(), ['מידן סחר', 'מידן סחר בעמ'].sort())
+  assert.ok(!g.stored.includes('מיזן סחר'), 'review spelling is not merged by default')
+})
+
+test('after ticking the review spelling, it joins aliases and stored', () => {
+  const ch = initialChoices(clusters())
+  ch['מידן סחר'].picked.add('מיזן סחר')          // user confirms the duplicate
   const [g] = buildMergeGroups(clusters(), ch)
   assert.deepEqual(g.aliases.sort(), ['מידן סחר', 'מידן סחר בעמ', 'מיזן סחר'].sort())
   assert.deepEqual(g.stored.sort(), ['מידן סחר', 'מידן סחר בעמ', 'מיזן סחר', 'מיזן סחר '].sort())
 })
 
-test('unticking the review spelling removes it from BOTH aliases and stored', () => {
+test('unticking a member excludes it from BOTH aliases and stored (coherence)', () => {
   const ch = initialChoices(clusters())
-  ch['מידן סחר'].picked.delete('מיזן סחר')          // user unticks the duplicate
+  ch['מידן סחר'].picked.delete('מידן סחר בעמ')      // user unticks a pre-checked member
   const [g] = buildMergeGroups(clusters(), ch)
-  assert.ok(!g.aliases.includes('מיזן סחר'), 'unticked spelling must not be an alias')
-  assert.ok(!g.stored.includes('מיזן סחר'), 'unticked spelling must not be relinked')
-  assert.ok(!g.stored.includes('מיזן סחר '), 'nor any of its stored variants')
-  assert.deepEqual(g.aliases.sort(), ['מידן סחר', 'מידן סחר בעמ'].sort())
+  assert.ok(!g.aliases.includes('מידן סחר בעמ'), 'unticked spelling must not be an alias')
+  assert.ok(!g.stored.includes('מידן סחר בעמ'), 'unticked spelling must not be relinked either')
+  assert.deepEqual(g.aliases, ['מידן סחר'])
 })
 
 test('a cluster with nothing picked is omitted', () => {

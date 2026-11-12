@@ -199,13 +199,25 @@ export function matchVendor(candidate, suppliers = []) {
 }
 
 /**
- * A vendor string that carries no identity at all — an OCR failure rather than a
- * business ("- ₪", "יש |", "|||"). These must never become suppliers; they are
- * surfaced for manual correction instead.
+ * The "no vendor was read" sentinels the pipeline writes when a scan has no
+ * usable supplier name. These are NOT a business and must never anchor a merge
+ * cluster — otherwise real suppliers get folded INTO "ספק לא ידוע" (observed on
+ * the live café data: an "unknown" row with 43 receipts pulling others in).
+ * Compared on the normalized form, so spacing/quote variants are caught too.
+ */
+const UNKNOWN_VENDOR_NORMS = new Set(
+  ['ספק לא ידוע', 'לא ידוע', 'ללא ספק', 'unknown', 'unknown supplier', 'n/a', 'na'].map(normalizeVendor)
+)
+
+/**
+ * A vendor string that carries no identity — an OCR failure ("- ₪", "|||") or an
+ * explicit "unknown supplier" sentinel. These must never become or merge into a
+ * supplier; they are surfaced for manual correction instead.
  */
 export function isJunkVendor(name) {
   const n = normalizeVendor(name)
   if (!n) return true
+  if (UNKNOWN_VENDOR_NORMS.has(n)) return true
   const letters = n.replace(/[^֐-׿a-z]/g, '')
   return letters.length < 2
 }
@@ -234,8 +246,13 @@ export function clusterVendors(rows = []) {
 
   const clusters = []
   for (const it of items) {
+    const itJunk = isJunkVendor(it.name)
     let placed = null, bestScore = 0
     for (const c of clusters) {
+      // Never attach across a junk boundary: a real supplier must not fold into an
+      // "unknown supplier"/garbage canonical, and junk must not join a real one.
+      // (Junk still forms its own cluster below, shown for manual correction.)
+      if (itJunk !== isJunkVendor(c.canonical)) continue
       // Compare against the cluster's canonical member only — chaining through
       // weak links is how unrelated suppliers get merged together.
       const v = vendorSimilarity(it.name, c.canonical)

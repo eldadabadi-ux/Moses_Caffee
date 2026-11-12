@@ -9,17 +9,19 @@
 export const clusterSpellings = (c) => [...(c.members || []), ...(c.review || [])]
 
 /**
- * Default selection: pre-check EVERY spelling, review band included. The task is
- * de-duplicating OCR spellings of one supplier, and the clusters are almost
- * always genuinely the same supplier, so "merge them all" is the useful default;
- * the user unticks anything that doesn't belong. (Leaving the review band
- * unchecked was why a plain "אשר איחוד" merged nothing the user cared about.)
+ * Default selection: pre-check only the near-certain `members` (>= AUTO), NOT the
+ * `review` band (0.60–0.92). A review match can be two different businesses that
+ * merely share a word — on real café data a 0.61 cluster pulled unrelated
+ * suppliers together, and auto-merging those is unrecoverable-looking to the
+ * user. Review rows are shown checked-off with a one-tap "סמן את כל הדומים" so a
+ * genuine duplicate is still fast to confirm, but the DEFAULT never merges an
+ * uncertain match on a single click.
  * @returns {{ [canonical]: { canonical, picked: Set<string> } }}
  */
 export function initialChoices(clusters = []) {
   const init = {}
   for (const c of clusters) {
-    init[c.canonical] = { canonical: c.canonical, picked: new Set(clusterSpellings(c).map(m => m.name)) }
+    init[c.canonical] = { canonical: c.canonical, picked: new Set((c.members || []).map(m => m.name)) }
   }
   return init
 }
