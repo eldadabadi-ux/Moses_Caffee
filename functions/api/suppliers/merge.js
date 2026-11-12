@@ -161,14 +161,17 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   // the merge is idempotent, so the user just runs it again to finish.
   const SUBREQUEST_BUDGET = 45
   let used = 0
-  let deferred = 0
+  const remaining = []   // canonicals NOT processed this run — the client resends ONLY these
 
   for (const g of groups) {
-    // ~3 subrequests per group — leave the loop before we can overshoot.
-    if (used + 3 > SUBREQUEST_BUDGET) { deferred++; continue }
-
     const canonical = String(g?.canonical || '').trim()
     if (!normalizeVendor(canonical)) { problems.push(`שם ריק — דולג`); continue }
+
+    // ~3 subrequests per group — leave the loop before we can overshoot, and
+    // name the groups left so the caller resends exactly those (not the whole
+    // list again, which would re-spend the budget on already-merged groups and
+    // never reach the tail).
+    if (used + 3 > SUBREQUEST_BUDGET) { remaining.push(canonical); continue }
 
     // Find or create the canonical supplier, verifying tenant ownership when the
     // client supplied an id.
@@ -237,9 +240,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
 
   return Response.json({
     suppliers_created: created, aliases_learned: aliases, receipts_linked: linked,
-    // Groups left for a follow-up run so one request never exceeds the subrequest
-    // cap. The merge is idempotent — re-running finishes the rest.
-    deferred: deferred || undefined,
+    // Canonicals left for a follow-up run so one request never exceeds the
+    // subrequest cap. The merge is idempotent; the client resends ONLY these.
+    deferred: remaining.length || undefined,
+    remaining: remaining.length ? remaining : undefined,
     problems: problems.length ? problems : undefined,
   }, { headers: CORS })
 })

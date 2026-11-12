@@ -91,7 +91,7 @@ export default function SupplierMergePage() {
     if (!pending.length) { toast.error('לא נבחר דבר'); return }
     setBusy(true)
     try {
-      const groups = pending.map(({ c, key, picked }) => ({
+      const allGroups = pending.map(({ c, key, picked }) => ({
         canonical: choices[key].canonical,
         supplier_id: c.existing_supplier?.id || accepted[key] || undefined,
         aliases: [...picked],
@@ -99,10 +99,41 @@ export default function SupplierMergePage() {
         // differences don't leave receipts unlinked.
         stored: c.stored,
       }))
-      const r = await authFetch('/api/suppliers/merge', { method: 'POST', body: JSON.stringify({ groups }) })
-      toast.success(`${r.suppliers_created} ספקים נוצרו · ${r.receipts_linked} קבלות קושרו`)
-      if (r.problems?.length) toast.error(`${r.problems.length} בעיות — ראה קונסול`)
-      if (r.deferred) toast(`נותרו ${r.deferred} קבוצות — לחץ "מזג" שוב כדי להשלים`, { icon: 'ℹ️', duration: 7000 })
+
+      // Each run merges as many groups as fit under Cloudflare's subrequest cap
+      // and returns the canonicals it did NOT reach. We resend ONLY those, so the
+      // work actually advances (resending the full list would re-spend the budget
+      // on already-merged groups and the tail would never be reached). Looping
+      // here means the user clicks once and we drive it to completion.
+      let queue = allGroups
+      let created = 0, linked = 0, aliasesLearned = 0
+      const problems = []
+      const progress = toast.loading('ממזג ספקים…')
+      try {
+        let guard = 0
+        while (queue.length && guard < 50) {
+          guard++
+          const r = await authFetch('/api/suppliers/merge', { method: 'POST', body: JSON.stringify({ groups: queue }) })
+          created += r.suppliers_created || 0
+          linked += r.receipts_linked || 0
+          aliasesLearned += r.aliases_learned || 0
+          if (r.problems?.length) problems.push(...r.problems)
+
+          const remaining = r.remaining || []
+          // No forward progress (even one group can't fit the budget, or the same
+          // set bounced back) — stop rather than loop forever.
+          if (remaining.length >= queue.length) {
+            throw new Error(`המיזוג נתקע עם ${remaining.length} קבוצות — ${problems[0] || 'נסה שוב'}`)
+          }
+          queue = queue.filter(g => remaining.includes(g.canonical))
+          if (queue.length) toast.loading(`ממזג… נותרו ${queue.length} קבוצות`, { id: progress })
+        }
+        toast.success(`${created} ספקים נוצרו · ${linked} קבלות קושרו${aliasesLearned ? ` · ${aliasesLearned} כינויים` : ''}`, { id: progress })
+        if (problems.length) toast.error(`${problems.length} בעיות — ראה קונסול`)
+        if (problems.length) console.warn('[merge] problems:', problems)
+      } catch (loopErr) {
+        toast.error(loopErr.message, { id: progress })
+      }
       await load()
     } catch (e) { toast.error(e.message) }
     finally { setBusy(false) }
