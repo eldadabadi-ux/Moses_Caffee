@@ -161,8 +161,17 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   // in the table, and SuppliersPage lists every supplier row, so the duplicates
   // still showed and the merge looked like it did nothing (client report).
   const catalogue = (await loadSupplierCatalogue(url, key, { orgId: user.org_id, userId: user.user_id })) || []
-  const supplierByNorm = new Map()
-  for (const s of catalogue) supplierByNorm.set(normalizeVendor(s.name), s.id)
+  // Normalized name → ALL supplier ids with that name. A plain Map (one id per
+  // name) silently dropped a duplicate whenever two rows share a normalized name
+  // — e.g. "חברת החשמל" and "חברת החשמל בע\"מ" both normalize alike — so the
+  // second row's id was never found and the fold did nothing (the exact "merge
+  // does nothing" the client hit; every real X-vs-X-בע"מ duplicate is this case).
+  const supplierIdsByNorm = new Map()
+  for (const s of catalogue) {
+    const n = normalizeVendor(s.name)
+    if (!supplierIdsByNorm.has(n)) supplierIdsByNorm.set(n, [])
+    supplierIdsByNorm.get(n).push(s.id)
+  }
 
   // Cloudflare allows a bounded number of subrequests per invocation. Each group
   // now costs ~4 (find/create + alias insert + receipts PATCH + fold-duplicates),
@@ -245,8 +254,11 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     // merged_into=canonical, so loadSuppliers (which filters merged_into is null)
     // stops listing it — this is what actually makes the duplicates disappear from
     // the suppliers screen. Receipts were already repointed by the PATCH above.
+    // flatMap over the multimap: a normalized name can map to SEVERAL supplier
+    // rows (the duplicate twin), and every one of them except the canonical must
+    // be folded. (Mapping to a single id per name is what left the twin behind.)
     const dupIds = [...new Set(
-      spellings.map(s => supplierByNorm.get(normalizeVendor(s))).filter(Boolean)
+      spellings.flatMap(s => supplierIdsByNorm.get(normalizeVendor(s)) || [])
     )].filter(dupId => dupId !== supplierId)
     if (dupIds.length) {
       used++

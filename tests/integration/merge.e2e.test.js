@@ -31,7 +31,7 @@ if (!(URL && ANON && SERVICE)) {
   const CANON = 'מידן סחר בעמ', MEMBER = 'מידן סחר', DUP = 'מיזן סחר בעמ'
   const SEED = [[CANON, 4], [MEMBER, 2], [DUP, 2]]
 
-  async function provision() {
+  async function provision(seed = SEED) {
     const RUN = Math.random().toString(36).slice(2, 8)
     const email = `pentest_merge_${RUN}@moses-test.local`, PW = `Pentest!${RUN}Xz9`
     const { data: u, error: ue } = await admin.auth.admin.createUser({ email, password: PW, email_confirm: true })
@@ -40,7 +40,7 @@ if (!(URL && ANON && SERVICE)) {
     const { data: org } = await admin.from('organizations').insert({ name: `PENTEST merge ${RUN}`, owner_id: uid }).select('id').single()
     await admin.from('memberships').insert({ org_id: org.id, user_id: uid, role: 'owner' })
     const supByName = {}
-    for (const [name, count] of SEED) {
+    for (const [name, count] of seed) {
       const { data: s } = await admin.from('suppliers').insert({ user_id: uid, org_id: org.id, name }).select('id').single()
       supByName[name] = s.id
       for (let i = 0; i < count; i++) {
@@ -105,6 +105,23 @@ if (!(URL && ANON && SERVICE)) {
       assert.equal(sups.filter(s => !s.merged_into).length, 2, 'two active: the merged CANON, and the untouched DUP')
       assert.ok(sups.find(s => s.id === dupId && !s.merged_into), 'DUP supplier is still active')
       assert.equal(recs.filter(r => r.supplier_id === dupId).length, 2, 'DUP keeps its own receipts')
+    } finally { await destroy(t) }
+  })
+
+  // Regression for the live-café bug: two supplier rows whose names normalize to
+  // the SAME string (X vs "X בע\"מ") are the most common real duplicate. The fold
+  // step keyed ids by normalized name in a 1:1 Map, so the twin was dropped and
+  // the merge silently did nothing (POST 200, zero rows folded). They are
+  // near-certain members → pre-checked → one click must collapse them to one.
+  test('two rows with the SAME normalized name (X vs X בע"מ) actually fold', async () => {
+    const t = await provision([['חשמל לדוגמה', 2], ['חשמל לדוגמה בע"מ', 2]])
+    try {
+      await mergeAll(t.token, () => true)
+      const sups = (await admin.from('suppliers').select('id,merged_into').eq('user_id', t.uid)).data || []
+      const recs = (await admin.from('receipts').select('supplier_id').eq('user_id', t.uid)).data || []
+      assert.equal(sups.filter(s => !s.merged_into).length, 1, 'same-normalized-name twin must fold to one active supplier')
+      assert.equal(sups.filter(s => s.merged_into).length, 1, 'the twin row is marked merged_into')
+      assert.equal(new Set(recs.map(r => r.supplier_id)).size, 1, 'all 4 receipts on the one survivor')
     } finally { await destroy(t) }
   })
 }
