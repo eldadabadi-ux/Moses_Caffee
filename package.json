@@ -12,6 +12,7 @@
     "deploy": "npm run build && wrangler pages deploy dist --project-name moses-caffee --branch=master --commit-dirty=true",
     "deploy:manual": "npm run build && wrangler pages deploy dist --project-name moses-caffee --branch=master --commit-dirty=true",
     "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:merge": "node --env-file=.env.test --test tests/integration/merge.e2e.test.js",
     "ship": "node scripts/ship.mjs",
     "cleanup": "node scripts/cleanup.mjs",
     "eval:scan": "node --env-file=.env.test scripts/eval-scan.mjs",

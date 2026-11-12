@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Store, Merge, AlertTriangle, ChevronLeft, Check, RefreshCw } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
+import { initialChoices, buildMergeGroups } from '../lib/mergeGroups'
 import toast from 'react-hot-toast'
 
 const fmtILS = n => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`
@@ -52,19 +53,10 @@ export default function SupplierMergePage() {
       // loop filters junk out and re-indexes, so slot i showed one cluster while
       // reading and writing another cluster's choices — every checkbox click and
       // rename went to the wrong place, silently.
-      const init = {}
-      d.clusters.forEach(c => {
-        // Pre-check the near-certain members AND any spelling that is ALREADY
-        // linked (m.linked > 0) from a previous run — otherwise a spelling the
-        // user merged last time would reappear unchecked under "לבדיקה" and look
-        // un-merged. A genuinely new, still-unlinked review spelling stays
-        // unchecked so the user makes the call.
-        const prePicked = [...c.members, ...c.review]
-          .filter(m => !c.review.some(r => r.name === m.name) || (m.linked || 0) > 0)
-          .map(m => m.name)
-        init[c.canonical] = { canonical: c.canonical, picked: new Set(prePicked) }
-      })
-      setChoices(init)
+      // Pre-check EVERY spelling (review band included) — see initialChoices.
+      // Leaving the review band unchecked by default was why a plain "אשר איחוד"
+      // looked like it did nothing: the actual duplicates were never selected.
+      setChoices(initialChoices(d.clusters))
     } catch (e) { toast.error(e.message) }
     finally { setLoading(false) }
   }, [])
@@ -90,13 +82,12 @@ export default function SupplierMergePage() {
     return { ...prev, [c.canonical]: { ...cur, picked } }
   })
 
-  // Clusters that still have at least one unconfirmed "review" spelling — the
-  // duplicates the user must decide on. This is what was invisible before.
-  const reviewPending = useMemo(() => {
+  // Clusters that contain a "review"-band spelling — pre-checked for merge but
+  // worth the user's eyes, so we surface a caution banner and highlight them.
+  const reviewClusters = useMemo(() => {
     if (!data) return []
-    return data.clusters.filter(c => !c.junk && c.review.length > 0 &&
-      c.review.some(r => !(choices[c.canonical]?.picked || new Set()).has(r.name)))
-  }, [data, choices])
+    return data.clusters.filter(c => !c.junk && c.review.length > 0)
+  }, [data])
 
   // Only clusters where something is actually being grouped or linked.
   const pending = useMemo(() => {
@@ -116,14 +107,11 @@ export default function SupplierMergePage() {
     if (!pending.length) { toast.error('לא נבחר דבר'); return }
     setBusy(true)
     try {
-      const allGroups = pending.map(({ c, key, picked }) => ({
-        canonical: choices[key].canonical,
-        supplier_id: c.existing_supplier?.id || accepted[key] || undefined,
-        aliases: [...picked],
-        // Echo back the EXACT spellings stored on the rows, so trimming
-        // differences don't leave receipts unlinked.
-        stored: c.stored,
-      }))
+      // aliases + stored are both derived from the PICKED spellings only, so
+      // unchecking a spelling excludes it from relinking AND folding (see
+      // buildMergeGroups, unit-tested). choices/accepted are keyed by the
+      // original canonical, exactly as this screen stores them.
+      const allGroups = buildMergeGroups(data.clusters, choices, accepted)
 
       // Each run merges as many groups as fit under Cloudflare's subrequest cap
       // and returns the canonicals it did NOT reach. We resend ONLY those, so the
@@ -205,15 +193,15 @@ export default function SupplierMergePage() {
         ))}
       </div>
 
-      {/* Review hint — the duplicates that need the user's confirmation. Without
-          this the review rows look merged-already and the user thinks nothing ran. */}
-      {reviewPending.length > 0 && (
+      {/* Caution banner — review-band spellings are pre-checked for merge, but a
+          partial match could be two different businesses, so invite a quick look. */}
+      {reviewClusters.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '12px 14px', borderRadius: 'var(--r-card)', background: 'var(--warn-bg, #fef3c7)', border: '1px solid var(--warn, #d97706)' }}>
           <AlertTriangle size={17} style={{ color: 'var(--warn, #92400e)', flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13.5, color: 'var(--warn, #92400e)', lineHeight: 1.6 }}>
-            <strong>{reviewPending.length} ספקים עם איותים דומים ממתינים לאישורך.</strong> איות דומה
-            (למשל מידן / מיזן) אינו מסומן אוטומטית — כי התאמה חלקית עלולה להיות שני עסקים שונים.
-            עבור על הקבוצות עם התווית הצהובה, וסמן ב"סמן את כל הדומים" את מי ששייך באמת לאותו ספק, ואז "אשר איחוד".
+            <strong>סימנו עבורך איותים דומים לאיחוד</strong> (מודגשים בצהוב, למשל מידן / מיזן).
+            ברוב המקרים זה אותו ספק — פשוט לחץ "אשר איחוד". אם איות מסוים הוא דווקא עסק אחר,
+            בטל את הסימון שלו לפני האישור.
           </div>
         </div>
       )}
@@ -227,8 +215,9 @@ export default function SupplierMergePage() {
         const isMerge = [...c.members, ...c.review].length > 1
         const hasReview = c.review.length > 0
         const allPicked = [...c.members, ...c.review].every(m => picked.has(m.name))
-        // Highlight clusters still waiting on the user's call about a similar spelling.
-        const awaiting = hasReview && c.review.some(r => !picked.has(r.name))
+        // A yellow border flags clusters that include a review-band spelling, so the
+        // user's eye lands on the ones worth a glance before confirming.
+        const awaiting = hasReview
         return (
           <div key={key} style={{ background: 'var(--panel)', border: `1px solid ${awaiting ? 'var(--warn, #d97706)' : isMerge ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 'var(--r-card)', padding: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: isMerge ? 10 : 0, flexWrap: 'wrap' }}>
@@ -265,11 +254,11 @@ export default function SupplierMergePage() {
             {hasReview && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
                 <span style={{ fontSize: 12.5, color: 'var(--warn, #92400e)', fontWeight: 600 }}>
-                  {c.review.length} איותים דומים — סמן את מה ששייך לספק הזה:
+                  {c.review.length} איותים דומים סומנו לאיחוד — בטל סימון למה שאינו שייך:
                 </span>
                 <button onClick={() => setAllInCluster(c, !allPicked)}
                   style={{ padding: '4px 12px', borderRadius: 999, border: '1px solid var(--accent)', background: allPicked ? 'var(--accent-bg)' : 'var(--panel)', color: 'var(--accent)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
-                  {allPicked ? 'נקה הכול' : 'סמן את כל הדומים'}
+                  {allPicked ? 'השאר רק זהים' : 'סמן את כל הדומים'}
                 </button>
               </div>
             )}
