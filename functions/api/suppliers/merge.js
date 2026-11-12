@@ -174,9 +174,9 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
   }
 
   // Cloudflare allows a bounded number of subrequests per invocation. Each group
-  // now costs ~4 (find/create + alias insert + receipts PATCH + fold-duplicates),
-  // plus the one catalogue read above. Stop short and report the remainder: the
-  // merge is idempotent, so the user just runs it again to finish.
+  // costs ~5 (find/create + alias insert + receipts PATCH + fold receipts-by-id +
+  // fold supplier rows), plus the one catalogue read above. Stop short and report
+  // the remainder: the merge is idempotent, so the user just runs it again.
   const SUBREQUEST_BUDGET = 45
   let used = 2   // the catalogue read (suppliers + aliases)
   const remaining = []   // canonicals NOT processed this run — the client resends ONLY these
@@ -185,11 +185,11 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     const canonical = String(g?.canonical || '').trim()
     if (!normalizeVendor(canonical)) { problems.push(`שם ריק — דולג`); continue }
 
-    // ~4 subrequests per group — leave the loop before we can overshoot, and
+    // ~5 subrequests per group — leave the loop before we can overshoot, and
     // name the groups left so the caller resends exactly those (not the whole
     // list again, which would re-spend the budget on already-merged groups and
     // never reach the tail).
-    if (used + 4 > SUBREQUEST_BUDGET) { remaining.push(canonical); continue }
+    if (used + 5 > SUBREQUEST_BUDGET) { remaining.push(canonical); continue }
 
     // Find or create the canonical supplier, verifying tenant ownership when the
     // client supplied an id.
@@ -261,6 +261,21 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
       spellings.flatMap(s => supplierIdsByNorm.get(normalizeVendor(s)) || [])
     )].filter(dupId => dupId !== supplierId)
     if (dupIds.length) {
+      // Repoint every receipt currently on a folded row to the survivor BY
+      // supplier_id — exact, and immune to the vendor_name quoting issues that
+      // the string-match PATCH above hits on names with gershayim ("בע\"מ").
+      // Without this a receipt is left pointing at a now-merged-away supplier.
+      used++
+      const recRes = await fetch(
+        `${url}/rest/v1/receipts?${scopeOf(user)}&supplier_id=${inList(dupIds)}`,
+        { method: 'PATCH',
+          headers: { ...sbh(key), Prefer: 'return=minimal,count=exact' },
+          body: JSON.stringify({ supplier_id: supplierId }) })
+      if (recRes.ok) {
+        const total = parseInt((recRes.headers.get('content-range') || '').split('/')[1], 10)
+        linked += Number.isFinite(total) ? total : 0
+      } else problems.push(`העברת קבלות נכשלה: ${canonical}`)
+
       used++
       const res = await fetch(
         `${url}/rest/v1/suppliers?id=${inList(dupIds)}&${scopeOf(user)}&merged_into=is.null`,
