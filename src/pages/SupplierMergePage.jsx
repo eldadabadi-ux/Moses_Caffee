@@ -311,12 +311,21 @@ export default function SupplierMergePage() {
                 {[...c.members, ...c.review].map(m => {
                   const on = picked.has(m.name)
                   const needsReview = c.review.some(r => r.name === m.name)
+                  // A review spelling already linked somewhere (no unlinked receipts)
+                  // has been dealt with — it was separated into its own supplier or
+                  // merged. Show it as done, not as an open suggestion.
+                  const handled = needsReview && m.hasUnlinked === false
                   return (
                     <div key={m.name}
-                      style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px', borderRadius: 8, background: on ? 'var(--accent-bg)' : 'transparent' }}>
-                      <input type="checkbox" checked={on} onChange={() => toggle(key, m.name)} style={{ width: 16, height: 16, accentColor: 'var(--accent)', flexShrink: 0, cursor: 'pointer' }} />
-                      <span onClick={() => toggle(key, m.name)} style={{ flex: 1, minWidth: 0, fontSize: 14.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{m.name}</span>
-                      {needsReview && (
+                      style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px', borderRadius: 8, background: on ? 'var(--accent-bg)' : 'transparent', opacity: handled ? 0.7 : 1 }}>
+                      {handled
+                        ? <Check size={16} style={{ color: 'var(--ok, #16a34a)', flexShrink: 0 }} />
+                        : <input type="checkbox" checked={on} onChange={() => toggle(key, m.name)} style={{ width: 16, height: 16, accentColor: 'var(--accent)', flexShrink: 0, cursor: 'pointer' }} />}
+                      <span onClick={() => !handled && toggle(key, m.name)} style={{ flex: 1, minWidth: 0, fontSize: 14.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: handled ? 'default' : 'pointer' }}>{m.name}</span>
+                      {handled && (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--ok, #166534)', whiteSpace: 'nowrap' }}>עסק נפרד ✓</span>
+                      )}
+                      {needsReview && !handled && (
                         <>
                           <span title={`ודאות ${Math.round(m.score * 100)}% — כדאי לוודא`}
                             style={{ fontSize: 11, fontWeight: 700, background: 'var(--warn-bg, #fef3c7)', color: 'var(--warn, #92400e)', borderRadius: 999, padding: '1px 8px', whiteSpace: 'nowrap' }}>
