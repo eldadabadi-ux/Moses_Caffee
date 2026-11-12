@@ -20,7 +20,7 @@
 import { requireMember, wrapAuthErrors } from '../_lib/auth.js'
 import { getSupabaseUrl } from '../_lib/extractReceipt.js'
 import { createSupplier, loadSupplierCatalogue } from '../_lib/supplierResolve.js'
-import { clusterVendors, normalizeVendor, matchVendor } from '../_lib/supplierMatch.js'
+import { clusterVendors, normalizeVendor, matchVendor, isJunkVendor } from '../_lib/supplierMatch.js'
 import { errorResponse } from '../_lib/response.js'
 import { writeAudit } from '../_lib/audit.js'
 
@@ -83,14 +83,17 @@ async function loadVendorRows(url, key, user) {
     const name = stored.trim()
     if (!name) continue
     if (!r.supplier_id) unlinked++
-    ;(map[name] ||= { name, count: 0, total: 0, linked: 0, stored: new Set() })
+    ;(map[name] ||= { name, count: 0, total: 0, linked: 0, stored: new Set(), supplierIds: new Set(), hasUnlinked: false })
     map[name].count++
     map[name].total += parseFloat(r.amount) || 0
     map[name].stored.add(stored)
-    if (r.supplier_id) map[name].linked++
+    if (r.supplier_id) { map[name].linked++; map[name].supplierIds.add(r.supplier_id) }
+    else map[name].hasUnlinked = true
   }
   return {
-    rows: Object.values(map).map(v => ({ ...v, total: Math.round(v.total * 100) / 100, stored: [...v.stored] })),
+    // supplierIds/hasUnlinked ride through clusterVendors (it spreads each row) so
+    // the GET can tell which clusters are already fully resolved to one supplier.
+    rows: Object.values(map).map(v => ({ ...v, total: Math.round(v.total * 100) / 100, stored: [...v.stored], supplierIds: [...v.supplierIds] })),
     unlinked,
   }
 }
@@ -105,6 +108,12 @@ export const onRequestGet = wrapAuthErrors(async (context) => {
   const { rows, unlinked } = await loadVendorRows(url, key, user)
   const catalogue = (await loadSupplierCatalogue(url, key, { orgId: user.org_id, userId: user.user_id })) || []
 
+  // How many ACTIVE supplier rows exist per normalized name — a cluster with two
+  // rows sharing a name still has a duplicate to fold even if receipts all point
+  // to one of them, so it is NOT "resolved".
+  const activeRowsByNorm = {}
+  for (const s of catalogue) { const n = normalizeVendor(s.name); activeRowsByNorm[n] = (activeRowsByNorm[n] || 0) + 1 }
+
   const storedByName = Object.fromEntries(rows.map(r => [r.name, r.stored]))
   const clusters = clusterVendors(rows).map(c => {
     // If one of these spellings already resolves to a supplier, propose THAT
@@ -113,8 +122,24 @@ export const onRequestGet = wrapAuthErrors(async (context) => {
     // silently: "קפה אחים" scores 0.65 against "מאפיית אחים בע\"מ", and stamping
     // its receipts with that supplier would corrupt the bakery's spend for good.
     const existing = matchVendor(c.canonical, catalogue)
+
+    // "resolved" = nothing left to merge: every receipt in the cluster is already
+    // linked to the SAME single, real supplier, there are no unlinked receipts,
+    // and no second supplier row shares the name. Such a cluster is hidden from
+    // the actionable list — its spellings would otherwise sit there forever
+    // (vendor_name is never rewritten) and read as an unmerged duplicate.
+    const all = [...c.members, ...c.review]
+    const supIds = new Set(all.flatMap(m => m.supplierIds || []))
+    const anyUnlinked = all.some(m => m.hasUnlinked)
+    const theId = supIds.size === 1 ? [...supIds][0] : null
+    const theSupplier = theId ? catalogue.find(s => s.id === theId) : null
+    const resolved = !!theSupplier && !anyUnlinked && !isJunkVendor(theSupplier.name)
+      && (activeRowsByNorm[normalizeVendor(theSupplier.name)] || 0) <= 1
+
     return {
       ...c,
+      resolved,
+      resolved_name: resolved ? theSupplier.name : null,
       existing_supplier: existing.decision === 'auto' && existing.supplier
         ? { id: existing.supplier.id, name: existing.supplier.name, score: existing.score }
         : null,
@@ -135,6 +160,9 @@ export const onRequestGet = wrapAuthErrors(async (context) => {
     unlinked,
     total_names: rows.length,
     total_suppliers_after: clusters.filter(c => !c.junk).length,
+    // Clusters with nothing left to do, so the client can show "already merged"
+    // separately instead of as pending work.
+    resolved_count: clusters.filter(c => !c.junk && c.resolved).length,
   }, { headers: CORS })
 })
 

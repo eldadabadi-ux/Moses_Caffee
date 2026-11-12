@@ -86,14 +86,14 @@ export default function SupplierMergePage() {
   // worth the user's eyes, so we surface a caution banner and highlight them.
   const reviewClusters = useMemo(() => {
     if (!data) return []
-    return data.clusters.filter(c => !c.junk && c.review.length > 0)
+    return data.clusters.filter(c => !c.junk && !c.resolved && c.review.length > 0)
   }, [data])
 
   // Only clusters where something is actually being grouped or linked.
   const pending = useMemo(() => {
     if (!data) return []
     return data.clusters.map(c => ({ c, key: c.canonical, picked: choices[c.canonical]?.picked || new Set() }))
-      .filter(({ c, picked }) => !c.junk && picked.size > 0)
+      .filter(({ c, picked }) => !c.junk && !c.resolved && picked.size > 0)
   }, [data, choices])
 
   const stats = useMemo(() => {
@@ -206,8 +206,17 @@ export default function SupplierMergePage() {
         </div>
       )}
 
-      {/* Clusters — the ones awaiting review float to the top */}
-      {data.clusters.filter(c => !c.junk)
+      {/* Already-merged note — clusters whose spellings all point to one supplier
+          already. Shown as done, not as pending work, so they stop looking unmerged. */}
+      {data.resolved_count > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 'var(--r-card)', background: 'var(--ok-bg, #ecfdf5)', border: '1px solid var(--ok, #16a34a)', color: 'var(--ok, #166534)', fontSize: 13.5 }}>
+          <Check size={16} style={{ flexShrink: 0 }} />
+          <span>{data.resolved_count} ספקים כבר מאוחדים — כל האיותים שלהם כבר מקושרים לספק אחד, ואין בהם מה לעשות.</span>
+        </div>
+      )}
+
+      {/* Clusters — only ones with actual work left; awaiting-review float to top */}
+      {data.clusters.filter(c => !c.junk && !c.resolved)
         .sort((a, b) => (b.review.length > 0) - (a.review.length > 0))
         .map(c => {
         const key = c.canonical

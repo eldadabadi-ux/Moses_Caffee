@@ -21,6 +21,7 @@ export const clusterSpellings = (c) => [...(c.members || []), ...(c.review || []
 export function initialChoices(clusters = []) {
   const init = {}
   for (const c of clusters) {
+    if (c.resolved) continue   // already one supplier — nothing to select
     init[c.canonical] = { canonical: c.canonical, picked: new Set((c.members || []).map(m => m.name)) }
   }
   return init
@@ -44,7 +45,7 @@ export function initialChoices(clusters = []) {
 export function buildMergeGroups(clusters = [], choices = {}, accepted = {}) {
   const groups = []
   for (const c of clusters) {
-    if (c.junk) continue
+    if (c.junk || c.resolved) continue
     const key = c.canonical
     const picked = choices[key]?.picked || new Set()
     if (picked.size === 0) continue

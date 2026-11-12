@@ -76,3 +76,11 @@ test('an existing_supplier on the cluster wins over accepted', () => {
   const g = buildMergeGroups(cs, initialChoices(cs), { 'מידן סחר': 'sup-123' })[0]
   assert.equal(g.supplier_id, 'existing-9')
 })
+
+test('a resolved cluster is skipped — never pre-checked, never sent', () => {
+  const cs = clusters(); cs[0].resolved = true
+  assert.deepEqual(initialChoices(cs), {}, 'resolved cluster gets no selection')
+  // even if choices somehow had it picked, buildMergeGroups omits a resolved cluster
+  const forced = { 'מידן סחר': { canonical: 'מידן סחר', picked: new Set(['מידן סחר']) } }
+  assert.equal(buildMergeGroups(cs, forced).length, 0, 'resolved cluster is not emitted as a group')
+})
