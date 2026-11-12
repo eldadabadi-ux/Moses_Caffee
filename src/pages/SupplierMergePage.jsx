@@ -54,7 +54,15 @@ export default function SupplierMergePage() {
       // rename went to the wrong place, silently.
       const init = {}
       d.clusters.forEach(c => {
-        init[c.canonical] = { canonical: c.canonical, picked: new Set(c.members.map(m => m.name)) }
+        // Pre-check the near-certain members AND any spelling that is ALREADY
+        // linked (m.linked > 0) from a previous run — otherwise a spelling the
+        // user merged last time would reappear unchecked under "לבדיקה" and look
+        // un-merged. A genuinely new, still-unlinked review spelling stays
+        // unchecked so the user makes the call.
+        const prePicked = [...c.members, ...c.review]
+          .filter(m => !c.review.some(r => r.name === m.name) || (m.linked || 0) > 0)
+          .map(m => m.name)
+        init[c.canonical] = { canonical: c.canonical, picked: new Set(prePicked) }
       })
       setChoices(init)
     } catch (e) { toast.error(e.message) }
@@ -72,6 +80,23 @@ export default function SupplierMergePage() {
   })
 
   const setCanonical = (key, canonical) => setChoices(prev => ({ ...prev, [key]: { ...prev[key], canonical } }))
+
+  // Tick (or clear) every spelling in a cluster at once — the "review" rows are
+  // unchecked by default on purpose, so this is the one-click way to confirm a
+  // cluster the user has eyeballed as genuinely one supplier.
+  const setAllInCluster = (c, on) => setChoices(prev => {
+    const cur = prev[c.canonical]; if (!cur) return prev
+    const picked = new Set(on ? [...c.members, ...c.review].map(m => m.name) : c.members.map(m => m.name))
+    return { ...prev, [c.canonical]: { ...cur, picked } }
+  })
+
+  // Clusters that still have at least one unconfirmed "review" spelling — the
+  // duplicates the user must decide on. This is what was invisible before.
+  const reviewPending = useMemo(() => {
+    if (!data) return []
+    return data.clusters.filter(c => !c.junk && c.review.length > 0 &&
+      c.review.some(r => !(choices[c.canonical]?.picked || new Set()).has(r.name)))
+  }, [data, choices])
 
   // Only clusters where something is actually being grouped or linked.
   const pending = useMemo(() => {
@@ -131,6 +156,9 @@ export default function SupplierMergePage() {
         toast.success(`${created} ספקים נוצרו · ${linked} קבלות קושרו${aliasesLearned ? ` · ${aliasesLearned} כינויים` : ''}`, { id: progress })
         if (problems.length) toast.error(`${problems.length} בעיות — ראה קונסול`)
         if (problems.length) console.warn('[merge] problems:', problems)
+        // The review banner recomputes against the reloaded data + fresh choices
+        // (already-linked spellings come back pre-checked), so it clears itself
+        // when nothing is left to confirm — no separate nag toast needed.
       } catch (loopErr) {
         toast.error(loopErr.message, { id: progress })
       }
@@ -176,13 +204,32 @@ export default function SupplierMergePage() {
         ))}
       </div>
 
-      {/* Clusters */}
-      {data.clusters.filter(c => !c.junk).map(c => {
+      {/* Review hint — the duplicates that need the user's confirmation. Without
+          this the review rows look merged-already and the user thinks nothing ran. */}
+      {reviewPending.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '12px 14px', borderRadius: 'var(--r-card)', background: 'var(--warn-bg, #fef3c7)', border: '1px solid var(--warn, #d97706)' }}>
+          <AlertTriangle size={17} style={{ color: 'var(--warn, #92400e)', flexShrink: 0, marginTop: 1 }} />
+          <div style={{ fontSize: 13.5, color: 'var(--warn, #92400e)', lineHeight: 1.6 }}>
+            <strong>{reviewPending.length} ספקים עם איותים דומים ממתינים לאישורך.</strong> איות דומה
+            (למשל מידן / מיזן) אינו מסומן אוטומטית — כי התאמה חלקית עלולה להיות שני עסקים שונים.
+            עבור על הקבוצות עם התווית הצהובה, וסמן ב"סמן את כל הדומים" את מי ששייך באמת לאותו ספק, ואז "אשר איחוד".
+          </div>
+        </div>
+      )}
+
+      {/* Clusters — the ones awaiting review float to the top */}
+      {data.clusters.filter(c => !c.junk)
+        .sort((a, b) => (b.review.length > 0) - (a.review.length > 0))
+        .map(c => {
         const key = c.canonical
         const picked = choices[key]?.picked || new Set()
         const isMerge = [...c.members, ...c.review].length > 1
+        const hasReview = c.review.length > 0
+        const allPicked = [...c.members, ...c.review].every(m => picked.has(m.name))
+        // Highlight clusters still waiting on the user's call about a similar spelling.
+        const awaiting = hasReview && c.review.some(r => !picked.has(r.name))
         return (
-          <div key={key} style={{ background: 'var(--panel)', border: `1px solid ${isMerge ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 'var(--r-card)', padding: 14 }}>
+          <div key={key} style={{ background: 'var(--panel)', border: `1px solid ${awaiting ? 'var(--warn, #d97706)' : isMerge ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 'var(--r-card)', padding: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: isMerge ? 10 : 0, flexWrap: 'wrap' }}>
               <Store size={16} color="var(--accent)" style={{ flexShrink: 0 }} />
               <input value={choices[key]?.canonical ?? c.canonical} onChange={e => setCanonical(key, e.target.value)}
@@ -210,6 +257,18 @@ export default function SupplierMergePage() {
                 <button onClick={() => setAccepted(a => ({ ...a, [key]: a[key] ? undefined : c.possible_supplier.id }))}
                   style={{ padding: '4px 12px', borderRadius: 999, border: `1px solid ${accepted[key] ? 'var(--accent)' : 'var(--border)'}`, background: accepted[key] ? 'var(--accent-bg)' : 'var(--panel)', color: accepted[key] ? 'var(--accent)' : 'var(--text-mute)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
                   {accepted[key] ? 'כן — אותו ספק ✓' : 'כן, אותו ספק'}
+                </button>
+              </div>
+            )}
+
+            {hasReview && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                <span style={{ fontSize: 12.5, color: 'var(--warn, #92400e)', fontWeight: 600 }}>
+                  {c.review.length} איותים דומים — סמן את מה ששייך לספק הזה:
+                </span>
+                <button onClick={() => setAllInCluster(c, !allPicked)}
+                  style={{ padding: '4px 12px', borderRadius: 999, border: '1px solid var(--accent)', background: allPicked ? 'var(--accent-bg)' : 'var(--panel)', color: 'var(--accent)', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  {allPicked ? 'נקה הכול' : 'סמן את כל הדומים'}
                 </button>
               </div>
             )}
