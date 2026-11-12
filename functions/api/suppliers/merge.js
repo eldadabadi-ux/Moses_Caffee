@@ -136,9 +136,18 @@ export const onRequestGet = wrapAuthErrors(async (context) => {
     const resolved = !!theSupplier && !anyUnlinked && !isJunkVendor(theSupplier.name)
       && (activeRowsByNorm[normalizeVendor(theSupplier.name)] || 0) <= 1
 
+    // A cluster is a TASK only while it still has an unlinked receipt among its
+    // spellings. Once every spelling is linked somewhere — merged into the
+    // canonical, or separated into its own supplier via "לא — עסק אחר" — there is
+    // nothing left to decide and the card disappears. Single-spelling clusters are
+    // never a merge task (nothing to consolidate).
+    const spellingCount = all.length
+    const actionable = !c.junk && spellingCount > 1 && anyUnlinked
+
     return {
       ...c,
       resolved,
+      actionable,
       resolved_name: resolved ? theSupplier.name : null,
       existing_supplier: existing.decision === 'auto' && existing.supplier
         ? { id: existing.supplier.id, name: existing.supplier.name, score: existing.score }

@@ -86,15 +86,17 @@ export default function SupplierMergePage() {
   // worth the user's eyes, so we surface a caution banner and highlight them.
   const reviewClusters = useMemo(() => {
     if (!data) return []
-    return data.clusters.filter(c => !c.junk && !c.resolved && c.review.length > 0)
+    return data.clusters.filter(c => c.actionable && c.review.length > 0)
   }, [data])
 
   // Only clusters where something is actually being grouped or linked.
   const pending = useMemo(() => {
     if (!data) return []
     return data.clusters.map(c => ({ c, key: c.canonical, picked: choices[c.canonical]?.picked || new Set() }))
-      .filter(({ c, picked }) => !c.junk && !c.resolved && picked.size > 0)
+      .filter(({ c, picked }) => c.actionable && picked.size > 0)
   }, [data, choices])
+
+  const actionableClusters = useMemo(() => (data?.clusters || []).filter(c => c.actionable), [data])
 
   const stats = useMemo(() => {
     const groups = pending.length
@@ -102,6 +104,28 @@ export default function SupplierMergePage() {
     const merges = pending.filter(p => p.picked.size > 1).length
     return { groups, names, merges }
   }, [pending])
+
+  // "לא — עסק אחר": this spelling is a DIFFERENT business, so give it its own
+  // supplier and link its receipts. It then stops being suggested under the other
+  // supplier, and once a cluster has nothing unlinked left it disappears from the
+  // task list. Reuses the merge endpoint with the spelling as its own group.
+  async function separateSpelling(member) {
+    setBusy(true)
+    const progress = toast.loading('יוצר ספק נפרד…')
+    try {
+      const r = await authFetch('/api/suppliers/merge', {
+        method: 'POST',
+        body: JSON.stringify({ groups: [{
+          canonical: member.name,
+          aliases: [member.name],
+          stored: (member.stored && member.stored.length) ? member.stored : [member.name],
+        }] }),
+      })
+      toast.success(`"${member.name}" הופרד לספק נפרד (${r.receipts_linked || 0} קבלות)`, { id: progress })
+      await load()
+    } catch (e) { toast.error(e.message, { id: progress }) }
+    finally { setBusy(false) }
+  }
 
   async function apply() {
     if (!pending.length) { toast.error('לא נבחר דבר'); return }
@@ -215,8 +239,18 @@ export default function SupplierMergePage() {
         </div>
       )}
 
-      {/* Clusters — only ones with actual work left; awaiting-review float to top */}
-      {data.clusters.filter(c => !c.junk && !c.resolved)
+      {/* Nothing left to decide */}
+      {actionableClusters.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '28px 16px', color: 'var(--text-mute)' }}>
+          <Check size={34} style={{ color: 'var(--ok, #16a34a)', margin: '0 auto 8px', display: 'block' }} />
+          <p style={{ fontWeight: 600, color: 'var(--text)', margin: 0 }}>אין משימות פתוחות</p>
+          <p style={{ fontSize: 13.5, marginTop: 4 }}>כל הספקים טופלו. איחודים חדשים יופיעו כאן אחרי סריקות הבאות.</p>
+        </div>
+      )}
+
+      {/* Clusters — only ones with actual work left (an unlinked spelling to
+          decide on); awaiting-review float to top */}
+      {data.clusters.filter(c => c.actionable)
         .sort((a, b) => (b.review.length > 0) - (a.review.length > 0))
         .map(c => {
         const key = c.canonical
@@ -278,18 +312,27 @@ export default function SupplierMergePage() {
                   const on = picked.has(m.name)
                   const needsReview = c.review.some(r => r.name === m.name)
                   return (
-                    <label key={m.name}
-                      style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px', borderRadius: 8, cursor: 'pointer', background: on ? 'var(--accent-bg)' : 'transparent' }}>
-                      <input type="checkbox" checked={on} onChange={() => toggle(key, m.name)} style={{ width: 16, height: 16, accentColor: 'var(--accent)', flexShrink: 0 }} />
-                      <span style={{ flex: 1, minWidth: 0, fontSize: 14.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
+                    <div key={m.name}
+                      style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 8px', borderRadius: 8, background: on ? 'var(--accent-bg)' : 'transparent' }}>
+                      <input type="checkbox" checked={on} onChange={() => toggle(key, m.name)} style={{ width: 16, height: 16, accentColor: 'var(--accent)', flexShrink: 0, cursor: 'pointer' }} />
+                      <span onClick={() => toggle(key, m.name)} style={{ flex: 1, minWidth: 0, fontSize: 14.5, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}>{m.name}</span>
                       {needsReview && (
-                        <span title={`ודאות ${Math.round(m.score * 100)}% — כדאי לוודא`}
-                          style={{ fontSize: 11, fontWeight: 700, background: 'var(--warn-bg, #fef3c7)', color: 'var(--warn, #92400e)', borderRadius: 999, padding: '1px 8px', whiteSpace: 'nowrap' }}>
-                          לבדיקה {Math.round(m.score * 100)}%
-                        </span>
+                        <>
+                          <span title={`ודאות ${Math.round(m.score * 100)}% — כדאי לוודא`}
+                            style={{ fontSize: 11, fontWeight: 700, background: 'var(--warn-bg, #fef3c7)', color: 'var(--warn, #92400e)', borderRadius: 999, padding: '1px 8px', whiteSpace: 'nowrap' }}>
+                            לבדיקה {Math.round(m.score * 100)}%
+                          </span>
+                          {/* "No — a different business": give the spelling its own supplier
+                              so it stops being suggested here and the card can resolve. */}
+                          <button onClick={() => separateSpelling(m)} disabled={busy}
+                            title="זה עסק אחר — צור לו ספק נפרד"
+                            style={{ padding: '2px 9px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-mute)', fontSize: 11.5, fontWeight: 600, cursor: busy ? 'default' : 'pointer', fontFamily: 'var(--font-main)', whiteSpace: 'nowrap' }}>
+                            לא — עסק אחר
+                          </button>
+                        </>
                       )}
                       <span style={{ fontSize: 12.5, color: 'var(--text-mute)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{m.count}×</span>
-                    </label>
+                    </div>
                   )
                 })}
               </div>
