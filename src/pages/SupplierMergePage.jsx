@@ -102,6 +102,7 @@ export default function SupplierMergePage() {
       const r = await authFetch('/api/suppliers/merge', { method: 'POST', body: JSON.stringify({ groups }) })
       toast.success(`${r.suppliers_created} ספקים נוצרו · ${r.receipts_linked} קבלות קושרו`)
       if (r.problems?.length) toast.error(`${r.problems.length} בעיות — ראה קונסול`)
+      if (r.deferred) toast(`נותרו ${r.deferred} קבוצות — לחץ "מזג" שוב כדי להשלים`, { icon: 'ℹ️', duration: 7000 })
       await load()
     } catch (e) { toast.error(e.message) }
     finally { setBusy(false) }
