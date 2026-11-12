@@ -1,7 +1,7 @@
 {
   "name": "moses-caffee",
   "private": true,
-  "version": "1.80.2",
+  "version": "1.81.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
