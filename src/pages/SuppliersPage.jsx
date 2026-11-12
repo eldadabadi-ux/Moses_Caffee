@@ -156,10 +156,17 @@ export default function SuppliersPage() {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(330px, 1fr))', gap: '14px' }}>
         {rows.map((row) => { const { name, stats: s, contact } = row; return (
           <div key={row.key} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
-            {/* Title row */}
+            {/* Title row — the name opens the supplier card page (client request #8) */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Store size={18} color="var(--accent)" /></div>
-              <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 16, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>{name}</span>
+              {(contact?.id || s?.supplierId) ? (
+                <button onClick={() => navigate(`/suppliers/${contact?.id || s.supplierId}`)} title={`תיק ספק: ${name}`}
+                  style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 16, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'start', fontFamily: 'var(--font-main)' }}>
+                  {name}
+                </button>
+              ) : (
+                <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 16, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={name}>{name}</span>
+              )}
               <button onClick={() => setEdit({ id: contact?.id, name, phone: contact?.phone || '', whatsapp: contact?.whatsapp || '', email: contact?.email || '', address: contact?.address || '', supplies: contact?.supplies || '', notes: contact?.notes || '' })}
                 title="עריכת פרטי קשר" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mute)', padding: 5, display: 'flex', flexShrink: 0 }}><Pencil size={15} /></button>
             </div>

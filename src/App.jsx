@@ -39,6 +39,7 @@ const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
 const SettingsPage    = lazy(() => import('./pages/SettingsPage'))
 const SuppliersPage   = lazy(() => import('./pages/SuppliersPage'))
 const SupplierMergePage = lazy(() => import('./pages/SupplierMergePage'))
+const SupplierDetailPage = lazy(() => import('./pages/SupplierDetailPage'))
 const EventQuotesPage   = lazy(() => import('./pages/EventQuotesPage'))
 const ArchivePage     = lazy(() => import('./pages/ArchivePage'))
 const AdminPage       = lazy(() => import('./pages/AdminPage'))
@@ -332,6 +333,7 @@ function AppShell() {
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/suppliers"  element={<SuppliersPage />} />
             <Route path="/suppliers/merge" element={<SupplierMergePage />} />
+            <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
             <Route path="/events/quotes" element={<FlagGate flag="events_book"><EventQuotesPage /></FlagGate>} />
             <Route path="/reconcile"  element={<ReconciliationPage />} />
             <Route path="/archive"    element={<ArchivePage />} />
