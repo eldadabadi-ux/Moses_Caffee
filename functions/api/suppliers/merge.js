@@ -54,6 +54,38 @@ export function chunk(arr, size) {
   return out
 }
 
+/**
+ * The receipt ids a merge group must stamp, chosen in JS rather than by a
+ * PostgREST vendor_name filter. Matching the name in the query is fragile for
+ * spellings with gershayim ("בע\"מ"): an UNLINKED receipt with such a name is
+ * missed by the string PATCH and, having no supplier_id, is also missed by the
+ * fold-by-id — so it never links and the cluster keeps reappearing (client bug).
+ * Receipt ids are UUIDs, so an `id=in.(…)` PATCH has no quoting pitfalls.
+ *
+ * A receipt belongs to the group when its exact stored vendor_name is one the
+ * client echoed back (`stored`), or its trimmed name is one of the picked
+ * `spellings`, or it already sits on a duplicate supplier row being folded
+ * (`dupIds`). Matching the EXACT chosen spellings — not every name that merely
+ * normalizes alike — is what keeps a spelling the user separated ("עסק אחר") out.
+ *
+ * @param {Array<{id,vendor_name,supplier_id}>} receipts  the tenant's receipts
+ * @param {{stored?:string[], spellings?:string[], dupIds?:string[]}} group
+ * @returns {string[]} receipt ids to stamp with the canonical supplier
+ */
+export function selectGroupReceiptIds(receipts, { stored = [], spellings = [], dupIds = [] } = {}) {
+  const storedSet = new Set(stored.map(String))
+  const spellingSet = new Set(spellings.map(s => String(s).trim()).filter(Boolean))
+  const dupSet = new Set(dupIds.map(String))
+  const ids = []
+  for (const r of receipts || []) {
+    const raw = r?.vendor_name ?? ''
+    const byName = storedSet.has(raw) || spellingSet.has(String(raw).trim())
+    const byDup = r?.supplier_id && dupSet.has(r.supplier_id)
+    if (byName || byDup) ids.push(r.id)
+  }
+  return ids
+}
+
 export async function onRequestOptions({ request, env }) {
   return new Response(null, { status: 204, headers: {
     'Access-Control-Allow-Origin': env.ALLOWED_ORIGIN || (request.headers.get('origin') || '').trim() || '*',
@@ -210,12 +242,23 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     supplierIdsByNorm.get(n).push(s.id)
   }
 
+  // Load the tenant's receipts ONCE (id + name + current link) so each group's
+  // rows are selected in JS and stamped BY id — robust against the vendor_name
+  // quoting that made gershayim spellings ("…בע\"מ") unmatchable by a string PATCH.
+  let allReceipts = []
+  try {
+    const rr = await fetch(
+      `${url}/rest/v1/receipts?${scopeOf(user)}&select=id,vendor_name,supplier_id&limit=100000`,
+      { headers: sbh(key) })
+    if (rr.ok) allReceipts = await rr.json()
+  } catch { /* fall through — a failed load just links nothing, never 500s */ }
+
   // Cloudflare allows a bounded number of subrequests per invocation. Each group
   // costs ~5 (find/create + alias insert + receipts PATCH + fold receipts-by-id +
   // fold supplier rows), plus the one catalogue read above. Stop short and report
   // the remainder: the merge is idempotent, so the user just runs it again.
   const SUBREQUEST_BUDGET = 45
-  let used = 2   // the catalogue read (suppliers + aliases)
+  let used = 3   // the catalogue read (suppliers + aliases) + the receipts read
   const remaining = []   // canonicals NOT processed this run — the client resends ONLY these
 
   for (const g of groups) {
@@ -268,14 +311,25 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
       else problems.push(`למידת כינויים נכשלה: ${canonical}`)
     }
 
-    // Stamp all receipts for the group in ONE PATCH per chunk, using an in.(…)
-    // filter, instead of one PATCH per spelling. `count=exact` returns how many
-    // rows were touched without returning them (a representation would drag every
-    // legacy base64 image into the Worker — guardrail 4).
-    for (const values of chunk(stored, 50)) {
+    // The duplicate SUPPLIER rows to fold — a normalized name can map to SEVERAL
+    // supplier rows (the X / "X בע\"מ" twin), and every one but the canonical must
+    // be absorbed. (Mapping one id per name is what used to leave the twin behind.)
+    const dupIds = [...new Set(
+      spellings.flatMap(s => supplierIdsByNorm.get(normalizeVendor(s)) || [])
+    )].filter(dupId => dupId !== supplierId)
+
+    // Select the group's receipts in JS and stamp them BY id. This replaces the
+    // vendor_name=in.(…) string PATCH, which missed unlinked gershayim spellings
+    // ("…בע\"מ") — the exact "it keeps coming back after I merge it" bug: those
+    // receipts stayed unlinked (string PATCH missed them; fold-by-id couldn't see
+    // them either, having no supplier_id), so the cluster never resolved. Ids are
+    // UUIDs, so an id=in.(…) filter has no quoting pitfalls. One receipt can thus
+    // be linked whether it was unlinked or sitting on a now-folded duplicate row.
+    const ids = selectGroupReceiptIds(allReceipts, { stored, spellings, dupIds })
+    for (const idChunk of chunk(ids, 50)) {
       used++
       const res = await fetch(
-        `${url}/rest/v1/receipts?${scopeOf(user)}&vendor_name=${inList(values)}`,
+        `${url}/rest/v1/receipts?${scopeOf(user)}&id=${inList(idChunk)}`,
         { method: 'PATCH',
           headers: { ...sbh(key), Prefer: 'return=minimal,count=exact' },
           body: JSON.stringify({ supplier_id: supplierId }) })
@@ -289,30 +343,9 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     // Fold the duplicate SUPPLIER rows into the canonical one. Each spelling that
     // already had its own supplier row (created at scan time) is stamped
     // merged_into=canonical, so loadSuppliers (which filters merged_into is null)
-    // stops listing it — this is what actually makes the duplicates disappear from
-    // the suppliers screen. Receipts were already repointed by the PATCH above.
-    // flatMap over the multimap: a normalized name can map to SEVERAL supplier
-    // rows (the duplicate twin), and every one of them except the canonical must
-    // be folded. (Mapping to a single id per name is what left the twin behind.)
-    const dupIds = [...new Set(
-      spellings.flatMap(s => supplierIdsByNorm.get(normalizeVendor(s)) || [])
-    )].filter(dupId => dupId !== supplierId)
+    // stops listing it — this is what makes the duplicates disappear from the
+    // suppliers screen. Receipts were already repointed by the id PATCH above.
     if (dupIds.length) {
-      // Repoint every receipt currently on a folded row to the survivor BY
-      // supplier_id — exact, and immune to the vendor_name quoting issues that
-      // the string-match PATCH above hits on names with gershayim ("בע\"מ").
-      // Without this a receipt is left pointing at a now-merged-away supplier.
-      used++
-      const recRes = await fetch(
-        `${url}/rest/v1/receipts?${scopeOf(user)}&supplier_id=${inList(dupIds)}`,
-        { method: 'PATCH',
-          headers: { ...sbh(key), Prefer: 'return=minimal,count=exact' },
-          body: JSON.stringify({ supplier_id: supplierId }) })
-      if (recRes.ok) {
-        const total = parseInt((recRes.headers.get('content-range') || '').split('/')[1], 10)
-        linked += Number.isFinite(total) ? total : 0
-      } else problems.push(`העברת קבלות נכשלה: ${canonical}`)
-
       used++
       const res = await fetch(
         `${url}/rest/v1/suppliers?id=${inList(dupIds)}&${scopeOf(user)}&merged_into=is.null`,
