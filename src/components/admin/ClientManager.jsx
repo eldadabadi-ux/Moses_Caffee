@@ -53,15 +53,20 @@ export default function ClientManager() {
 
   function openOrg(org) {
     if (openId === org.id) { setOpenId(null); setDraft(null); return }
-    const c = clientOf(org.id) || {}
+    const c = clientOf(org.id)
+    // A client with no card yet starts PRE-CHECKED with the modules that are
+    // live for them right now, so the first save mirrors reality — it never
+    // switches an existing customer's features off by surprise.
+    const features = c ? { ...(c.features || {}) }
+      : Object.fromEntries((data?.enabled_modules?.[org.id] || []).map(k => [k, { price: 0 }]))
     setOpenId(org.id)
     setDraft({
-      contact_name: c.contact_name || '', contact_phone: c.contact_phone || '', contact_email: c.contact_email || '',
-      monthly_price: c.monthly_price ?? 0,
-      features: { ...(c.features || {}) },
-      payment_method: c.payment_method || '', payment_notes: c.payment_notes || '',
-      status: c.status || 'active', started_at: c.started_at || '',
-      notes: c.notes || '',
+      contact_name: c?.contact_name || '', contact_phone: c?.contact_phone || '', contact_email: c?.contact_email || '',
+      monthly_price: c?.monthly_price ?? 0,
+      features,
+      payment_method: c?.payment_method || '', payment_notes: c?.payment_notes || '',
+      status: c?.status || 'active', started_at: c?.started_at || '',
+      notes: c?.notes || '',
     })
   }
 
@@ -172,7 +177,7 @@ export default function ClientManager() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <label style={{ ...lbl, marginBottom: 0 }}>פיצ׳רים שנרכשו</label>
                         <span style={{ fontSize: 12, color: 'var(--text-mute)' }}>
-                          סה"כ פיצ׳רים: <strong>{fmtILS(featureTotal(draft.features))}</strong> · שמירה מעדכנת גם את מתגי המודולים
+                          סה"כ פיצ׳רים: <strong>{fmtILS(featureTotal(draft.features))}</strong> · מסומן = פעיל אצל הלקוח, לא מסומן = כבוי (נקבע בשמירה)
                         </span>
                       </div>
                       <div style={{ border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden' }}>

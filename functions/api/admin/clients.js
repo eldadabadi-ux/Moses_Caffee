@@ -17,7 +17,7 @@
  */
 import { requireUser, wrapAuthErrors } from '../_lib/auth.js'
 import { writeAudit } from '../_lib/audit.js'
-import { MODULE_FLAGS } from '../_lib/flags.js'
+import { MODULE_FLAGS, resolveFlags } from '../_lib/flags.js'
 
 const SUPERADMIN_FALLBACK = 'eldadabadi@gmail.com'
 const sbUrl = (env) => env.VITE_SUPABASE_URL || env.SUPABASE_URL || 'https://dsoucojqjrodxozcbicf.supabase.co'
@@ -54,11 +54,19 @@ export const onRequestGet = wrapAuthErrors(async (context) => {
   const g = await guardOwner(context)
   if (g.res) return g.res
   const { url, headers } = g
-  const [orgs, clients] = await Promise.all([
+  const [orgs, clients, flagRows] = await Promise.all([
     fetch(`${url}/rest/v1/organizations?select=id,name,business_name,plan,subscription_status&order=name`, { headers }).then(r => r.ok ? r.json() : []),
     fetch(`${url}/rest/v1/client_accounts?select=*`, { headers }).then(r => r.ok ? r.json() : []),
+    fetch(`${url}/rest/v1/feature_flags?select=key,org_id,enabled`, { headers }).then(r => r.ok ? r.json() : []),
   ])
-  return Response.json({ orgs, clients, modules: MODULE_FLAGS }, { headers: cors })
+  // The modules each org can use RIGHT NOW (override → global → default) — the
+  // console pre-checks these on a client that has no card yet, so the first
+  // save mirrors reality instead of switching anything off by surprise.
+  const enabled_modules = Object.fromEntries((orgs || []).map(o => {
+    const eff = resolveFlags(flagRows || [], o.id)
+    return [o.id, MODULE_FLAGS.filter(k => eff[k])]
+  }))
+  return Response.json({ orgs, clients, modules: MODULE_FLAGS, enabled_modules }, { headers: cors })
 })
 
 /** Validate + shape the writable fields; returns { record } or { error }. */
@@ -102,7 +110,12 @@ function cleanRecord(body) {
   return { record: out }
 }
 
-/** Align the org's module flags with its purchased features (audited per flip). */
+/**
+ * Align the org's module flags with its purchased features — BINARY (operator
+ * decision 15.11.26): checked = the module is ON for this client, unchecked =
+ * explicitly OFF. No "fall back to default" middle state — the client card is
+ * the single source of truth for what a customer can use. Audited per flip.
+ */
 async function syncFeatureFlags(context, g, orgId, features) {
   const { url, headers, caller } = g
   const existing = await fetch(
@@ -112,17 +125,15 @@ async function syncFeatureFlags(context, g, orgId, features) {
   const changes = []
 
   for (const key of MODULE_FLAGS) {
-    const bought = key in features
+    const want = key in features
     const cur = byKey[key]
-    if (bought && !(cur?.enabled === true)) {
-      const res = cur?.id
-        ? await fetch(`${url}/rest/v1/feature_flags?id=eq.${cur.id}`, { method: 'PATCH', headers, body: JSON.stringify({ enabled: true, updated_at: new Date().toISOString() }) })
-        : await fetch(`${url}/rest/v1/feature_flags`, { method: 'POST', headers, body: JSON.stringify({ key, org_id: orgId, enabled: true, note: 'client purchase' }) })
-      if (res.ok) { changes.push({ key, enabled: true }); await writeAudit(context.env, { orgId, userId: caller.user_id, action: 'flag_set', target: key, meta: { enabled: true, via: 'client_account' } }) }
-    } else if (!bought && cur) {
-      // Not purchased → clear the override back to the global/default.
-      const res = await fetch(`${url}/rest/v1/feature_flags?id=eq.${cur.id}`, { method: 'DELETE', headers })
-      if (res.ok) { changes.push({ key, enabled: null }); await writeAudit(context.env, { orgId, userId: caller.user_id, action: 'flag_cleared', target: key, meta: { via: 'client_account' } }) }
+    if (cur?.enabled === want) continue
+    const res = cur?.id
+      ? await fetch(`${url}/rest/v1/feature_flags?id=eq.${cur.id}`, { method: 'PATCH', headers, body: JSON.stringify({ enabled: want, updated_at: new Date().toISOString() }) })
+      : await fetch(`${url}/rest/v1/feature_flags`, { method: 'POST', headers, body: JSON.stringify({ key, org_id: orgId, enabled: want, note: 'client card' }) })
+    if (res.ok) {
+      changes.push({ key, enabled: want })
+      await writeAudit(context.env, { orgId, userId: caller.user_id, action: 'flag_set', target: key, meta: { enabled: want, via: 'client_account' } })
     }
   }
   return changes
