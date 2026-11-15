@@ -253,14 +253,31 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
 
 /**
  * SidebarRail — the collapsed desktop state (client request 15.11.26): a slim
- * fixed strip on the right showing only the section icons. Clicking ANY icon —
- * the menu button included — reopens the full sidebar; a section icon also hands
- * its section id up so the sidebar opens with that section expanded.
+ * fixed strip on the right showing only the section icons. Hovering an icon
+ * shows a styled tooltip with its name; clicking a section icon NAVIGATES to
+ * that page AND reopens the full sidebar with the section expanded (round 3:
+ * one click instead of open-menu-then-click-again). The menu button just opens.
  */
 export function SidebarRail({ onExpand }) {
+  const navigate = useNavigate()
   const location = useLocation()
   const flags = useFeatureFlags()
   const reconcileCount = useReconcileAlerts()
+  const [hovered, setHovered] = useState(null)
+
+  const tip = (text) => (
+    <span style={{ position: 'absolute', right: 'calc(100% + 10px)', top: '50%', transform: 'translateY(-50%)',
+      background: '#1f2937', color: '#fff', fontSize: 12.5, fontWeight: 600, padding: '5px 11px', borderRadius: 7,
+      whiteSpace: 'nowrap', pointerEvents: 'none', boxShadow: '0 4px 14px rgba(0,0,0,0.22)', zIndex: 130 }}>
+      {text}
+    </span>
+  )
+
+  function goSection(s) {
+    navigate(s.to)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    onExpand?.(s.id)
+  }
 
   return (
     <aside style={{
@@ -269,29 +286,32 @@ export function SidebarRail({ onExpand }) {
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       padding: '10px 0', gap: 3, boxShadow: '-4px 0 16px rgba(0,0,0,0.06)',
     }} dir="rtl">
-      <button onClick={() => onExpand?.(null)} aria-label="פתח תפריט" title="פתח תפריט"
-        style={{ width: 50, height: 50, borderRadius: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}
-        onMouseEnter={e => e.currentTarget.style.background = 'var(--panel-2)'}
-        onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+      <button onClick={() => onExpand?.(null)} aria-label="פתח תפריט"
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--panel-2)'; setHovered('menu') }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'none'; setHovered(null) }}
+        style={{ position: 'relative', width: 50, height: 50, borderRadius: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
         <Menu size={27} />
+        {hovered === 'menu' && tip('פתח תפריט')}
       </button>
       <div style={{ width: 38, height: 1, background: 'var(--border)', marginBottom: 6 }} />
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: '100%' }}>
+      {/* overflow stays VISIBLE so the tooltips can hang outside the rail */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: '100%' }}>
         {NAV.filter(s => !NAV_FLAG[s.id] || flags[NAV_FLAG[s.id]]).map(s => {
           const isActive = location.pathname === s.to
           const Icon = s.icon
           return (
-            <button key={s.id} onClick={() => onExpand?.(s.id)} aria-label={s.label} title={s.label}
+            <button key={s.id} onClick={() => goSection(s)} aria-label={s.label}
+              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--panel-2)'; setHovered(s.id) }}
+              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'none'; setHovered(null) }}
               style={{ position: 'relative', width: 50, height: 50, borderRadius: 12, border: 'none', cursor: 'pointer',
                 background: isActive ? 'var(--accent-bg)' : 'none',
                 color: isActive ? 'var(--accent)' : 'var(--text-dim)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--panel-2)' }}
-              onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'none' }}>
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               <Icon size={26} />
               {s.id === 'reconcile' && reconcileCount > 0 && (
                 <span style={{ position: 'absolute', top: 6, insetInlineEnd: 6, width: 9, height: 9, borderRadius: '50%', background: 'var(--danger)' }} />
               )}
+              {hovered === s.id && tip(s.label)}
             </button>
           )
         })}
