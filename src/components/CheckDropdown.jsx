@@ -15,21 +15,33 @@ export default function CheckDropdown({ icon: Icon, options = [], values = [], o
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const panelRef = useRef(null)
-  // The panel hangs off the button's RIGHT edge (RTL) and grows left — near the
-  // viewport's left edge that clips it. Instead of guessing with a threshold
-  // (the first-open miss of QA 15.11.26 round 3), measure the REAL panel rect
-  // before paint and translate it back inside the viewport, whichever edge it
-  // crossed. useLayoutEffect = corrected position on the very first frame.
+  // The panel hangs off the button's RIGHT edge (RTL) and grows left. The page
+  // wraps content in overflow-x:clip containers (html/body/#root/main — the
+  // no-horizontal-scroll guards in index.css), so a panel poking past MAIN's
+  // left edge is painted cut — the real "חתוך משמאל" of QA 15.11.26: the clip
+  // happened at the content frame, not the viewport, which is why a
+  // viewport-only clamp looked fine. Fix: measure the panel before paint and
+  // translate it back inside the intersection of the viewport AND every
+  // overflow-clipping ancestor. useLayoutEffect = corrected on the first frame.
   const [shift, setShift] = useState(0)
   useLayoutEffect(() => {
     if (!open) { setShift(0); return }
     const p = panelRef.current?.getBoundingClientRect()
     if (!p) return
-    const vw = document.documentElement.clientWidth
+    // Visible horizontal bounds: viewport ∩ every ancestor that clips overflow.
+    let min = EDGE, max = document.documentElement.clientWidth - EDGE
+    for (let n = panelRef.current.parentElement; n && n !== document.body; n = n.parentElement) {
+      const ox = getComputedStyle(n).overflowX
+      if (ox !== 'visible') {
+        const r = n.getBoundingClientRect()
+        min = Math.max(min, r.left + EDGE)
+        max = Math.min(max, r.right - EDGE)
+      }
+    }
     // The rect is measured WITH the current shift applied, so corrections add up.
     let dx = 0
-    if (p.left < EDGE) dx = EDGE - p.left
-    else if (p.right > vw - EDGE) dx = (vw - EDGE) - p.right
+    if (p.left < min) dx = min - p.left
+    else if (p.right > max) dx = max - p.right
     if (dx !== 0) setShift(s => s + dx)
   }, [open, options.length, shift])  // eslint-disable-line react-hooks/exhaustive-deps
 
