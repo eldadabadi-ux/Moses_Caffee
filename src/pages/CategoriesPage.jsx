@@ -16,6 +16,14 @@ import ConfirmDialog from '../components/ui/ConfirmDialog'
 import Modal from '../components/ui/Modal'
 import CategoryInsightPanel from '../components/CategoryInsightPanel'
 
+// Single-flight guard for the category sync (module scope — shared across
+// mounts). On a BRAND-NEW tenant two concurrent load() calls (StrictMode's
+// double effect in dev, or a user-object refresh refiring the effect) both saw
+// an empty tree and both inserted the missing L1s → every category appeared
+// twice (observed 15.11.26). Concurrent callers now share one sync run; the
+// merge pass inside sync self-heals any duplicates that already exist.
+let _syncInFlight = null
+
 export default function CategoriesPage() {
   const { user } = useAuth()
   const { orgId } = useTenant()
@@ -256,7 +264,12 @@ export default function CategoriesPage() {
   async function load() {
     if (!hasCached('categories')) setLoading(true)
     try {
-      await syncMissingCategories()   // create any categories used by receipts but missing here
+      // Create any categories used by receipts but missing here — behind the
+      // module-level single-flight so concurrent loads cannot double-insert.
+      if (!_syncInFlight) {
+        _syncInFlight = syncMissingCategories().finally(() => { _syncInFlight = null })
+      }
+      await _syncInFlight
       const { data, error } = await supabase
         .from('categories')
         .select('*')

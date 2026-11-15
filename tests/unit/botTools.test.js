@@ -45,9 +45,27 @@ const FOREIGN = [
     amount: 99999, doc_type: 'receipt', archived_at: null, category_text: 'אחר', items: [] },
 ]
 
+// Catering quotes: one accepted + priced, one draft — for the event_quotes tool.
+const QUOTES = [
+  { id: 'q1', title: 'בר מצווה כהן', customer_name: 'משפחת כהן', event_date: '2026-09-20',
+    guests: 100, status: 'accepted', vat_rate: 18, valid_until: '2026-09-01',
+    items: [{ item_name: 'מנת שף', quantity: 100, unit: "יח'", unit_price: 50 }] },
+  { id: 'q2', title: 'ערב חברה', customer_name: 'סטארטאפ בע"מ', event_date: '2026-10-05',
+    guests: 40, status: 'draft', vat_rate: 18,
+    items: [{ item_name: 'קינוח', quantity: 40, unit: "יח'", unit_price: 20 }] },
+]
+
+// The category tree rows for the category_tree tool.
+const CATEGORIES = [
+  { id: 'c1', name: 'מוצרי מזון ומכולת', parent_id: null, level: 1 },
+  { id: 'c2', name: 'מוצרי חלב', parent_id: 'c1', level: 2 },
+]
+
 let lastUrls = []
+let budgetRows = []        // set per budget test — time-window math needs live dates
 function installStub() {
   lastUrls = []
+  budgetRows = []
   globalThis.fetch = async (url) => {
     const u = String(url)
     lastUrls.push(u)
@@ -56,6 +74,14 @@ function installStub() {
     const pick = (rows) => (scoped ? rows : [...rows, ...FOREIGN])
     if (u.includes('/rest/v1/suppliers')) return json(scoped ? SUPPLIERS : [])
     if (u.includes('/rest/v1/receipts')) return json(pick(RECEIPTS))
+    if (u.includes('/rest/v1/event_quotes')) {
+      let rows = scoped ? QUOTES : []
+      const st = /status=eq\.([a-z]+)/.exec(u)
+      if (st) rows = rows.filter(r => r.status === st[1])
+      return json(rows)
+    }
+    if (u.includes('/rest/v1/supplier_budgets')) return json(scoped ? budgetRows : [])
+    if (u.includes('/rest/v1/categories')) return json(scoped ? CATEGORIES : [])
     return json([])
   }
 }
@@ -396,4 +422,73 @@ test('supplier_info says so when the supplier is unknown', async () => {
   installContacts()
   const out = await runTool('supplier_info', { supplier: 'ספק דמיוני' }, CTX)
   assert.match(out.note, /לא נמצא ספק/)
+})
+
+// ── event_quotes ─────────────────────────────────────────────────────────────
+test('event quotes are listed with real pricing math (net + VAT, per guest)', async () => {
+  const out = await runTool('event_quotes', {}, CTX)
+  assert.equal(out.found, 2)
+  const q1 = out.quotes.find(q => q.title === 'בר מצווה כהן')
+  assert.equal(q1.status, 'התקבלה')
+  assert.match(q1.total, /5,900/)                 // 100×50 = 5,000 + 18% VAT
+  assert.match(q1.per_guest, /59/)
+  assert.match(out.accepted_total, /5,900/)
+  assert.equal(out.by_status['התקבלה'], 1)
+  assert.equal(out.by_status['טיוטה'], 1)
+})
+
+test('event quotes filter by status and by customer', async () => {
+  const byStatus = await runTool('event_quotes', { status: 'accepted' }, CTX)
+  assert.equal(byStatus.found, 1)
+  const byCustomer = await runTool('event_quotes', { customer: 'סטארטאפ' }, CTX)
+  assert.equal(byCustomer.found, 1)
+  assert.equal(byCustomer.quotes[0].status, 'טיוטה')
+})
+
+// ── category_tree ────────────────────────────────────────────────────────────
+test('the category tree carries per-category spend and nests subcategories', async () => {
+  const out = await runTool('category_tree', {}, CTX)
+  assert.equal(out.categories, 1)
+  assert.equal(out.subcategories, 1)
+  const l1 = out.tree[0]
+  assert.equal(l1.name, 'מוצרי מזון ומכולת')
+  assert.match(l1.total, /372/)                   // 120+156+96 — the summary invoice excluded
+  assert.equal(l1.children[0].name, 'מוצרי חלב')
+  assert.equal(out.uncategorized, undefined)      // every receipt category exists in the tree
+})
+
+// ── budget_status ────────────────────────────────────────────────────────────
+test('budget status reports utilization with the same math as the UI', async () => {
+  // Dates must fall in the CURRENT window (budgetStatus measures "now"), so the
+  // fixture is built from today's date — the test cannot rot with the calendar.
+  const today = new Date()
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const nowRows = [
+    { id: 'b1', vendor_name: 'קטיף ירקות קצוצים בע"מ', supplier_id: 'sup-katif',
+      receipt_date: iso(today), amount: 250, doc_type: 'receipt', archived_at: null, category_text: 'מזון', items: [] },
+    { id: 'b2', vendor_name: 'מיזן סחר ושיווק מזון איכותי בע"מ', supplier_id: 'sup-mizan',
+      receipt_date: iso(today), amount: 150, doc_type: 'receipt', archived_at: null, category_text: 'מזון', items: [] },
+  ]
+  budgetRows = [
+    { supplier_id: 'sup-katif', period: 'annual', amount: 300, alert_pct: 80 },   // 250/300 → warn
+    { supplier_id: 'sup-mizan', period: 'monthly', amount: 100, alert_pct: 80 },  // 150/100 → over
+  ]
+  const base = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    if (u.includes('/rest/v1/receipts')) return { ok: true, status: 200, json: async () => nowRows }
+    return base(url)
+  }
+  const out = await runTool('budget_status', {}, CTX)
+  assert.equal(out.budgets, 2)
+  assert.equal(out.over, 1)
+  assert.equal(out.near, 1)
+  assert.equal(out.items[0].state, 'חריגה')       // over sorts first
+  assert.match(out.items[0].remaining, /-50|50-/)
+  assert.equal(out.items[1].used_pct, 83)         // 250/300
+})
+
+test('budget status says so when no budgets are defined', async () => {
+  const out = await runTool('budget_status', {}, CTX)
+  assert.match(out.note, /לא הוגדרו תקציבי ספקים/)
 })

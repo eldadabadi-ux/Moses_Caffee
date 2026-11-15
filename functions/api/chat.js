@@ -152,7 +152,10 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
       reply: 'העוזר החכם כבוי כרגע במערכת. אפשר להדליק אותו בהגדרות המערכת.',
     }, { headers: CORS })
   }
-  const tools = TOOL_DEFS.filter(t => t.name !== 'price_changes' || flags.price_alerts)
+  // Module-gated tools are hidden when their module is off for the tenant
+  // (same packaging rule as the pages they mirror).
+  const TOOL_FLAG = { price_changes: 'price_alerts', event_quotes: 'events_book' }
+  const tools = TOOL_DEFS.filter(t => !TOOL_FLAG[t.name] || flags[TOOL_FLAG[t.name]])
 
   const system = buildSystemPrompt({
     orientation,

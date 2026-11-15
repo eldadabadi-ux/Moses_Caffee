@@ -25,6 +25,8 @@ import { normalizeVendor, vendorSimilarity, ASK_THRESHOLD } from './supplierMatc
 import { unitLabel } from './units.js'
 import { docTypeOf, isExpenseDoc } from './docTypes.js'
 import { bookOf, DEFAULT_BOOK, bookLabel } from './books.js'
+import { quoteTotals } from './quotes.js'
+import { budgetStatus, periodLabel } from './budgetMath.js'
 
 const MAX_ROWS = 4000          // hard cap on receipts pulled for one tool call
 const MAX_LIST = 60            // rows returned to the model in a listing
@@ -118,6 +120,22 @@ async function loadSuppliers(ctx) {
   try {
     return await sbGet(ctx.url, ctx.key,
       `suppliers?${scopeOf(ctx)}&merged_into=is.null&select=id,name,phone,email,whatsapp,supplies&order=name`)
+  } catch { return [] }
+}
+
+/** The tenant's category tree rows (L1→L3). */
+async function loadCategories(ctx) {
+  try {
+    return await sbGet(ctx.url, ctx.key,
+      `categories?${scopeOf(ctx)}&select=id,name,parent_id,level&order=level.asc,sort_order.asc`)
+  } catch { return [] }
+}
+
+/** The tenant's supplier budgets. */
+async function loadBudgets(ctx) {
+  try {
+    return await sbGet(ctx.url, ctx.key,
+      `supplier_budgets?${scopeOf(ctx)}&select=supplier_id,period,amount,alert_pct,note`)
   } catch { return [] }
 }
 
@@ -292,6 +310,49 @@ export const TOOL_DEFS = [
         book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ספר החשבונות — cafe (ברירת מחדל) / events (קייטרינג) / all' },
         from: { type: 'string' }, to: { type: 'string' },
         limit: { type: 'integer' },
+      },
+    },
+  },
+  {
+    name: 'event_quotes',
+    description:
+      'הצעות מחיר לאירועי קייטרינג (ספר האירועים): רשימה וסינון לפי סטטוס, תאריך אירוע או לקוח, ' +
+      'עם הסכום, הרווח והמחיר לאורח של כל הצעה. השתמש לשאלות "אילו הצעות פתוחות", ' +
+      '"כמה הצעות התקבלו החודש", "מה ההצעה לאירוע של X".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['draft', 'sent', 'accepted', 'declined'], description: 'סטטוס ההצעה' },
+        customer: { type: 'string', description: 'סינון לפי שם לקוח או כותרת (התאמה חלקית)' },
+        from: { type: 'string', description: 'תאריך אירוע מ- YYYY-MM-DD' },
+        to: { type: 'string', description: 'תאריך אירוע עד YYYY-MM-DD' },
+        limit: { type: 'integer' },
+      },
+    },
+  },
+  {
+    name: 'category_tree',
+    description:
+      'עץ הקטגוריות המלא של העסק (עד 3 רמות) עם ההוצאה בכל קטגוריה ותת-קטגוריה. ' +
+      'השתמש לשאלות "אילו קטגוריות יש", "כמה הוצאתי על תת-קטגוריה X", "פירוט הוצאות לפי מבנה הקטגוריות".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'תאריך התחלה YYYY-MM-DD' },
+        to: { type: 'string', description: 'תאריך סיום YYYY-MM-DD' },
+        book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ספר החשבונות — cafe (ברירת מחדל) / events / all' },
+      },
+    },
+  },
+  {
+    name: 'budget_status',
+    description:
+      'מצב תקציבי הספקים לתקופה הנוכחית: סכום התקציב, הניצול, היתרה ומי חרג או מתקרב לחריגה. ' +
+      'השתמש לשאלות "איך אנחנו מול התקציב", "מי חרג מהתקציב", "כמה נשאר בתקציב של X".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        supplier: { type: 'string', description: 'שם ספק (גם איות חלקי); ריק = כל התקציבים' },
       },
     },
   },
@@ -560,12 +621,161 @@ async function toolSupplierInfo(ctx, args) {
   return { book: bookLabel(loaded.book) || 'הכל', count: names.size, showing: list.length, suppliers: list }
 }
 
+const QUOTE_STATUS_HE = { draft: 'טיוטה', sent: 'נשלחה', accepted: 'התקבלה', declined: 'נדחתה' }
+
+async function toolEventQuotes(ctx, args) {
+  const filters = [scopeOf(ctx)]
+  const badDates = []
+  if (args.status && Object.keys(QUOTE_STATUS_HE).includes(args.status)) filters.push(`status=eq.${q(args.status)}`)
+  if (args.from != null && String(args.from).trim()) {
+    if (DATE_RE.test(String(args.from))) filters.push(`event_date=gte.${q(args.from)}`)
+    else badDates.push(String(args.from))
+  }
+  if (args.to != null && String(args.to).trim()) {
+    if (DATE_RE.test(String(args.to))) filters.push(`event_date=lte.${q(args.to)}`)
+    else badDates.push(String(args.to))
+  }
+  const rows = await sbGet(ctx.url, ctx.key,
+    `event_quotes?${filters.join('&')}&select=*&order=event_date.desc.nullslast&limit=${MAX_LIST + 1}`)
+  const cust = (args.customer || '').trim().toLowerCase()
+  const matched = rows.filter(r =>
+    !cust || `${r.customer_name || ''} ${r.title || ''}`.toLowerCase().includes(cust))
+  const limit = Math.min(Math.max(1, args.limit || MAX_LIST), MAX_LIST)
+
+  const byStatus = {}
+  let acceptedTotal = 0
+  const quotes = matched.slice(0, limit).map(qr => {
+    const t = quoteTotals(qr)
+    byStatus[qr.status] = (byStatus[qr.status] || 0) + 1
+    if (qr.status === 'accepted') acceptedTotal += t.total
+    return {
+      title: qr.title,
+      customer: qr.customer_name || null,
+      event_date: qr.event_date || null,
+      guests: qr.guests || null,
+      status: QUOTE_STATUS_HE[qr.status] || qr.status,
+      total: ils(t.total),
+      per_guest: t.per_guest != null ? ils(t.per_guest) : null,
+      // Profit only when every line carries a cost — a partial figure would
+      // read as a margin and be wrong in the flattering direction.
+      profit: t.fully_costed ? ils(t.profit) : null,
+      margin_pct: t.fully_costed ? t.margin_pct : null,
+      valid_until: qr.valid_until || null,
+      notes: qr.notes || undefined,
+    }
+  })
+  return {
+    found: matched.length,
+    showing: quotes.length,
+    by_status: Object.fromEntries(Object.entries(byStatus).map(([k, v]) => [QUOTE_STATUS_HE[k] || k, v])),
+    accepted_total: ils(acceptedTotal),
+    note: [matched.length > limit ? `הוצגו ${limit} ההצעות האחרונות בלבד` : null, dateNote(badDates)]
+      .filter(Boolean).join(' · ') || (matched.length ? undefined : 'לא נמצאו הצעות מחיר מתאימות'),
+    quotes,
+  }
+}
+
+async function toolCategoryTree(ctx, args) {
+  const [cats, loaded] = await Promise.all([loadCategories(ctx), loadReceipts(ctx, args)])
+  const { rows } = loaded
+  const expense = rows.filter(isExpenseDoc)
+
+  // Spend by name per level: L1 from the receipt's own category, L2/L3 from the
+  // line items (the same sources the dashboard drill-down aggregates).
+  const l1Spend = {}, l2Spend = {}, l3Spend = {}
+  for (const r of expense) {
+    const l1 = (r.category_text || 'שונות').trim()
+    l1Spend[l1] = (l1Spend[l1] || 0) + (num(r.amount) || 0)
+    for (const it of (Array.isArray(r.items) ? r.items : [])) {
+      const p = num(it.price) || 0
+      const c2 = (it.category_l2 || '').trim(), c3 = (it.category_l3 || '').trim()
+      if (c2) l2Spend[c2] = (l2Spend[c2] || 0) + p
+      if (c3) l3Spend[c3] = (l3Spend[c3] || 0) + p
+    }
+  }
+
+  const spendOf = (cat) => (cat.level === 1 ? l1Spend : cat.level === 2 ? l2Spend : l3Spend)[cat.name] || 0
+  const children = (id, lvl) => cats.filter(c => c.parent_id === id && c.level === lvl)
+  const node = (cat) => {
+    const kids = children(cat.id, cat.level + 1).map(node)
+    const out = { name: cat.name, total: ils(spendOf(cat)) }
+    if (kids.length) out.children = kids
+    return out
+  }
+  const tree = cats.filter(c => c.level === 1).map(node)
+
+  // Receipt categories that exist on documents but not in the tree.
+  const inTree = new Set(cats.filter(c => c.level === 1).map(c => c.name))
+  const orphans = Object.entries(l1Spend).filter(([name]) => !inTree.has(name))
+    .map(([name, v]) => ({ name, total: ils(v) }))
+
+  return {
+    book: bookLabel(loaded.book) || 'הכל',
+    categories: cats.filter(c => c.level === 1).length,
+    subcategories: cats.filter(c => c.level > 1).length,
+    note: dateNote(loaded.badDates),
+    tree,
+    uncategorized: orphans.length ? orphans : undefined,
+  }
+}
+
+const BUDGET_STATE_HE = { over: 'חריגה', warn: 'קרוב לחריגה', ok: 'תקין' }
+
+async function toolBudgetStatus(ctx, args) {
+  const [budgets, suppliers, loaded] = await Promise.all([
+    loadBudgets(ctx), loadSuppliers(ctx), loadReceipts(ctx),
+  ])
+  if (!budgets.length) return { note: 'לא הוגדרו תקציבי ספקים. מגדירים תקציב בדף הספק (ספקים ← בחירת ספק).' }
+  const { rows } = loaded
+  const byId = Object.fromEntries(suppliers.map(s => [s.id, s.name]))
+
+  let wanted = budgets
+  if (args.supplier) {
+    const filter = resolveSupplierFilter(args.supplier, suppliers, rows)
+    if (!filter || !filter.id) return { note: `לא נמצא ספק בשם "${args.supplier}" עם תקציב מוגדר` }
+    wanted = budgets.filter(b => b.supplier_id === filter.id)
+    if (!wanted.length) return { note: `לספק "${filter.name}" לא הוגדר תקציב` }
+  }
+
+  const order = { over: 0, warn: 1, ok: 2 }
+  const items = wanted.map(b => {
+    // Budget spend counts linked receipts only — the same rule the supplier page
+    // shows, so the bot and the UI never disagree on utilization.
+    const own = rows.filter(r => r.supplier_id === b.supplier_id)
+    const st = budgetStatus(b, own)
+    if (!st) return null
+    return {
+      supplier: byId[b.supplier_id] || '(ספק שנמחק)',
+      period: periodLabel(b.period),
+      window: st.window.label,
+      budget: ils(st.amount),
+      used: ils(st.used),
+      used_pct: st.pct,
+      remaining: ils(st.remaining),
+      state: BUDGET_STATE_HE[st.state],
+      _ord: order[st.state] ?? 3, _pct: st.pct,
+    }
+  }).filter(Boolean)
+    .sort((a, b) => a._ord - b._ord || b._pct - a._pct)
+    .map(({ _ord, _pct, ...rest }) => rest)
+
+  return {
+    budgets: items.length,
+    over: items.filter(i => i.state === BUDGET_STATE_HE.over).length,
+    near: items.filter(i => i.state === BUDGET_STATE_HE.warn).length,
+    items,
+  }
+}
+
 const EXECUTORS = {
   query_receipts: toolQueryReceipts,
   compare_product_prices: toolComparePrices,
   supplier_report: toolSupplierReport,
   price_changes: toolPriceChanges,
   supplier_info: toolSupplierInfo,
+  event_quotes: toolEventQuotes,
+  category_tree: toolCategoryTree,
+  budget_status: toolBudgetStatus,
 }
 
 /**
