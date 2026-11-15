@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import { Building2, UserPlus, ShieldCheck, Check, Copy, ScrollText, RefreshCw, ShieldAlert } from 'lucide-react'
 import FeatureFlagManager from '../components/admin/FeatureFlagManager'
+import ClientManager from '../components/admin/ClientManager'
 import toast from 'react-hot-toast'
 
 const AUDIT_LABELS = {
@@ -139,6 +140,9 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* ── Client cards: who pays what, for which features, and how ──────────── */}
+      <ClientManager />
 
       {/* ── Per-customer feature modules (SaaS packaging) ─────────────────────── */}
       <FeatureFlagManager />

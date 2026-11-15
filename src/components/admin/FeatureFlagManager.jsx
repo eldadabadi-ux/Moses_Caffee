@@ -4,12 +4,7 @@ import { FLAG_DEFAULTS } from '../../lib/flags'
 import toast from 'react-hot-toast'
 import { ToggleLeft, RefreshCw } from 'lucide-react'
 
-// Hebrew labels for the sellable modules (keys come from /api/admin/flags).
-const MODULE_LABELS = {
-  bot_tools: 'עוזר חכם', events_book: 'ספר אירועים', reconciliation: 'התאמות',
-  product_compare: 'השוואת מוצרים', insights: 'תובנות', price_alerts: 'התראות מחיר',
-  mail_ingest: 'קליטת מייל',
-}
+import { MODULE_LABELS } from './moduleLabels'
 
 async function authFetch(path, method = 'GET', body) {
   const { data: { session } } = await supabase.auth.getSession()
