@@ -301,3 +301,99 @@ test('a well-formed date filter still works', async () => {
   assert.ok(receiptCall.includes('receipt_date=gte.2026-01-01'))
   assert.ok(receiptCall.includes('receipt_date=lte.2026-12-31'))
 })
+
+// ── book scoped in the query (the cap-before-filter leak) ─────────────────────
+test('the café book is scoped server-side so the row cap cannot drop café rows', async () => {
+  installStub()
+  await runTool('query_receipts', {}, CTX)
+  const receiptCall = lastUrls.find(u => u.includes('/rest/v1/receipts'))
+  // café default must accept NULL book too (bookOf treats NULL as café).
+  assert.ok(receiptCall.includes('or=(book.is.null,book.eq.cafe)'), receiptCall)
+  await runTool('query_receipts', { book: 'events' }, CTX)
+  assert.ok(lastUrls.filter(u => u.includes('/rest/v1/receipts')).pop().includes('book=eq.events'))
+})
+
+// ── malformed date is reported, not silently ignored ─────────────────────────
+test('a malformed date is reported back in the note', async () => {
+  installStub()
+  const out = await runTool('query_receipts', { from: 'אתמול' }, CTX)
+  assert.match(out.note || '', /תאריך לא תקין/)
+})
+
+// ── enriched document fields (reconciliation / doc number / VAT) ──────────────
+const RICH = [
+  { id: 'd1', vendor_name: 'ספק', supplier_id: null, receipt_date: '2026-05-01', amount: 118,
+    doc_type: 'delivery_note', archived_at: null, category_text: 'מזון', doc_number: 'ת-500',
+    matched_invoice_id: 'inv9', amount_before_vat: 100, vat_amount: 18, items: [] },
+  { id: 'd2', vendor_name: 'ספק', supplier_id: null, receipt_date: '2026-05-02', amount: 90,
+    doc_type: 'delivery_note', archived_at: null, category_text: 'מזון', doc_number: 'ת-501',
+    matched_invoice_id: null, items: [] },
+  { id: 'i1', vendor_name: 'ספק', supplier_id: null, receipt_date: '2026-05-31', amount: 5000,
+    doc_type: 'summary_invoice', archived_at: null, category_text: 'מזון', doc_number: 'ח-77',
+    reconciliation: null, items: [] },
+]
+function installRich() {
+  lastUrls = []
+  globalThis.fetch = async (url) => {
+    const u = String(url); lastUrls.push(u)
+    if (u.includes('/rest/v1/suppliers')) return json([])
+    if (u.includes('/rest/v1/receipts')) return json(RICH)
+    return json([])
+  }
+}
+
+test('query_receipts surfaces doc number, reconciliation status and VAT', async () => {
+  installRich()
+  const out = await runTool('query_receipts', {}, CTX)
+  const byDate = Object.fromEntries(out.receipts.map(r => [r.date, r]))
+  assert.equal(byDate['2026-05-01'].doc_number, 'ת-500')
+  assert.equal(byDate['2026-05-01'].reconciliation, 'מותאמת לחשבונית')
+  assert.equal(byDate['2026-05-01'].vat.vat, '₪18')
+  assert.equal(byDate['2026-05-02'].reconciliation, 'פתוחה (ללא חשבונית מרכזת)')
+  assert.equal(byDate['2026-05-31'].reconciliation, 'ממתינה להתאמה')
+})
+
+// ── supplier_info ─────────────────────────────────────────────────────────────
+const CONTACT_SUPPLIERS = [
+  { id: 's1', name: 'ירקות השדה', phone: '050-1234567', email: 'veg@field.co', whatsapp: '972501234567', supplies: 'ירקות ופירות', merged_into: null },
+]
+const CONTACT_RECEIPTS = [
+  { id: 'c1', vendor_name: 'ירקות השדה', supplier_id: 's1', receipt_date: '2026-04-01', amount: 200,
+    doc_type: 'receipt', archived_at: null, category_text: 'ירקות', items: [] },
+  { id: 'c2', vendor_name: 'ירקות השדה בע"מ', supplier_id: 's1', receipt_date: '2026-06-15', amount: 300,
+    doc_type: 'receipt', archived_at: null, category_text: 'ירקות', items: [] },
+]
+function installContacts() {
+  lastUrls = []
+  globalThis.fetch = async (url) => {
+    const u = String(url); lastUrls.push(u)
+    if (u.includes('/rest/v1/suppliers')) return json(CONTACT_SUPPLIERS)
+    if (u.includes('/rest/v1/receipts')) return json(CONTACT_RECEIPTS)
+    return json([])
+  }
+}
+
+test('supplier_info returns contacts, spellings and activity for one supplier', async () => {
+  installContacts()
+  const out = await runTool('supplier_info', { supplier: 'ירקות' }, CTX)
+  assert.equal(out.supplier, 'ירקות השדה')
+  assert.equal(out.contact.phone, '050-1234567')
+  assert.equal(out.contact.whatsapp, '972501234567')
+  assert.ok(out.spellings.includes('ירקות השדה בע"מ'))
+  assert.equal(out.documents, 2)
+  assert.match(out.total_spend, /500/)
+  assert.equal(out.last_purchase, '2026-06-15')
+})
+
+test('supplier_info with no name returns a directory ranked by spend', async () => {
+  installContacts()
+  const out = await runTool('supplier_info', {}, CTX)
+  assert.equal(out.count, 1)
+  assert.equal(out.suppliers[0].supplier, 'ירקות השדה')
+})
+
+test('supplier_info says so when the supplier is unknown', async () => {
+  installContacts()
+  const out = await runTool('supplier_info', { supplier: 'ספק דמיוני' }, CTX)
+  assert.match(out.note, /לא נמצא ספק/)
+})

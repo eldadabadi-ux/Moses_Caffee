@@ -26,6 +26,7 @@ and in local `.env` / `.env.test` files that are git-ignored.
 |---|---|---|
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | `functions/api/_lib/auth.js` and all endpoints | server-side DB access |
 | `ANTHROPIC_API_KEY` | `functions/api/chat.js` | the business assistant (Claude) |
+| `CHAT_MODEL` | `functions/api/chat.js` | optional Claude model override for the assistant (default `claude-sonnet-4-6`) |
 | `GEMINI_API_KEY` | `functions/api/_lib/extractReceipt.js` | receipt OCR/extraction |
 | `GEMINI_MODEL` | `extractReceipt.js` | optional primary-model override |
 | `GEMINI_FALLBACK_MODEL` | `extractReceipt.js` | optional fallback-model override |

@@ -4,6 +4,11 @@
 import { useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
+// Only the last N turns are sent upstream. The tool-use rewrite means each
+// answer is grounded in fresh tool results, not in a long transcript, so an
+// unbounded history only inflates cost and context with no gain.
+const MAX_HISTORY = 20
+
 export function useAIChat() {
   const [messages, setMessages] = useState([])   // [{ role, content, ts }]
   const [loading, setLoading]   = useState(false)
@@ -24,7 +29,7 @@ export function useAIChat() {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: next.map(m => ({ role: m.role, content: m.content })), context: aiContext }),
+        body: JSON.stringify({ messages: next.slice(-MAX_HISTORY).map(m => ({ role: m.role, content: m.content })), context: aiContext }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))

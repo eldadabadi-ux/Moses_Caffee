@@ -6,19 +6,27 @@ import { useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 
 const ROUTE_NAMES = {
-  '/':           'דשבורד',
-  '/receipts':   'קבלות',
-  '/categories': 'קטגוריות',
-  '/suppliers':  'ספקים',
-  '/settings':   'הגדרות',
+  '/':                 'דשבורד',
+  '/receipts':         'קבלות',
+  '/categories':       'קטגוריות',
+  '/suppliers':        'ספקים',
+  '/suppliers/merge':  'איחוד ספקים',
+  '/reconcile':        'התאמות',
+  '/products':         'השוואת מוצרים',
+  '/events/quotes':    'הצעות מחיר לאירועים',
+  '/archive':          'ארכיון',
+  '/settings':         'הגדרות',
+  '/admin':            'ניהול',
 }
 
 function resolveScreen(pathname) {
   if (ROUTE_NAMES[pathname]) return ROUTE_NAMES[pathname]
+  // Longest prefix wins, so "/suppliers/merge" beats "/suppliers".
+  let best = null, bestLen = -1
   for (const [prefix, label] of Object.entries(ROUTE_NAMES)) {
-    if (prefix !== '/' && pathname.startsWith(prefix + '/')) return label
+    if (prefix !== '/' && pathname.startsWith(prefix + '/') && prefix.length > bestLen) { best = label; bestLen = prefix.length }
   }
-  return 'מסך לא ידוע'
+  return best || 'מסך לא ידוע'
 }
 
 export function useAIContext() {

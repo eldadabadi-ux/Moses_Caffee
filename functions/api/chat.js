@@ -26,9 +26,11 @@ import { getSupabaseUrl } from './_lib/extractReceipt.js'
 import { TOOL_DEFS, runTool, buildOrientation } from './_lib/botTools.js'
 import { loadFlags } from './_lib/flags.js'
 
-const CLAUDE_MODEL = 'claude-sonnet-4-6'
-const MAX_TOKENS   = 2048
-const MAX_ROUNDS   = 6     // tool-use turns before we stop and answer with what we have
+// Model is env-overridable (like GEMINI_MODEL) so it can be upgraded or rolled
+// back without a deploy; CHAT_MODEL in the Cloudflare env wins.
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6'
+const MAX_TOKENS   = 4096
+const MAX_ROUNDS   = 8     // tool-use turns before we stop and answer with what we have
 
 function corsHeaders(request, env) {
   const origin  = (request.headers.get('origin') || '').trim()
@@ -51,9 +53,10 @@ function buildSystemPrompt({ orientation, vatRate, showWithVat, bizName }) {
 
 יש לך גישה מלאה לכל נתוני העסק דרך כלים. אל תנחש ואל תסתמך על הסיכום שלמטה למספרים —
 **הפעל כלי** בכל פעם שנדרש נתון, סכום, השוואה או דו"ח:
-- query_receipts — מסמכים ספציפיים ושורות המוצרים שלהם
+- query_receipts — מסמכים ספציפיים ושורות המוצרים שלהם (כולל מספר מסמך, פירוט מע"מ וסטטוס התאמה)
 - compare_product_prices — מי זול יותר, לפי מחיר ליחידת בסיס
 - supplier_report — סיכום ספק לפי חודש / רבעון / שנה
+- supplier_info — אנשי קשר של ספק, תחומי אספקה, איותים וסיכום פעילות
 - price_changes — מוצרים שהמחיר שלהם עלה או ירד
 
 חוקים:
@@ -168,7 +171,7 @@ export const onRequestPost = wrapAuthErrors(async (context) => {
     let rounds = 0
     for (;;) {
       const data = await callAnthropic(context.env, {
-        model: CLAUDE_MODEL,
+        model: context.env.CHAT_MODEL || DEFAULT_CLAUDE_MODEL,
         max_tokens: MAX_TOKENS,
         tools,
         // The system block is identical request-to-request within a conversation,

@@ -34,7 +34,23 @@ const ils = (n) => `₪${(Math.round((Number(n) || 0) * 100) / 100).toLocaleStri
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
 const RECEIPT_FIELDS =
-  'id,vendor_name,supplier_id,receipt_date,amount,currency,category_text,items,doc_type,book,archived_at,created_at'
+  'id,vendor_name,supplier_id,receipt_date,amount,currency,category_text,items,doc_type,book,archived_at,created_at,' +
+  'doc_number,matched_invoice_id,reconciliation,amount_before_vat,vat_amount'
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+/**
+ * Server-side book predicate, matching bookOf()'s semantics exactly:
+ * a NULL book counts as the café, so the café filter must accept both. Pushing
+ * this into the query means the MAX_ROWS cap applies to the book we actually
+ * want — otherwise a tenant with >MAX_ROWS rows across both books could lose
+ * café rows to the cap before the client-side filter ever ran.
+ */
+function bookPredicate(book) {
+  if (book === 'all') return null
+  if (book === 'events') return 'book=eq.events'
+  return 'or=(book.is.null,book.eq.cafe)'   // café (default) — NULL included
+}
 
 // ── data access ──────────────────────────────────────────────────────────────
 
@@ -68,16 +84,34 @@ async function sbGet(url, key, path) {
 async function loadReceipts(ctx, { from, to, book } = {}) {
   const filters = [scopeOf(ctx)]
   // Only well-formed dates reach the query at all — anything else is dropped
-  // rather than passed through as a filter fragment.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(from || ''))) filters.push(`receipt_date=gte.${q(from)}`)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(to || ''))) filters.push(`receipt_date=lte.${q(to)}`)
+  // rather than passed through as a filter fragment. A malformed date is reported
+  // back (badDates) so the tool can SAY it ignored the filter, instead of
+  // silently answering over all time.
+  const badDates = []
+  if (from != null && String(from).trim()) {
+    if (DATE_RE.test(String(from))) filters.push(`receipt_date=gte.${q(from)}`)
+    else badDates.push(String(from))
+  }
+  if (to != null && String(to).trim()) {
+    if (DATE_RE.test(String(to))) filters.push(`receipt_date=lte.${q(to)}`)
+    else badDates.push(String(to))
+  }
+  const wanted = book === 'all' ? null : (book === 'events' ? 'events' : DEFAULT_BOOK)
+  const bookPred = bookPredicate(book)
+  if (bookPred) filters.push(bookPred)
   const rows = await sbGet(ctx.url, ctx.key,
     `receipts?${filters.join('&')}&select=${RECEIPT_FIELDS}&order=receipt_date.desc.nullslast&limit=${MAX_ROWS + 1}`)
   const truncated = rows.length > MAX_ROWS
-  const wanted = book === 'all' ? null : (book === 'events' ? 'events' : DEFAULT_BOOK)
+  // Keep the client-side book filter too: a belt-and-suspenders guard, and the
+  // only line that scopes the book in tests that stub the REST layer.
   const scoped = wanted ? rows.filter(r => bookOf(r) === wanted) : rows
-  return { rows: truncated ? scoped.slice(0, MAX_ROWS) : scoped, truncated, book: wanted }
+  return { rows: truncated ? scoped.slice(0, MAX_ROWS) : scoped, truncated, book: wanted, badDates }
 }
+
+const dateNote = (badDates) =>
+  badDates && badDates.length
+    ? `התעלמתי מתאריך לא תקין: ${badDates.join(', ')} (נדרש פורמט YYYY-MM-DD)`
+    : undefined
 
 /** Canonical supplier catalogue, id → name. */
 async function loadSuppliers(ctx) {
@@ -92,6 +126,35 @@ async function loadSuppliers(ctx) {
 /** Display name for a receipt's supplier — canonical when linked. */
 const supplierNameOf = (r, byId) =>
   (r.supplier_id && byId[r.supplier_id]) || (r.vendor_name || '').trim() || 'לא ידוע'
+
+/**
+ * Reconciliation state of a document, in words the model can report directly
+ * (client request #3). A summary invoice is matched/rounding/mismatch once
+ * confirmed, otherwise pending; a delivery note is matched to an invoice or open;
+ * a plain receipt has no reconciliation dimension.
+ */
+function reconStatusOf(r) {
+  const type = docTypeOf(r)
+  if (type === 'summary_invoice') {
+    const st = r.reconciliation?.status
+    if (st === 'matched' || st === 'rounding') return 'מותאמת'
+    if (st === 'mismatch') return 'מותאמת עם פער'
+    return 'ממתינה להתאמה'
+  }
+  if (type === 'delivery_note') return r.matched_invoice_id ? 'מותאמת לחשבונית' : 'פתוחה (ללא חשבונית מרכזת)'
+  return null
+}
+
+/** Printed VAT breakdown of a document when the scan captured one. */
+function vatOf(r) {
+  const before = num(r.amount_before_vat), vat = num(r.vat_amount)
+  if (before == null && vat == null) return null
+  return {
+    before_vat: before != null ? ils(before) : null,
+    vat: vat != null ? ils(vat) : null,
+    total: ils(r.amount),
+  }
+}
 
 /**
  * Resolve a user-typed supplier name to the canonical rows it covers.
@@ -232,6 +295,20 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    name: 'supplier_info',
+    description:
+      'פרטי ספק: אנשי קשר (טלפון / אימייל / וואטסאפ), תחומי אספקה, כל האיותים שבהם הופיע, ' +
+      'וסיכום פעילות (מספר מסמכים, סה"כ הוצאה, קנייה אחרונה). השאר ריק לרשימת כל הספקים. ' +
+      'השתמש לשאלות "מה הטלפון של X", "ממי קונים ירקות", "מתי קנינו לאחרונה מ-X".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        supplier: { type: 'string', description: 'שם ספק (גם איות חלקי); ריק = כל הספקים' },
+        book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ספר החשבונות — cafe (ברירת מחדל) / events / all' },
+      },
+    },
+  },
 ]
 
 // ── executors ────────────────────────────────────────────────────────────────
@@ -259,13 +336,17 @@ async function toolQueryReceipts(ctx, args) {
     book: bookLabel(loaded.book) || 'הכל',
     found: matched.length,
     total_spend: ils(total),
-    note: truncated ? `הוצגו ${MAX_ROWS} המסמכים האחרונים בלבד` : undefined,
+    note: [truncated ? `הוצגו ${MAX_ROWS} המסמכים האחרונים בלבד` : null, dateNote(loaded.badDates)]
+      .filter(Boolean).join(' · ') || undefined,
     showing: Math.min(matched.length, limit),
     receipts: matched.slice(0, limit).map(r => ({
       date: r.receipt_date || '(חסר תאריך)',
       supplier: supplierNameOf(r, byId),
       amount: ils(r.amount),
       type: docTypeOf(r),
+      doc_number: r.doc_number || undefined,
+      reconciliation: reconStatusOf(r) || undefined,
+      vat: vatOf(r) || undefined,
       category: r.category_text || '',
       archived: !!r.archived_at,
       items: args.include_items
@@ -425,11 +506,66 @@ async function toolPriceChanges(ctx, args) {
   }
 }
 
+async function toolSupplierInfo(ctx, args) {
+  const loaded = await loadReceipts(ctx, args)
+  const { rows } = loaded
+  const suppliers = await loadSuppliers(ctx)
+  const byId = Object.fromEntries(suppliers.map(s => [s.id, s.name]))
+
+  // Stats accumulated from this book's receipts, keyed by canonical name.
+  const stats = {}
+  for (const r of rows) {
+    if (!isExpenseDoc(r)) continue
+    const name = supplierNameOf(r, byId)
+    const s = (stats[name] ||= { name, documents: 0, total: 0, first: '', last: '', spellings: new Set(), categories: {} })
+    const date = r.receipt_date || (r.created_at || '').slice(0, 10)
+    s.documents++; s.total += num(r.amount) || 0
+    if (date) { if (!s.first || date < s.first) s.first = date; if (date > s.last) s.last = date }
+    const raw = (r.vendor_name || '').trim(); if (raw) s.spellings.add(raw)
+    const cat = (r.category_text || 'שונות').trim(); s.categories[cat] = (s.categories[cat] || 0) + (num(r.amount) || 0)
+  }
+  const catalogByName = Object.fromEntries(suppliers.map(s => [s.name, s]))
+  const topCats = (obj) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    .map(([name, v]) => ({ name, total: ils(v) }))
+
+  const card = (name) => {
+    const s = stats[name] || { documents: 0, total: 0, first: '', last: '', spellings: new Set(), categories: {} }
+    const cat = catalogByName[name] || {}
+    return {
+      supplier: name,
+      contact: { phone: cat.phone || null, email: cat.email || null, whatsapp: cat.whatsapp || null },
+      supplies: cat.supplies || null,
+      spellings: [...s.spellings].filter(v => v !== name),
+      documents: s.documents,
+      total_spend: ils(s.total),
+      first_purchase: s.first || null,
+      last_purchase: s.last || null,
+      top_categories: topCats(s.categories),
+    }
+  }
+
+  if (args.supplier) {
+    const filter = resolveSupplierFilter(args.supplier, suppliers, rows)
+    if (!filter) return { note: `לא נמצא ספק בשם "${args.supplier}"` }
+    return { book: bookLabel(loaded.book) || 'הכל', ...card(filter.name) }
+  }
+
+  // No supplier → a directory: every catalogued supplier + anyone seen only on
+  // receipts, ranked by spend, capped.
+  const names = new Set([...suppliers.map(s => s.name), ...Object.keys(stats)])
+  const list = [...names]
+    .map(card)
+    .sort((a, b) => (stats[b.supplier]?.total || 0) - (stats[a.supplier]?.total || 0))
+    .slice(0, MAX_LIST)
+  return { book: bookLabel(loaded.book) || 'הכל', count: names.size, showing: list.length, suppliers: list }
+}
+
 const EXECUTORS = {
   query_receipts: toolQueryReceipts,
   compare_product_prices: toolComparePrices,
   supplier_report: toolSupplierReport,
   price_changes: toolPriceChanges,
+  supplier_info: toolSupplierInfo,
 }
 
 /**
