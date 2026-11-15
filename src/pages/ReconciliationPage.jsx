@@ -314,8 +314,8 @@ export default function ReconciliationPage() {
     <div style={{ display:'flex', flexDirection:'column', gap:'16px' }} dir="rtl">
       {/* Header + month picker */}
       <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-        <h1 style={{ margin:0, fontSize: isMobile ? 20 : 23, fontWeight:800, color:'var(--text)', display:'flex', alignItems:'center', gap:9 }}>
-          <ArrowLeftRight size={22} style={{ color:'var(--accent)' }} /> התאמות
+        <h1 style={{ margin:0, fontSize: isMobile ? 23 : 26, fontWeight:700, color:'var(--text)', display:'flex', alignItems:'center', gap:8 }}>
+          <ArrowLeftRight size={24} style={{ color:'var(--accent)' }} /> התאמות
         </h1>
         <div style={{ marginInlineStart:'auto', display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
           <div style={{ display:'flex', alignItems:'center', gap:4, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:10, padding:'4px 6px' }}>

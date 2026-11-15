@@ -30,25 +30,60 @@ function SpreadBadge({ pct }) {
   )
 }
 
+// A small per-product column chart — one column per supplier, height ∝ the real
+// ₪/base-unit, so the price gap is visible at a glance (client request 15.11.26).
+function SupplierPriceBars({ suppliers, cheapest, unitLabel }) {
+  const shown = suppliers.slice(0, 6)
+  const max = Math.max(...shown.map(s => s.price), 0)
+  const dearest = Math.max(...suppliers.map(s => s.price), 0)
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, background: 'var(--panel-2)', padding: '10px 10px 8px', alignSelf: 'stretch' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-mute)', marginBottom: 8 }}>
+        מחיר ל{unitLabel} לפי ספק{suppliers.length > shown.length ? ` (${shown.length} מתוך ${suppliers.length})` : ''}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-around', gap: 8 }}>
+        {shown.map(s => {
+          const isCheap = s.vendor === cheapest.vendor
+          const isDear = suppliers.length > 1 && s.price === dearest && !isCheap
+          const color = isCheap ? '#16a34a' : isDear ? '#dc2626' : 'var(--accent)'
+          const h = max > 0 ? Math.max(10, Math.round((s.price / max) * 110)) : 10
+          return (
+            <div key={s.vendor} title={`${s.vendor} — ${fmtUnit(s.price, unitLabel)}`}
+              style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                ₪{Number(s.price).toLocaleString('he-IL', { maximumFractionDigits: 2 })}
+              </span>
+              <div style={{ width: '68%', maxWidth: 38, height: h, background: color, borderRadius: '6px 6px 2px 2px', opacity: isCheap || isDear ? 1 : 0.7 }} />
+              <span style={{ fontSize: 11, color: 'var(--text-dim)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'center' }}>{s.vendor}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ProductCard({ product }) {
   const [open, setOpen] = useState(false)
+  const isMobile = window.innerWidth < 768
   const { label, unitLabel, suppliers, cheapest, spreadPct } = product
   return (
     <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 'var(--r-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+      {/* The summary facts sit right next to the product name (the old layout
+          pushed them to the far edge, leaving a dead gap — QA 15.11.26); only
+          the chevron stays at the end. */}
       <button onClick={() => setOpen(o => !o)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '13px 16px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right' }}>
-        <span style={{ fontWeight: 700, fontSize: 15.5, color: 'var(--text)' }}>{label}</span>
-        <span style={{ fontSize: 12.5, color: 'var(--text-mute)' }}>{suppliers.length} ספקים</span>
-        <span style={{ marginInlineStart: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 13.5, color: 'var(--text-dim)' }}>
-            הזול: <strong style={{ color: '#16a34a' }}>{fmtUnit(cheapest.price, unitLabel)}</strong>
-          </span>
-          <SpreadBadge pct={spreadPct} />
-          <ChevronLeft size={16} style={{ color: 'var(--text-mute)', transform: open ? 'rotate(-90deg)' : 'none', transition: 'transform 160ms' }} />
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-main)', textAlign: 'right', minWidth: 0 }}>
+        <span style={{ fontWeight: 700, fontSize: 15.5, color: 'var(--text)', flexShrink: 0 }}>{label}</span>
+        <span style={{ fontSize: 12.5, color: 'var(--text-mute)', flexShrink: 0 }}>{suppliers.length} ספקים</span>
+        <span style={{ fontSize: 13.5, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+          הזול: <strong style={{ color: '#16a34a' }}>{fmtUnit(cheapest.price, unitLabel)}</strong>
         </span>
+        <SpreadBadge pct={spreadPct} />
+        <ChevronLeft size={16} style={{ marginInlineStart: 'auto', flexShrink: 0, color: 'var(--text-mute)', transform: open ? 'rotate(-90deg)' : 'none', transition: 'transform 160ms' }} />
       </button>
       {open && (
-        <div style={{ padding: '0 16px 14px' }}>
+        <div style={{ padding: '0 16px 14px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.4fr) minmax(220px, 1fr)', gap: 12, alignItems: 'start' }}>
           <div style={{ background: 'var(--panel-2)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
             {suppliers.map((s, i) => {
               const isCheap = s.vendor === cheapest.vendor
@@ -59,9 +94,9 @@ function ProductCard({ product }) {
                   background: isCheap ? '#f0fdf4' : 'transparent' }}>
                   {isCheap ? <Trophy size={15} style={{ color: '#16a34a', flexShrink: 0 }} />
                            : <span style={{ width: 15, flexShrink: 0 }} />}
-                  <span style={{ fontWeight: isCheap ? 700 : 600, fontSize: 14, color: 'var(--text)' }}>{s.vendor}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-mute)' }}>· {s.count} רכישות · {fmtDate(s.lastDate)}</span>
-                  <span style={{ marginInlineStart: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontWeight: isCheap ? 700 : 600, fontSize: 14, color: 'var(--text)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.vendor}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-mute)', whiteSpace: 'nowrap' }}>· {s.count} רכישות · {fmtDate(s.lastDate)}</span>
+                  <span style={{ marginInlineStart: 'auto', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                     {overPct > 0 && <span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>+{overPct}%</span>}
                     <span style={{ fontSize: 14.5, fontWeight: 800, color: isCheap ? '#16a34a' : 'var(--text)' }}>{fmtUnit(s.price, unitLabel)}</span>
                   </span>
@@ -69,6 +104,7 @@ function ProductCard({ product }) {
               )
             })}
           </div>
+          <SupplierPriceBars suppliers={suppliers} cheapest={cheapest} unitLabel={unitLabel} />
         </div>
       )}
     </div>
@@ -118,8 +154,8 @@ export default function ProductComparePage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }} dir="rtl">
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0, fontSize: isMobile ? 20 : 23, fontWeight: 800, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Scale size={22} style={{ color: 'var(--accent)' }} /> השוואת מוצרים
+        <h1 style={{ margin: 0, fontSize: isMobile ? 23 : 26, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Scale size={24} style={{ color: 'var(--accent)' }} /> השוואת מוצרים
         </h1>
         {model.length > 0 && (
           <button onClick={exportCsv}

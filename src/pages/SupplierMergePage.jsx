@@ -186,7 +186,7 @@ export default function SupplierMergePage() {
   const junk = data.clusters.filter(c => c.junk)
 
   return (
-    <div className="animate-fade-in" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 96 }}>
+    <div className="animate-fade-in" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
       {/* Header */}
       <div>
@@ -201,6 +201,25 @@ export default function SupplierMergePage() {
           הסריקה כותבת את שם הספק מחדש בכל קבלה, ולכן אותו ספק מופיע בכמה איותים.
           כאן מאחדים אותם לספק אחד. שם הקבלה עצמו לא משתנה — רק נוצר קישור, וניתן להריץ שוב.
         </p>
+      </div>
+
+      {/* Apply bar — at the TOP and sticky (client request 15.11.26: with many
+          suppliers the button used to sit far below the fold), so "אשר איחוד"
+          is always one glance away no matter how long the cluster list gets. */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 50, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 'var(--r-card)', padding: '10px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, boxShadow: 'var(--shadow-card)' }}>
+        <span style={{ fontSize: 14, color: 'var(--text-mute)' }}>
+          {stats.merges} איחודים · {stats.names} שמות → {stats.groups} ספקים
+        </span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={load} disabled={busy} title="רענן"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 12px', borderRadius: 'var(--r-btn)', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-mute)', cursor: busy ? 'default' : 'pointer', fontFamily: 'var(--font-main)', fontSize: 14 }}>
+            <RefreshCw size={15} />
+          </button>
+          <button onClick={apply} disabled={busy || !pending.length}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 'var(--r-btn)', border: 'none', background: busy || !pending.length ? 'var(--border)' : 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 15, cursor: busy || !pending.length ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
+            <Check size={16} /> {busy ? 'מאחד…' : 'אשר איחוד'}
+          </button>
+        </div>
       </div>
 
       {/* Summary */}
@@ -370,22 +389,6 @@ export default function SupplierMergePage() {
         </div>
       )}
 
-      {/* Sticky apply bar */}
-      <div style={{ position: 'fixed', bottom: 0, insetInlineStart: 0, insetInlineEnd: 0, zIndex: 50, background: 'var(--panel)', borderTop: '1px solid var(--border)', padding: '12px 16px calc(12px + env(safe-area-inset-bottom))', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, boxShadow: '0 -4px 16px rgba(0,0,0,0.08)' }}>
-        <span style={{ fontSize: 14, color: 'var(--text-mute)' }}>
-          {stats.merges} איחודים · {stats.names} שמות → {stats.groups} ספקים
-        </span>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={load} disabled={busy} title="רענן"
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 12px', borderRadius: 'var(--r-btn)', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-mute)', cursor: busy ? 'default' : 'pointer', fontFamily: 'var(--font-main)', fontSize: 14 }}>
-            <RefreshCw size={15} />
-          </button>
-          <button onClick={apply} disabled={busy || !pending.length}
-            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 'var(--r-btn)', border: 'none', background: busy || !pending.length ? 'var(--border)' : 'var(--accent)', color: '#fff', fontWeight: 700, fontSize: 15, cursor: busy || !pending.length ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
-            <Check size={16} /> {busy ? 'מאחד…' : 'אשר איחוד'}
-          </button>
-        </div>
-      </div>
     </div>
   )
 }

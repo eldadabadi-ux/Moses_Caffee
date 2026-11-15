@@ -14,7 +14,7 @@ import InstallBanner from './components/InstallBanner'
 import DailyBackup from './components/DailyBackup'
 import AIChatWidget from './components/AIChatWidget'
 import CookieConsent from './components/CookieConsent'
-import Sidebar from './components/Sidebar'
+import Sidebar, { SidebarRail } from './components/Sidebar'
 import MfaGate from './components/MfaGate'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
 
@@ -39,6 +39,7 @@ const DashboardPage   = lazy(() => import('./pages/DashboardPage'))
 const SettingsPage    = lazy(() => import('./pages/SettingsPage'))
 const SuppliersPage   = lazy(() => import('./pages/SuppliersPage'))
 const SupplierMergePage = lazy(() => import('./pages/SupplierMergePage'))
+const SupplierComparePage = lazy(() => import('./pages/SupplierComparePage'))
 const SupplierDetailPage = lazy(() => import('./pages/SupplierDetailPage'))
 const EventQuotesPage   = lazy(() => import('./pages/EventQuotesPage'))
 const ArchivePage     = lazy(() => import('./pages/ArchivePage'))
@@ -272,6 +273,9 @@ function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try { return localStorage.getItem('moses_sidebar_open') !== '0' } catch { return true }
   })
+  // Which section the expanded sidebar should open with — set by clicking a
+  // rail icon while the sidebar is collapsed (client request 15.11.26).
+  const [railOpenId, setRailOpenId] = useState(null)
   function toggleSidebar() {
     setSidebarOpen(o => { const n = !o; try { localStorage.setItem('moses_sidebar_open', n ? '1' : '0') } catch {} ; return n })
   }
@@ -283,6 +287,7 @@ function AppShell() {
     import('./pages/CategoriesPage'); import('./pages/SuppliersPage')
     import('./pages/SettingsPage'); import('./pages/AdminPage')
     import('./pages/ArchivePage'); import('./pages/ReconciliationPage')
+    import('./pages/SupplierComparePage')
   }, [])
 
   // Warm the data cache for the other tabs while on the home page, so the first
@@ -303,13 +308,11 @@ function AppShell() {
   return (
     <div style={{ minHeight: '100dvh', background: 'var(--bg)' }}>
       {/* Desktop: fixed sidebar (right, RTL), collapsible. Mobile: slim header + drawer. */}
-      {desktopSidebar && <Sidebar onSignOut={handleSignOut} onCollapse={toggleSidebar} />}
-      {/* Desktop: floating "open" button when the sidebar is collapsed */}
+      {desktopSidebar && <Sidebar onSignOut={handleSignOut} onCollapse={toggleSidebar} initialOpenId={railOpenId} />}
+      {/* Desktop: collapsed state shows an icon rail on the right — clicking any
+          icon reopens the full sidebar with that section expanded. */}
       {!isMobile && !sidebarOpen && (
-        <button onClick={toggleSidebar} aria-label="פתח תפריט"
-          style={{ position: 'fixed', top: 14, right: 14, zIndex: 120, display: 'flex', alignItems: 'center', gap: 7, padding: '9px 14px', borderRadius: 10, background: 'var(--panel)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-card)', color: 'var(--text)', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
-          <Menu size={18} /> תפריט
-        </button>
+        <SidebarRail onExpand={(id) => { setRailOpenId(id || null); toggleSidebar() }} />
       )}
       {isMobile && <MobileHeader onMenu={() => setDrawerOpen(true)} />}
       {isMobile && drawerOpen && (
@@ -322,7 +325,8 @@ function AppShell() {
       {/* Page content */}
       <main style={{
         padding: isMobile ? '16px 14px' : '24px 28px',
-        maxWidth: displayLocation.pathname === '/categories' ? '1320px' : displayLocation.pathname === '/' ? '1100px' : '900px',
+        maxWidth: displayLocation.pathname === '/categories' ? '1320px'
+          : (displayLocation.pathname === '/' || displayLocation.pathname === '/compare') ? '1100px' : '900px',
         margin: '0 auto',
         paddingBottom: isMobile ? bottomPad : '32px',
       }}>
@@ -335,6 +339,7 @@ function AppShell() {
             <Route path="/categories" element={<CategoriesPage />} />
             <Route path="/suppliers"  element={<SuppliersPage />} />
             <Route path="/suppliers/merge" element={<SupplierMergePage />} />
+            <Route path="/compare"    element={<SupplierComparePage />} />
             <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
             <Route path="/events/quotes" element={<FlagGate flag="events_book"><EventQuotesPage /></FlagGate>} />
             <Route path="/reconcile"  element={<FlagGate flag="reconciliation"><ReconciliationPage /></FlagGate>} />

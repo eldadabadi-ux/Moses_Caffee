@@ -487,8 +487,12 @@ export default function CategoriesPage() {
         </div>
       )}
 
-      <div style={{ display:'flex', gap:'20px', alignItems:'flex-start' }}>
-        <div style={{ flex:1, minWidth:0, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-hero)', boxShadow:'var(--shadow-card)', overflow:'hidden' }}>
+      {/* The tree is capped at a readable width (the old full-width table left a
+          huge dead gap between the name and the actions — QA 15.11.26), and the
+          insight panel takes the remaining space on the LEFT so its charts and
+          tables sit beside the tree instead of below the fold. */}
+      <div style={{ display:'flex', gap:'20px', alignItems:'flex-start', flexWrap:'wrap' }}>
+        <div style={{ flex: isMobile ? '1 1 100%' : '0 1 600px', minWidth: isMobile ? 0 : 360, background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-hero)', boxShadow:'var(--shadow-card)', overflow:'hidden' }}>
         {l1.length === 0 ? (
           <div style={{ padding:'48px 24px', textAlign:'center' }}>
             <Tag size={32} style={{ color:'var(--text-mute)', margin:'0 auto 12px', display:'block' }} />
@@ -505,9 +509,10 @@ export default function CategoriesPage() {
           </>
         )}
         </div>
-        {/* Desktop: sticky insight panel beside the tree */}
+        {/* Desktop: sticky insight panel beside the tree — takes all the width
+            the narrowed tree freed up */}
         {!isMobile && (
-          <aside style={{ width:400, flexShrink:0, position:'sticky', top:20, maxHeight:'calc(100dvh - 40px)', overflowY:'auto', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-hero)', boxShadow:'var(--shadow-card)', padding:'16px' }}>
+          <aside style={{ flex:1, minWidth:400, position:'sticky', top:20, maxHeight:'calc(100dvh - 40px)', overflowY:'auto', background:'var(--panel)', border:'1px solid var(--border)', borderRadius:'var(--r-hero)', boxShadow:'var(--shadow-card)', padding:'16px' }}>
             <CategoryInsightPanel node={selectedNode} path={selectedNode ? nodePath(categories, selectedNode) : []} flatItems={flatItems} onJumpVendor={jumpVendor} onJumpReceipts={jumpReceipts} />
           </aside>
         )}

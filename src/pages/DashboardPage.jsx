@@ -1,20 +1,17 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
-import { getCached, setCached, hasCached } from '../lib/pageCache'
+import { getCached, hasCached } from '../lib/pageCache'
+import { loadYearReceipts, loadDashMeta } from '../lib/dashboardData'
 import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X, Store } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
 import CategoryDrilldown from '../components/CategoryDrilldown'
 import ChartTypeToggle from '../components/charts/ChartTypeToggle'
-import MultiSelect from '../components/MultiSelect'
-import ProductCompareChart from '../components/charts/ProductCompareChart'
+import CheckDropdown from '../components/CheckDropdown'
 import ShekelSign from '../components/icons/ShekelSign'
-import { flattenItems, vendorComposition } from '../lib/itemAggregation'
-import { isExpenseDoc } from '../lib/docTypes'
-import { isCafeBook } from '../lib/books'
+import { flattenItems } from '../lib/itemAggregation'
 
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
@@ -80,190 +77,79 @@ export default function DashboardPage() {
   // Amount of a receipt respecting the with/without-VAT display preference
   const amt = (r) => displayAmount(parseFloat(r.amount) || 0, r.amount_before_vat)
 
-  const [receipts,    setReceipts]    = useState(() => getCached('dash:' + thisYear)?.receipts || [])
-  const [prevReceipts,setPrevReceipts]= useState(() => getCached('dash:' + thisYear)?.prevReceipts || [])
-  const [categories,  setCategories]  = useState(() => getCached('dash:' + thisYear)?.categories || [])
-  const [supplierRows, setSupplierRows] = useState(() => getCached('dash:' + thisYear)?.suppliers || [])
-  const [loading,     setLoading]     = useState(() => !hasCached('dash:' + thisYear))
-  const [year,        setYear]        = useState(thisYear)
-  const [compareYear, setCompareYear] = useState(null)
-  const [filterCat,   setFilterCat]   = useState(null)  // L1 category name filter
-  const [filterVendor, setFilterVendor] = useState(null) // supplier filter (client request #7)
-  const [distMode,    setDistMode]    = useState('cat') // distribution donut: 'cat' | 'vendor'
-  const [selVendor,   setSelVendor]   = useState(null)  // highlighted vendor slice (local)
-  const [selCat,      setSelCat]      = useState(null)  // highlighted category slice (local — NO filtering)
-  const [availYears,  setAvailYears]  = useState(() => getCached('dash:' + thisYear)?.availYears || [thisYear])
-  const [vendorA,     setVendorA]     = useState('')    // vendor comparison
-  const [vendorB,     setVendorB]     = useState('')
-  const [selProdsA,   setSelProdsA]   = useState([])    // products picked for vendor A
-  const [selProdsB,   setSelProdsB]   = useState([])    // products picked for vendor B
-  const [chartType,   setChartType]   = useState('bar') // 'bar' | 'line' for time charts
+  // The top filters select SEVERAL values at once (client request 15.11.26):
+  // years, categories and suppliers are each a checkbox multi-select, and the
+  // combined selection drives the WHOLE dashboard — KPIs, every chart, drill-down.
+  const [years,         setYears]         = useState([thisYear])
+  const [filterCats,    setFilterCats]    = useState([])   // L1 category names
+  const [filterVendors, setFilterVendors] = useState([])   // keys: supplier_id or "name:<raw>"
+
+  const [receipts,       setReceipts]       = useState(() => getCached('dashyr:' + thisYear) || [])
+  const [prevReceipts,   setPrevReceipts]   = useState([])  // the single selected year − 1, for YoY
+  const [compareReceipts, setCompareReceipts] = useState([])
+  const [categories,     setCategories]     = useState(() => getCached('dash:meta')?.categories || [])
+  const [supplierRows,   setSupplierRows]   = useState(() => getCached('dash:meta')?.suppliers || [])
+  const [loading,        setLoading]        = useState(() => !hasCached('dashyr:' + thisYear))
+  const [compareYear,    setCompareYear]    = useState(null)
+  const [distMode,       setDistMode]       = useState('cat') // distribution donut: 'cat' | 'vendor'
+  const [selVendor,      setSelVendor]      = useState(null)  // highlighted vendor slice (local)
+  const [selCat,         setSelCat]         = useState(null)  // highlighted category slice (local — NO filtering)
+  const [availYears,     setAvailYears]     = useState(() => getCached('dash:meta')?.availYears || [thisYear])
+  const [chartType,      setChartType]      = useState('bar') // 'bar' | 'line' for time charts
 
   // ── Load data ────────────────────────────────────────────────────────────────
+  // One cached fetch per calendar year (shared with SupplierComparePage), so a
+  // multi-year selection combines already-loaded years instantly and only
+  // fetches the missing ones.
+  const fetchYearReceipts = useCallback((y) => loadYearReceipts(user.id, y), [user?.id])
+
+  const yearsKey = useMemo(() => [...years].sort((a, b) => a - b).join(','), [years])
+
   useEffect(() => {
     if (!user) return
+    let alive = true
     async function load() {
-      // Show the year's cached data immediately (instant year switch); only show
-      // the spinner when there's truly nothing cached for this year yet.
-      const cached = getCached('dash:' + year)
-      if (cached) {
-        setReceipts(cached.receipts || [])
-        setPrevReceipts(cached.prevReceipts || [])
-        setCategories(cached.categories || [])
-        setAvailYears(cached.availYears || [year])
-        setLoading(false)
-      } else {
-        setLoading(true)
-      }
+      const allCached = years.every(y => hasCached('dashyr:' + y)) && hasCached('dash:meta')
+      if (!allCached && receipts.length === 0) setLoading(true)
       try {
-        // Current year (include items for drill-down). doc_type is selected so
-        // summary invoices (חשבונית מרכזת) can be EXCLUDED from all totals —
-        // they aggregate delivery notes that are already counted. Pre-migration
-        // the column doesn't exist → retry without it.
-        let { data: recs, error: recsErr } = await supabase
-          .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type, book, archived_at')
-          .eq('user_id', user.id)
-          .gte('receipt_date', `${year}-01-01`)
-          .lte('receipt_date', `${year}-12-31`)
-          .order('receipt_date')
-        if (recsErr) {
-          ;({ data: recs } = await supabase
-            .from('receipts')
-            .select('id, amount, receipt_date, category_id, category_text, vendor_name, items')
-            .eq('user_id', user.id)
-            .gte('receipt_date', `${year}-01-01`)
-            .lte('receipt_date', `${year}-12-31`)
-            .order('receipt_date'))
-        }
-        // Catering events are a separate book — the café dashboard never shows them.
-        recs = (recs || []).filter(r => isExpenseDoc(r) && isCafeBook(r))
+        const perYear = await Promise.all(years.map(fetchYearReceipts))
+        const combined = perYear.flat()
+          .sort((a, b) => (a.receipt_date || '').localeCompare(b.receipt_date || ''))
 
-        // Previous year (for YoY)
-        let { data: prevRecs, error: prevErr } = await supabase
-          .from('receipts')
-          .select('id, amount, receipt_date, category_id, category_text, vendor_name, supplier_id, doc_type, book, archived_at')
-          .eq('user_id', user.id)
-          .gte('receipt_date', `${year - 1}-01-01`)
-          .lte('receipt_date', `${year - 1}-12-31`)
-        if (prevErr) {
-          ;({ data: prevRecs } = await supabase
-            .from('receipts')
-            .select('id, amount, receipt_date, category_id, category_text, vendor_name')
-            .eq('user_id', user.id)
-            .gte('receipt_date', `${year - 1}-01-01`)
-            .lte('receipt_date', `${year - 1}-12-31`))
-        }
-        prevRecs = (prevRecs || []).filter(r => isExpenseDoc(r) && isCafeBook(r))
+        const meta = await loadDashMeta(user.id, thisYear)
 
-        // Categories
-        const { data: cats } = await supabase
-          .from('categories')
-          .select('id, name, parent_id, level, sort_order')
-          .order('level').order('sort_order')
+        // YoY needs the preceding year — only meaningful for a single-year view.
+        const prev = years.length === 1 ? await fetchYearReceipts(years[0] - 1) : []
 
-        // Canonical supplier names — a merged supplier must appear once on the
-        // dashboard, not once per OCR spelling.
-        const { data: sups } = await supabase
-          .from('suppliers').select('id, name').eq('user_id', user.id)
-
-        // Available years
-        const { data: allDates } = await supabase
-          .from('receipts')
-          .select('receipt_date')
-          .eq('user_id', user.id)
-          .not('receipt_date', 'is', null)
-        const years = [...new Set((allDates || []).map(r => parseInt(r.receipt_date.slice(0, 4))))].filter(Boolean).sort((a, b) => b - a)
-        if (!years.includes(year)) years.unshift(year)
-
-        setReceipts(recs || [])
-        setPrevReceipts(prevRecs || [])
-        setCategories(cats || [])
-        setSupplierRows(sups || [])
-        setAvailYears(years.length ? years : [thisYear])
-        setCached('dash:' + year, {
-          receipts: recs || [], prevReceipts: prevRecs || [],
-          categories: cats || [], suppliers: sups || [], availYears: years.length ? years : [thisYear],
-        })
+        if (!alive) return
+        setReceipts(combined)
+        setPrevReceipts(prev)
+        setCategories(meta.categories)
+        setSupplierRows(meta.suppliers)
+        setAvailYears([...new Set([...meta.availYears, ...years])].sort((a, b) => b - a))
       } catch (err) {
         console.error('Dashboard load error:', err)
-      } finally { setLoading(false) }
+      } finally { if (alive) setLoading(false) }
     }
     load()
-  }, [user, year])
+    return () => { alive = false }
+  }, [user, yearsKey, fetchYearReceipts])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Active receipts (category + supplier filters) ────────────────────────────
-  // The supplier filter matches on the canonical supplier_id once a receipt has
-  // been linked, and on the scanned name for rows that predate the merge.
-  const active = useMemo(() => receipts.filter(r => {
-    if (filterCat && r.category_text !== filterCat) return false
-    if (filterVendor) {
-      const linked = filterVendor.id && r.supplier_id === filterVendor.id
-      const byName = !r.supplier_id && (r.vendor_name || '').trim() === filterVendor.name
-      if (!linked && !byName) return false
-    }
-    return true
-  }), [receipts, filterCat, filterVendor])
+  // Year-against-year overlay is a single-year tool — drop it when several
+  // years are already combined on screen.
+  useEffect(() => { if (years.length > 1 && compareYear) setCompareYear(null) }, [years, compareYear])
+  useEffect(() => {
+    if (!user || !compareYear) { setCompareReceipts([]); return }
+    let alive = true
+    fetchYearReceipts(compareYear).then(r => { if (alive) setCompareReceipts(r) })
+    return () => { alive = false }
+  }, [user, compareYear, fetchYearReceipts])
 
-  const total     = useMemo(() => active.reduce((s, r) => s + amt(r), 0), [active, settings.showWithVat])
-  // The comparison year must obey the SAME filters as the current one. Comparing
-  // one filtered supplier's ₪12k against the whole previous year's ₪400k
-  // rendered "-97% מהשנה הקודמת" next to a correctly filtered number.
-  const activePrev = useMemo(() => prevReceipts.filter(r => {
-    if (filterCat && r.category_text !== filterCat) return false
-    if (filterVendor) {
-      const linked = filterVendor.id && r.supplier_id === filterVendor.id
-      const byName = !r.supplier_id && (r.vendor_name || '').trim() === filterVendor.name
-      if (!linked && !byName) return false
-    }
-    return true
-  }), [prevReceipts, filterCat, filterVendor])
-  const totalPrev = useMemo(() => activePrev.reduce((s, r) => s + amt(r), 0), [activePrev, settings.showWithVat])
-  const yoy       = totalPrev > 0 ? ((total - totalPrev) / totalPrev) * 100 : null
-
-  // Flattened line-items for the drill-down (item-level L1→L2→L3 over time)
-  const flatItems = useMemo(() => flattenItems(active), [active])
-
-  const avgMonthly = useMemo(() => {
-    const months = new Set(active.map(r => r.receipt_date?.slice(0, 7)).filter(Boolean))
-    return months.size > 0 ? total / months.size : 0
-  }, [active, total])
-
-  // ── Monthly aggregation ───────────────────────────────────────────────────────
-  // The monthly overview is INDEPENDENT of the category-distribution filter
-  // (filterCat) — it always shows the whole year's monthly spend. Selecting a
-  // category in the donut below must not reshape this chart.
-  const monthlyData = useMemo(() => {
-    const map = {}
-    receipts.forEach(r => {
-      if (!r.receipt_date) return
-      const m = parseInt(r.receipt_date.slice(5, 7))
-      if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
-      map[m].total += amt(r)
-      map[m].count += 1
-    })
-    return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
-  }, [receipts, settings.showWithVat])
-
-  const prevMonthlyData = useMemo(() => {
-    if (!compareYear) return null
-    const src = compareYear === year - 1 ? prevReceipts : []
-    const map = {}
-    src.forEach(r => {
-      if (!r.receipt_date) return
-      const m = parseInt(r.receipt_date.slice(5, 7))
-      if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
-      map[m].total += amt(r)
-      map[m].count += 1
-    })
-    return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
-  }, [compareYear, prevReceipts, year, settings.showWithVat])
-
-  // ── Category aggregation (L1) ────────────────────────────────────────────────
+  // ── Category resolution (L1) ─────────────────────────────────────────────────
   const l1Cats = useMemo(() => categories.filter(c => c.level === 1), [categories])
 
   // Resolve a receipt's L1 category name (walk up the tree if it points to L2/L3).
-  function resolveL1(r) {
+  const resolveL1 = useCallback((r) => {
     let catName = r.category_text || 'שונות'
     if (r.category_id) {
       const cat = categories.find(c => c.id === r.category_id)
@@ -274,33 +160,7 @@ export default function DashboardPage() {
       }
     }
     return catName
-  }
-  function aggregateL1(list) {
-    const map = {}
-    list.forEach(r => {
-      const n = resolveL1(r)
-      if (!map[n]) map[n] = { name: n, total: 0, count: 0 }
-      map[n].total += amt(r); map[n].count += 1
-    })
-    return Object.values(map).sort((a, b) => b.total - a.total)
-      .map(d => ({ ...d, id: l1Cats.find(c => c.name === d.name)?.id }))
-  }
-
-  // Filtered view (both category + vendor filters) — used by the tree.
-  const l1Data = useMemo(() => aggregateL1(active), [active, categories, l1Cats, settings.showWithVat])
-
-  // ALL categories (ignores the category filter) — used by the donut + ranking +
-  // dropdown, so selecting a category greys the others out instead of hiding them.
-  const catScope = receipts
-  const l1DataAll = useMemo(() => aggregateL1(catScope), [catScope, categories, l1Cats, settings.showWithVat])
-  const totalAll  = useMemo(() => l1DataAll.reduce((s, c) => s + c.total, 0), [l1DataAll])
-
-  // Stable colour per category — matches the donut's colour order.
-  const catColor = useMemo(() => {
-    const m = {}; l1DataAll.forEach((c, i) => { m[c.name] = COLORS[i % COLORS.length] }); return m
-  }, [l1DataAll])
-  // When a category is selected, the time charts adopt its colour.
-  const selColor = filterCat ? (catColor[filterCat] || '#2563eb') : '#2563eb'
+  }, [categories])
 
   // Display name for a receipt's supplier: the canonical one when the receipt is
   // linked, otherwise whatever the scan wrote. Without this the dashboard shows a
@@ -314,20 +174,111 @@ export default function DashboardPage() {
     return (r.supplier_id && canonicalById[r.supplier_id]) || raw
   }, [canonicalById])
 
-  // ── Vendor aggregation (full) — powers the "by vendor" distribution ──────────
-  // Always over ALL receipts (not the category-filtered `active`), so switching
-  // the distribution to "ספק" always shows every supplier — selecting a category
-  // never narrows the supplier view.
+  // Supplier options for the dashboard filter — one entry per canonical supplier
+  // (falling back to the scanned name for receipts not yet linked). Options come
+  // from the UNfiltered receipts so a selection never hides the other choices.
+  const vendorFilterOptions = useMemo(() => {
+    const map = new Map()
+    for (const r of receipts) {
+      const name = supplierNameOf(r)
+      if (!name) continue
+      const key = r.supplier_id || `name:${name}`
+      if (!map.has(key)) map.set(key, { key, id: r.supplier_id || null, name })
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'he'))
+  }, [receipts, supplierNameOf])
+  const selectedVendorOpts = useMemo(
+    () => vendorFilterOptions.filter(o => filterVendors.includes(o.key)),
+    [vendorFilterOptions, filterVendors])
+
+  // ── The one filter predicate the whole dashboard obeys ───────────────────────
+  // The supplier filter matches on the canonical supplier_id once a receipt has
+  // been linked, and on the scanned name for rows that predate the merge.
+  const passesFilters = useCallback((r) => {
+    if (filterCats.length && !filterCats.includes(resolveL1(r))) return false
+    if (selectedVendorOpts.length) {
+      const hit = selectedVendorOpts.some(o =>
+        (o.id && r.supplier_id === o.id) ||
+        (!r.supplier_id && (r.vendor_name || '').trim() === o.name))
+      if (!hit) return false
+    }
+    return true
+  }, [filterCats, selectedVendorOpts, resolveL1])
+
+  const active = useMemo(() => receipts.filter(passesFilters), [receipts, passesFilters])
+
+  const total     = useMemo(() => active.reduce((s, r) => s + amt(r), 0), [active, settings.showWithVat])
+  // The comparison year must obey the SAME filters as the current one. Comparing
+  // one filtered supplier's ₪12k against the whole previous year's ₪400k
+  // rendered "-97% מהשנה הקודמת" next to a correctly filtered number.
+  const activePrev = useMemo(() => prevReceipts.filter(passesFilters), [prevReceipts, passesFilters])
+  const totalPrev = useMemo(() => activePrev.reduce((s, r) => s + amt(r), 0), [activePrev, settings.showWithVat])
+  const yoy       = years.length === 1 && totalPrev > 0 ? ((total - totalPrev) / totalPrev) * 100 : null
+
+  // Flattened line-items for the drill-down (item-level L1→L2→L3 over time)
+  const flatItems = useMemo(() => flattenItems(active), [active])
+
+  const avgMonthly = useMemo(() => {
+    const months = new Set(active.map(r => r.receipt_date?.slice(0, 7)).filter(Boolean))
+    return months.size > 0 ? total / months.size : 0
+  }, [active, total])
+
+  // ── Monthly aggregation ───────────────────────────────────────────────────────
+  // Obeys the top filters like everything else (client request 15.11.26: a
+  // supplier/category selection reshapes ALL the charts). With several years
+  // selected, each calendar month sums across the chosen years.
+  const monthlyOf = useCallback((list) => {
+    const map = {}
+    list.forEach(r => {
+      if (!r.receipt_date) return
+      const m = parseInt(r.receipt_date.slice(5, 7))
+      if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
+      map[m].total += amt(r)
+      map[m].count += 1
+    })
+    return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
+  }, [settings.showWithVat])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const monthlyData = useMemo(() => monthlyOf(active), [active, monthlyOf])
+  const prevMonthlyData = useMemo(() => {
+    if (!compareYear) return null
+    return monthlyOf(compareReceipts.filter(passesFilters))
+  }, [compareYear, compareReceipts, passesFilters, monthlyOf])
+
+  // ── Distribution aggregations (over the FILTERED receipts) ───────────────────
+  function aggregateL1(list) {
+    const map = {}
+    list.forEach(r => {
+      const n = resolveL1(r)
+      if (!map[n]) map[n] = { name: n, total: 0, count: 0 }
+      map[n].total += amt(r); map[n].count += 1
+    })
+    return Object.values(map).sort((a, b) => b.total - a.total)
+      .map(d => ({ ...d, id: l1Cats.find(c => c.name === d.name)?.id }))
+  }
+
+  // Dropdown options + stable colours come from ALL receipts, so selecting a
+  // category never removes the other checkboxes or reshuffles the palette.
+  const l1Options = useMemo(() => aggregateL1(receipts), [receipts, categories, l1Cats, settings.showWithVat])
+  const catColor = useMemo(() => {
+    const m = {}; l1Options.forEach((c, i) => { m[c.name] = COLORS[i % COLORS.length] }); return m
+  }, [l1Options])
+
+  // The donut + ranking show the FILTERED picture.
+  const l1Data  = useMemo(() => aggregateL1(active), [active, categories, l1Cats, settings.showWithVat])
+  const totalL1 = useMemo(() => l1Data.reduce((s, c) => s + c.total, 0), [l1Data])
+
+  // ── Vendor aggregation — powers the "by vendor" distribution ─────────────────
   const vendorDist = useMemo(() => {
     const map = {}
-    receipts.forEach(r => {
+    active.forEach(r => {
       const name = supplierNameOf(r) || 'לא ידוע'
       if (!map[name]) map[name] = { name, total: 0, count: 0 }
       map[name].total += amt(r)
       map[name].count += 1
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
-  }, [receipts, supplierNameOf, settings.showWithVat])
+  }, [active, supplierNameOf, settings.showWithVat])
   const vendorTotal = useMemo(() => vendorDist.reduce((s, v) => s + v.total, 0), [vendorDist])
   // Cap to top 8 + "אחר" so the donut stays readable
   const vendorDonutData = useMemo(() => {
@@ -343,74 +294,14 @@ export default function DashboardPage() {
     return m.total > 0 ? HEB_MONTHS_FULL[m.month - 1] : null
   }, [monthlyData])
 
-  // ── Vendor comparison (independent of the category/vendor dashboard filters) ───
-  const allVendors = useMemo(() => {
-    const set = new Set(receipts.map(supplierNameOf).filter(Boolean))
-    return [...set].sort((a, b) => a.localeCompare(b, 'he'))
-  }, [receipts, supplierNameOf])
-
-  // Supplier options for the dashboard filter — one entry per canonical supplier
-  // (falling back to the scanned name for receipts not yet linked).
-  const vendorFilterOptions = useMemo(() => {
-    const map = new Map()
-    for (const r of receipts) {
-      const name = supplierNameOf(r)
-      if (!name) continue
-      const key = r.supplier_id || `name:${name}`
-      if (!map.has(key)) map.set(key, { id: r.supplier_id || null, name })
-    }
-    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'he'))
-  }, [receipts, supplierNameOf])
-
-  // Flattened items for the whole year (ignores filters) — drives product picking.
-  const flatAll = useMemo(() => flattenItems(receipts), [receipts])
-
-  // Line items still carry the RAW scanned vendor string, so a merged supplier's
-  // composition has to gather every spelling filed under it.
-  const rawNamesFor = useCallback((displayName) => {
-    const set = new Set([displayName])
-    for (const r of receipts) if (supplierNameOf(r) === displayName) set.add((r.vendor_name || '').trim())
-    return [...set].filter(Boolean)
-  }, [receipts, supplierNameOf])
-
-  const compA = useMemo(() => vendorA ? vendorComposition(flatAll, vendorA, rawNamesFor(vendorA)) : null, [vendorA, flatAll, rawNamesFor])
-  const compB = useMemo(() => vendorB ? vendorComposition(flatAll, vendorB, rawNamesFor(vendorB)) : null, [vendorB, flatAll, rawNamesFor])
-
-  function monthlyForVendor(name) {
-    const map = {}
-    receipts.filter(r => supplierNameOf(r) === name).forEach(r => {
-      if (!r.receipt_date) return
-      const m = parseInt(r.receipt_date.slice(5, 7))
-      if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
-      map[m].total += amt(r); map[m].count += 1
-    })
-    return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
-  }
-  function vendorStats(name) {
-    const rows = receipts.filter(r => supplierNameOf(r) === name)
-    const total = rows.reduce((s, r) => s + amt(r), 0)
-    return { total, count: rows.length, avg: rows.length ? total / rows.length : 0 }
-  }
-  const cmpA = useMemo(() => vendorA ? monthlyForVendor(vendorA) : null, [vendorA, receipts, settings.showWithVat])
-  const cmpB = useMemo(() => vendorB ? monthlyForVendor(vendorB) : null, [vendorB, receipts, settings.showWithVat])
-
-  // Products chosen for comparison (union of A's and B's picks). Empty = overall.
-  const compareProducts = useMemo(() => {
-    const names = [...new Set([...selProdsA, ...selProdsB])]
-    const aMap = Object.fromEntries((compA?.rows || []).map(r => [r.name, r.total]))
-    const bMap = Object.fromEntries((compB?.rows || []).map(r => [r.name, r.total]))
-    return names
-      .map(n => ({ name: n, a: aMap[n] || 0, b: bMap[n] || 0 }))
-      .sort((x, y) => (y.a + y.b) - (x.a + x.b))
-  }, [selProdsA, selProdsB, compA, compB])
-
-  const hasFilters = filterCat || filterVendor
+  const hasFilters = filterCats.length > 0 || filterVendors.length > 0
+  const yearsLabel = useMemo(() => [...years].sort((a, b) => b - a).join(' + '), [years])
 
   // ── Distribution donut/ranking: switchable between category and vendor ────────
   const isVendorDist = distMode === 'vendor'
-  const distDonut = isVendorDist ? vendorDonutData : l1DataAll   // capped for donut
-  const distRank  = isVendorDist ? vendorDist : l1DataAll        // full list for ranking
-  const distTotal = isVendorDist ? vendorTotal : totalAll
+  const distDonut = isVendorDist ? vendorDonutData : l1Data   // capped for donut
+  const distRank  = isVendorDist ? vendorDist : l1Data        // full list for ranking
+  const distTotal = isVendorDist ? vendorTotal : totalL1
   // The distribution selection is a LOCAL highlight in BOTH modes (it greys the
   // other slices) — it does NOT filter the rest of the dashboard, so a category
   // click never carries over to the supplier view.
@@ -444,49 +335,31 @@ export default function DashboardPage() {
               title='החלף בין כולל / ללא מע"מ'>
               <ShekelSign size={14} /> {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
             </button>
-            {/* Year picker */}
-            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-              <Calendar size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
-              <select value={year} onChange={e => { setYear(+e.target.value); setFilterCat(null) }}
-                style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer' }}>
-                {availYears.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-            {/* Compare year */}
-            {!isMobile && (
+            {/* Years — multi-select (at least one stays selected) */}
+            <CheckDropdown icon={Calendar} minOne allLabel="שנה"
+              options={availYears.map(y => ({ value: y, label: String(y) }))}
+              values={years} onChange={setYears} width={150} />
+            {/* Compare year — single-year view only */}
+            {!isMobile && years.length === 1 && (
               <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                 <select value={compareYear || ''} onChange={e => setCompareYear(e.target.value ? +e.target.value : null)}
                   style={{ height: 36, paddingRight: 12, paddingLeft: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer' }}>
                   <option value="">השוואה: ללא</option>
-                  {availYears.filter(y => y !== year).map(y => <option key={y} value={y}>{y}</option>)}
+                  {availYears.filter(y => y !== years[0]).map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
             )}
-            {/* Category filter */}
-            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-              <Tag size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
-              <select value={filterCat || ''} onChange={e => { setFilterCat(e.target.value || null) }}
-                style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: `1px solid ${filterCat ? 'var(--accent)' : 'var(--border)'}`, background: filterCat ? 'var(--accent-bg)' : 'var(--panel)', color: filterCat ? 'var(--accent)' : 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer' }}>
-                <option value="">כל הקטגוריות</option>
-                {l1DataAll.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
-              </select>
-            </div>
-            {/* Supplier filter (client request #7) */}
-            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-              <Store size={13} style={{ position: 'absolute', right: 10, color: 'var(--text-mute)', pointerEvents: 'none' }} />
-              <select value={filterVendor ? (filterVendor.id || `name:${filterVendor.name}`) : ''}
-                onChange={e => {
-                  const v = e.target.value
-                  setFilterVendor(v ? vendorFilterOptions.find(o => (o.id || `name:${o.name}`) === v) || null : null)
-                }}
-                style={{ height: 36, paddingRight: 30, paddingLeft: 12, borderRadius: 8, border: `1px solid ${filterVendor ? 'var(--accent)' : 'var(--border)'}`, background: filterVendor ? 'var(--accent-bg)' : 'var(--panel)', color: filterVendor ? 'var(--accent)' : 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer', maxWidth: 190 }}>
-                <option value="">כל הספקים</option>
-                {vendorFilterOptions.map(o => <option key={o.id || o.name} value={o.id || `name:${o.name}`}>{o.name}</option>)}
-              </select>
-            </div>
+            {/* Categories — multi-select */}
+            <CheckDropdown icon={Tag} allLabel="כל הקטגוריות"
+              options={l1Options.map(c => ({ value: c.name, label: c.name }))}
+              values={filterCats} onChange={setFilterCats} />
+            {/* Suppliers — multi-select */}
+            <CheckDropdown icon={Store} allLabel="כל הספקים"
+              options={vendorFilterOptions.map(o => ({ value: o.key, label: o.name }))}
+              values={filterVendors} onChange={setFilterVendors} />
             {/* Clear filters */}
             {hasFilters && (
-              <button onClick={() => { setFilterCat(null); setFilterVendor(null) }}
+              <button onClick={() => { setFilterCats([]); setFilterVendors([]) }}
                 style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid var(--danger)', background: '#fef2f2', color: 'var(--danger)', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}>
                 <X size={12} /> נקה
               </button>
@@ -495,30 +368,30 @@ export default function DashboardPage() {
         </div>
 
         {/* Active filter pills */}
-        {(filterCat || filterVendor) && (
+        {hasFilters && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {filterCat && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
-                <Tag size={10} /> {filterCat}
-                <button onClick={() => setFilterCat(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
+            {filterCats.map(c => (
+              <span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
+                <Tag size={10} /> {c}
+                <button onClick={() => setFilterCats(filterCats.filter(x => x !== c))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
               </span>
-            )}
-            {filterVendor && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
-                <Store size={10} /> {filterVendor.name}
-                <button onClick={() => setFilterVendor(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
+            ))}
+            {selectedVendorOpts.map(o => (
+              <span key={o.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, background: 'var(--accent-bg)', border: '1px solid var(--accent)', fontSize: '12px', color: 'var(--accent)' }}>
+                <Store size={10} /> {o.name}
+                <button onClick={() => setFilterVendors(filterVendors.filter(k => k !== o.key))} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0, display: 'flex' }}><X size={10} /></button>
               </span>
-            )}
+            ))}
           </div>
         )}
       </div>
 
       {/* ── KPI Cards ─────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: isMobile ? '10px' : '14px', flexWrap: 'wrap' }}>
-        <KpiCard label="סה״כ הוצאות" value={fmtILS(total)} sub={`שנת ${year}`} icon={ShekelSign} color="var(--ok)" trend={yoy} />
+        <KpiCard label="סה״כ הוצאות" value={fmtILS(total)} sub={`שנת ${yearsLabel}`} icon={ShekelSign} color="var(--ok)" trend={yoy} />
         <KpiCard label="ממוצע חודשי" value={fmtILS(avgMonthly)} sub={bestMonth ? `חודש שיא: ${bestMonth}` : undefined} icon={Calendar} color="var(--accent)" />
         <KpiCard label="מספר קבלות" value={active.length} sub={`${active.filter(r => r.ai_extracted).length} נסרקו ב-AI`} icon={BarChart2} color="#7c3aed" />
-        {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1DataAll.length} sub={`${vendorDist.length} ספקים`} icon={Tag} color="#d97706" />}
+        {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1Data.length} sub={`${vendorDist.length} ספקים`} icon={Tag} color="#d97706" />}
       </div>
 
       {/* ── Empty state ───────────────────────────────────────────────────────── */}
@@ -526,7 +399,7 @@ export default function DashboardPage() {
         <div style={{ textAlign: 'center', padding: '64px 16px', color: 'var(--text-mute)' }}>
           <BarChart2 size={44} style={{ margin: '0 auto 14px', display: 'block', opacity: 0.25 }} />
           <p style={{ fontWeight: 600, color: 'var(--text)', fontSize: '15px' }}>אין נתונים לתצוגה</p>
-          <p style={{ fontSize: '13px', marginTop: 6 }}>הוסף קבלות כדי לראות את הדשבורד</p>
+          <p style={{ fontSize: '13px', marginTop: 6 }}>{hasFilters ? 'אין קבלות התואמות את הסינון' : 'הוסף קבלות כדי לראות את הדשבורד'}</p>
         </div>
       )}
 
@@ -535,14 +408,14 @@ export default function DashboardPage() {
         {/* ── Monthly chart ─────────────────────────────────────────────────────── */}
         <Section
           id="dash-monthly"
-          title={`הוצאות חודשיות — ${year}${compareYear ? ` מול ${compareYear}` : ''}`}
-          sub={compareYear ? undefined : `סה"כ: ${fmtILS(totalAll)}`}
+          title={`הוצאות חודשיות — ${yearsLabel}${compareYear ? ` מול ${compareYear}` : ''}`}
+          sub={compareYear ? undefined : `סה"כ: ${fmtILS(total)}`}
           action={
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               {compareYear && !isMobile && (
                 <div style={{ display: 'flex', gap: 12, fontSize: '12px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />{year}
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />{yearsLabel}
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />{compareYear}
@@ -553,7 +426,7 @@ export default function DashboardPage() {
             </div>
           }
         >
-          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={year} compareYear={compareYear} chartType={chartType} color="#2563eb" />
+          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={yearsLabel} compareYear={compareYear} chartType={chartType} color="#2563eb" />
         </Section>
 
         {/* ── Distribution donut + ranking (by category OR by vendor) ───────────── */}
@@ -635,72 +508,6 @@ export default function DashboardPage() {
         {/* ── Interactive drill-down (category → sub → product, over time) ───────── */}
         <Section id="dash-drilldown" title="ניתוח מעמיק לאורך זמן" sub="הוצאה לאורך זמן (בחר גרנולריות) · לחץ על ספק כדי לפרק את העמודה שלו למוצרים, ומעבר עכבר/לחיצה על מלבן מציג את הערך הכספי">
           <CategoryDrilldown items={flatItems} />
-        </Section>
-
-        {/* ── Vendor comparison ─────────────────────────────────────────────────── */}
-        <Section id="dash-compare" title="השוואת ספקים"
-          sub="בחר שני ספקים. תחת כל אחד בחר מוצרים להשוואה ממוקדת — או השאר ריק להשוואת הוצאה כללית."
-          action={<ChartTypeToggle value={chartType} onChange={setChartType} />}>
-
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '14px', marginBottom: '16px' }}>
-            {/* Vendor A */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#2563eb', marginBottom: '6px' }}>ספק א'</label>
-                <select value={vendorA} onChange={e => { setVendorA(e.target.value); setSelProdsA([]) }}
-                  style={{ width: '100%', height: 42, padding: '0 12px', borderRadius: 8, border: `1px solid ${vendorA ? '#2563eb' : 'var(--border)'}`, background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
-                  <option value="">בחר ספק…</option>
-                  {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </div>
-              {vendorA && <MultiSelect label="מוצרים מספק א'" options={compA?.rows || []} value={selProdsA} onChange={setSelProdsA} accent="#2563eb" />}
-            </div>
-            {/* Vendor B */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#f59e0b', marginBottom: '6px' }}>ספק ב'</label>
-                <select value={vendorB} onChange={e => { setVendorB(e.target.value); setSelProdsB([]) }}
-                  style={{ width: '100%', height: 42, padding: '0 12px', borderRadius: 8, border: `1px solid ${vendorB ? '#f59e0b' : 'var(--border)'}`, background: 'var(--panel)', color: 'var(--text)', fontSize: '15px', fontFamily: 'var(--font-main)' }}>
-                  <option value="">בחר ספק…</option>
-                  {allVendors.map(v => <option key={v} value={v}>{v}</option>)}
-                </select>
-              </div>
-              {vendorB && <MultiSelect label="מוצרים מספק ב'" options={compB?.rows || []} value={selProdsB} onChange={setSelProdsB} accent="#f59e0b" />}
-            </div>
-          </div>
-
-          {(vendorA || vendorB) ? (
-            <>
-              {compareProducts.length > 0 ? (
-                /* Focused product comparison */
-                <ProductCompareChart products={compareProducts} labelA={vendorA || "ספק א'"} labelB={vendorB || "ספק ב'"} colorA="#2563eb" colorB="#f59e0b" chartType={chartType} />
-              ) : (
-                /* Overall monthly comparison */
-                <MonthlyBars
-                  data={cmpA || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
-                  compareData={cmpB || Array.from({ length: 12 }, (_, i) => ({ month: i + 1, total: 0, count: 0 }))}
-                  year={vendorA || 'ספק א'} compareYear={vendorB || 'ספק ב'} chartType={chartType}
-                />
-              )}
-              {/* Comparison stats table */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '16px' }}>
-                {[{ n: vendorA, c: '#2563eb' }, { n: vendorB, c: '#f59e0b' }].map(({ n, c }, idx) => {
-                  if (!n) return <div key={idx} style={{ minWidth: 0, padding: '14px', borderRadius: 12, border: '1px dashed var(--border)', color: 'var(--text-mute)', fontSize: '14px', textAlign: 'center' }}>לא נבחר ספק</div>
-                  const s = vendorStats(n)
-                  return (
-                    <div key={idx} style={{ minWidth: 0, padding: '14px 16px', borderRadius: 12, border: `1px solid var(--border)`, borderTop: `3px solid ${c}`, background: 'var(--panel-2)' }}>
-                      <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={n}>{n}</div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: 'var(--text-dim)', marginBottom: '4px' }}><span>סה"כ</span><strong style={{ color: 'var(--ok)' }}>{fmtILS(s.total)}</strong></div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: 'var(--text-dim)', marginBottom: '4px' }}><span>קבלות</span><strong>{s.count}</strong></div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: 'var(--text-dim)' }}><span>ממוצע לקבלה</span><strong>{fmtILS(s.avg)}</strong></div>
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          ) : (
-            <p style={{ textAlign: 'center', color: 'var(--text-mute)', padding: '24px 0', fontSize: '15px' }}>בחר ספק אחד או שניים כדי להשוות</p>
-          )}
         </Section>
 
       </>)}

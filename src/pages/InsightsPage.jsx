@@ -67,8 +67,8 @@ export default function InsightsPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }} dir="rtl">
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0, fontSize: isMobile ? 20 : 23, fontWeight: 800, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 9 }}>
-          <Lightbulb size={22} style={{ color: 'var(--accent)' }} /> תובנות
+        <h1 style={{ margin: 0, fontSize: isMobile ? 23 : 26, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Lightbulb size={24} style={{ color: 'var(--accent)' }} /> תובנות
         </h1>
         <div style={{ marginInlineStart: 'auto', display: 'flex', gap: 6, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, padding: 4 }}>
           {INSIGHT_PERIODS.map(p => (
