@@ -8,12 +8,20 @@ import { ChevronDown, Check, X } from 'lucide-react'
  * Empty selection means "everything" (`allLabel`). `minOne` keeps at least one
  * value selected (the year filter must never be empty).
  */
+const PANEL_MAX_W = 280
+
 export default function CheckDropdown({ icon: Icon, options = [], values = [], onChange, allLabel, minOne = false, width }) {
   const [open, setOpen] = useState(false)
+  // RTL: the panel normally hangs off the button's RIGHT edge and grows left.
+  // Near the viewport's left edge that pushes it off-screen (QA 15.11.26 — the
+  // suppliers filter is the leftmost control), so flip it to grow rightward.
+  const [alignStart, setAlignStart] = useState(false)
   const ref = useRef(null)
 
   useEffect(() => {
     if (!open) return
+    const r = ref.current?.getBoundingClientRect()
+    setAlignStart(!!r && r.right - PANEL_MAX_W < 8)
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDoc)
@@ -52,7 +60,7 @@ export default function CheckDropdown({ icon: Icon, options = [], values = [], o
       </button>
 
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 40, minWidth: '100%', width: 'max-content', maxWidth: 280,
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', ...(alignStart ? { left: 0 } : { right: 0 }), zIndex: 40, minWidth: '100%', width: 'max-content', maxWidth: `min(${PANEL_MAX_W}px, calc(100vw - 16px))`,
           background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: 'var(--shadow-modal)',
           maxHeight: 300, overflowY: 'auto', padding: 6 }}>
           {!minOne && (

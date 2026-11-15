@@ -6,7 +6,7 @@ import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, ArrowRightLeft, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb, Menu,
+  ArrowLeftRight, Equal, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb, Menu,
 } from 'lucide-react'
 
 // A nav section hidden unless its feature flag is on (SaaS module packaging).
@@ -59,7 +59,8 @@ const NAV = [
   {
     // The supplier comparison lives in its own clean screen (client request
     // 15.11.26) — it used to be a scroll-anchor at the bottom of the dashboard.
-    id: 'compare', label: 'השוואת ספקים', icon: ArrowRightLeft, to: '/compare',
+    // Icon is the "=" sign (client request: must not share reconcile's arrows).
+    id: 'compare', label: 'השוואת ספקים', icon: Equal, to: '/compare',
     children: [],
   },
   {
@@ -263,33 +264,33 @@ export function SidebarRail({ onExpand }) {
 
   return (
     <aside style={{
-      position: 'fixed', top: 0, right: 0, height: '100dvh', width: 58, zIndex: 120,
+      position: 'fixed', top: 0, right: 0, height: '100dvh', width: 66, zIndex: 120,
       background: 'var(--panel)', borderLeft: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: '10px 0', gap: 2, boxShadow: '-4px 0 16px rgba(0,0,0,0.06)',
+      padding: '10px 0', gap: 3, boxShadow: '-4px 0 16px rgba(0,0,0,0.06)',
     }} dir="rtl">
       <button onClick={() => onExpand?.(null)} aria-label="פתח תפריט" title="פתח תפריט"
-        style={{ width: 42, height: 42, borderRadius: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}
+        style={{ width: 50, height: 50, borderRadius: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}
         onMouseEnter={e => e.currentTarget.style.background = 'var(--panel-2)'}
         onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-        <Menu size={22} />
+        <Menu size={27} />
       </button>
-      <div style={{ width: 34, height: 1, background: 'var(--border)', marginBottom: 6 }} />
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, width: '100%' }}>
+      <div style={{ width: 38, height: 1, background: 'var(--border)', marginBottom: 6 }} />
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, width: '100%' }}>
         {NAV.filter(s => !NAV_FLAG[s.id] || flags[NAV_FLAG[s.id]]).map(s => {
           const isActive = location.pathname === s.to
           const Icon = s.icon
           return (
             <button key={s.id} onClick={() => onExpand?.(s.id)} aria-label={s.label} title={s.label}
-              style={{ position: 'relative', width: 42, height: 42, borderRadius: 10, border: 'none', cursor: 'pointer',
+              style={{ position: 'relative', width: 50, height: 50, borderRadius: 12, border: 'none', cursor: 'pointer',
                 background: isActive ? 'var(--accent-bg)' : 'none',
                 color: isActive ? 'var(--accent)' : 'var(--text-dim)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
               onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--panel-2)' }}
               onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'none' }}>
-              <Icon size={21} />
+              <Icon size={26} />
               {s.id === 'reconcile' && reconcileCount > 0 && (
-                <span style={{ position: 'absolute', top: 5, insetInlineEnd: 5, width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)' }} />
+                <span style={{ position: 'absolute', top: 6, insetInlineEnd: 6, width: 9, height: 9, borderRadius: '50%', background: 'var(--danger)' }} />
               )}
             </button>
           )

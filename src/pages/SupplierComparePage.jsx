@@ -15,7 +15,7 @@ import MonthlyBars from '../components/charts/MonthlyBars'
 import ProductCompareChart from '../components/charts/ProductCompareChart'
 import ChartTypeToggle from '../components/charts/ChartTypeToggle'
 import MultiSelect from '../components/MultiSelect'
-import { ArrowRightLeft, Calendar } from 'lucide-react'
+import { Equal, Calendar } from 'lucide-react'
 
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 
@@ -121,7 +121,7 @@ export default function SupplierComparePage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: isMobile ? '23px' : '26px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ArrowRightLeft size={24} color="var(--accent)" /> השוואת ספקים
+            <Equal size={24} color="var(--accent)" /> השוואת ספקים
           </h1>
           <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>
             בחר שני ספקים. תחת כל אחד בחר מוצרים להשוואה ממוקדת — או השאר ריק להשוואת הוצאה כללית.
