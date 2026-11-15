@@ -8,6 +8,7 @@ import { ToggleLeft, RefreshCw } from 'lucide-react'
 const MODULE_LABELS = {
   bot_tools: 'עוזר חכם', events_book: 'ספר אירועים', reconciliation: 'התאמות',
   product_compare: 'השוואת מוצרים', insights: 'תובנות', price_alerts: 'התראות מחיר',
+  mail_ingest: 'קליטת מייל',
 }
 
 async function authFetch(path, method = 'GET', body) {

@@ -9,9 +9,14 @@ import { requireMember, wrapAuthErrors } from '../_lib/auth.js'
 import { getSupabaseUrl } from '../_lib/extractReceipt.js'
 import { scanConnection } from '../_lib/mailScan.js'
 import { checkRateLimit, rateLimitedResponse } from '../_lib/rateLimit.js'
+import { loadFlags } from '../_lib/flags.js'
 
 export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
   const user = await requireMember(request, env)
+
+  // Mail import is a sellable module — refuse when this tenant does not have it.
+  const flags = await loadFlags(getSupabaseUrl(env), env.SUPABASE_SERVICE_ROLE_KEY, { orgId: user.org_id })
+  if (!flags.mail_ingest) return Response.json({ error: 'module_off', message: 'קליטת מייל אינה פעילה בחשבון זה' }, { status: 403 })
 
   // Throttle mailbox scans per user (A.8.12). A single "scan now" click loops up
   // to ~15 batched rounds client-side, so 30/min leaves room for that + a retry.

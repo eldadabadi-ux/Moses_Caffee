@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
 import { useTenant } from '../hooks/useTenant'
+import { useFeatureFlags } from '../lib/flags'
 import { Settings, Save, Info, Percent, Image as ImageIcon, Trash2, Building2, FolderOpen, Bell, Smartphone, Download, Share, Plus, Check, RefreshCw, Database, Upload, ScanLine, KeyRound, ShieldCheck, AlertTriangle } from 'lucide-react'
 import Modal from '../components/ui/Modal'
 import { Link } from 'react-router-dom'
@@ -24,6 +25,7 @@ export default function SettingsPage() {
   const { settings, updateSettings, saving } = useSettings()
   const { user, updatePassword, deleteAccount } = useAuth()
   const { org, updateOrg } = useTenant()
+  const flags = useFeatureFlags()
   const { canInstall, promptInstall, isIOS, isStandalone } = useInstall()
   const [vatInput, setVatInput] = useState(String(settings.vatRate))
   const [changed, setChanged] = useState(false)
@@ -264,11 +266,15 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Connect mailbox → auto-import receipts from email */}
-      <MailConnectCard />
+      {flags.mail_ingest && (
+        <>
+          {/* Connect mailbox → auto-import receipts from email */}
+          <MailConnectCard />
 
-      {/* Self-service inbound address → forward receipts, no OAuth */}
-      <InboundMailCard />
+          {/* Self-service inbound address → forward receipts, no OAuth */}
+          <InboundMailCard />
+        </>
+      )}
 
       {/* Logo + Business name Card */}
       <div id="set-logo" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>

@@ -5,6 +5,8 @@
  */
 import { requireMember, wrapAuthErrors } from '../_lib/auth.js'
 import { signState } from '../_lib/mailCrypto.js'
+import { getSupabaseUrl } from '../_lib/extractReceipt.js'
+import { loadFlags } from '../_lib/flags.js'
 
 const PROVIDERS = {
   gmail: {
@@ -29,6 +31,12 @@ export const onRequestPost = wrapAuthErrors(async ({ request, env }) => {
     return Response.json({ error: `אינטגרציית ${provider === 'outlook' ? 'Outlook' : 'Gmail'} לא מוגדרת בשרת` }, { status: 500 })
   }
   const user = await requireMember(request, env)
+
+  // Mail import is a sellable module — don't start an OAuth flow for a tenant
+  // that doesn't have it.
+  const flags = await loadFlags(getSupabaseUrl(env), env.SUPABASE_SERVICE_ROLE_KEY, { orgId: user.org_id })
+  if (!flags.mail_ingest) return Response.json({ error: 'module_off', message: 'קליטת מייל אינה פעילה בחשבון זה' }, { status: 403 })
+
   const state = await signState({ uid: user.user_id, oid: user.org_id || null, p: provider }, env.MAIL_TOKEN_KEY)
   const url = cfg.auth + '?' + new URLSearchParams({
     client_id: env[cfg.idEnv], redirect_uri: redirectUri(env, request),

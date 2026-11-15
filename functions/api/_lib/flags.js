@@ -41,6 +41,7 @@ export const FLAG_DEFAULTS = {
   reconciliation: true,   // "התאמות" — summary-invoice ↔ delivery-note matching
   product_compare: true,  // "השוואת מוצרים" — cross-supplier price-per-unit report
   insights: true,         // "תובנות" — the periodic insights report
+  mail_ingest: true,      // email import: mailbox connect/scan + the inbound address
 }
 
 export const FLAG_KEYS = Object.keys(FLAG_DEFAULTS)
@@ -51,7 +52,7 @@ export const FLAG_KEYS = Object.keys(FLAG_DEFAULTS)
  * the rest (e.g. supplier_confirm) are behaviour toggles, not product modules.
  */
 export const MODULE_FLAGS = [
-  'bot_tools', 'events_book', 'reconciliation', 'product_compare', 'insights', 'price_alerts',
+  'bot_tools', 'events_book', 'reconciliation', 'product_compare', 'insights', 'price_alerts', 'mail_ingest',
 ]
 
 /**

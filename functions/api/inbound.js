@@ -18,6 +18,7 @@ import { getSupabaseUrl } from './_lib/extractReceipt.js'
 import { makeDb, alreadyImported, ingestReceipt } from './_lib/mailIngest.js'
 import { aliasFromAddress, pickAttachments } from './_lib/inbound.js'
 import { resolveOrgId } from './_lib/auth.js'
+import { loadFlags } from './_lib/flags.js'
 
 export async function onRequestPost({ request, env }) {
   const secret = request.headers.get('x-inbound-secret') || ''
@@ -50,6 +51,12 @@ export async function onRequestPost({ request, env }) {
   }
 
   const org_id = await resolveOrgId(owner.user_id, env)
+
+  // Mail import is a sellable module — accept the message but don't ingest for a
+  // tenant without it (200 so Email Routing doesn't retry/bounce).
+  const flags = await loadFlags(url, key, { orgId: org_id })
+  if (!flags.mail_ingest) return Response.json({ ok: true, ignored: 'module_off' })
+
   const conn = { user_id: owner.user_id, org_id }
   const vatRate = Number(owner.vat_rate) > 0 ? Number(owner.vat_rate) : 18
   const files = pickAttachments(attachments)
