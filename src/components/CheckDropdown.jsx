@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { ChevronDown, Check, X } from 'lucide-react'
 
 /**
@@ -9,19 +9,32 @@ import { ChevronDown, Check, X } from 'lucide-react'
  * value selected (the year filter must never be empty).
  */
 const PANEL_MAX_W = 280
+const EDGE = 8
 
 export default function CheckDropdown({ icon: Icon, options = [], values = [], onChange, allLabel, minOne = false, width }) {
   const [open, setOpen] = useState(false)
-  // RTL: the panel normally hangs off the button's RIGHT edge and grows left.
-  // Near the viewport's left edge that pushes it off-screen (QA 15.11.26 — the
-  // suppliers filter is the leftmost control), so flip it to grow rightward.
-  const [alignStart, setAlignStart] = useState(false)
   const ref = useRef(null)
+  const panelRef = useRef(null)
+  // The panel hangs off the button's RIGHT edge (RTL) and grows left — near the
+  // viewport's left edge that clips it. Instead of guessing with a threshold
+  // (the first-open miss of QA 15.11.26 round 3), measure the REAL panel rect
+  // before paint and translate it back inside the viewport, whichever edge it
+  // crossed. useLayoutEffect = corrected position on the very first frame.
+  const [shift, setShift] = useState(0)
+  useLayoutEffect(() => {
+    if (!open) { setShift(0); return }
+    const p = panelRef.current?.getBoundingClientRect()
+    if (!p) return
+    const vw = document.documentElement.clientWidth
+    // The rect is measured WITH the current shift applied, so corrections add up.
+    let dx = 0
+    if (p.left < EDGE) dx = EDGE - p.left
+    else if (p.right > vw - EDGE) dx = (vw - EDGE) - p.right
+    if (dx !== 0) setShift(s => s + dx)
+  }, [open, options.length, shift])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return
-    const r = ref.current?.getBoundingClientRect()
-    setAlignStart(!!r && r.right - PANEL_MAX_W < 8)
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDoc)
@@ -60,7 +73,7 @@ export default function CheckDropdown({ icon: Icon, options = [], values = [], o
       </button>
 
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', ...(alignStart ? { left: 0 } : { right: 0 }), zIndex: 40, minWidth: '100%', width: 'max-content', maxWidth: `min(${PANEL_MAX_W}px, calc(100vw - 16px))`,
+        <div ref={panelRef} style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, transform: `translateX(${shift}px)`, zIndex: 40, minWidth: '100%', width: 'max-content', maxWidth: `min(${PANEL_MAX_W}px, calc(100vw - ${EDGE * 2}px))`,
           background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: 'var(--shadow-modal)',
           maxHeight: 300, overflowY: 'auto', padding: 6 }}>
           {!minOne && (

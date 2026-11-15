@@ -90,7 +90,9 @@ export default function DashboardPage() {
   const [categories,     setCategories]     = useState(() => getCached('dash:meta')?.categories || [])
   const [supplierRows,   setSupplierRows]   = useState(() => getCached('dash:meta')?.suppliers || [])
   const [loading,        setLoading]        = useState(() => !hasCached('dashyr:' + thisYear))
-  const [compareYear,    setCompareYear]    = useState(null)
+  // Comparison years — ALSO a checkbox multi-select (client request 15.11.26
+  // round 3): any year(s), the current year included, against the main selection.
+  const [compareYears,   setCompareYears]   = useState([])
   const [distMode,       setDistMode]       = useState('cat') // distribution donut: 'cat' | 'vendor'
   const [selVendor,      setSelVendor]      = useState(null)  // highlighted vendor slice (local)
   const [selCat,         setSelCat]         = useState(null)  // highlighted category slice (local — NO filtering)
@@ -135,15 +137,15 @@ export default function DashboardPage() {
     return () => { alive = false }
   }, [user, yearsKey, fetchYearReceipts])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Year-against-year overlay is a single-year tool — drop it when several
-  // years are already combined on screen.
-  useEffect(() => { if (years.length > 1 && compareYear) setCompareYear(null) }, [years, compareYear])
+  const compareKey = useMemo(() => [...compareYears].sort((a, b) => a - b).join(','), [compareYears])
   useEffect(() => {
-    if (!user || !compareYear) { setCompareReceipts([]); return }
+    if (!user || !compareYears.length) { setCompareReceipts([]); return }
     let alive = true
-    fetchYearReceipts(compareYear).then(r => { if (alive) setCompareReceipts(r) })
+    Promise.all(compareYears.map(fetchYearReceipts))
+      .then(perYear => { if (alive) setCompareReceipts(perYear.flat()) })
+      .catch(err => console.error('Compare load error:', err))
     return () => { alive = false }
-  }, [user, compareYear, fetchYearReceipts])
+  }, [user, compareKey, fetchYearReceipts])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Category resolution (L1) ─────────────────────────────────────────────────
   const l1Cats = useMemo(() => categories.filter(c => c.level === 1), [categories])
@@ -240,10 +242,10 @@ export default function DashboardPage() {
   }, [settings.showWithVat])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthlyData = useMemo(() => monthlyOf(active), [active, monthlyOf])
-  const prevMonthlyData = useMemo(() => {
-    if (!compareYear) return null
+  const compareMonthly = useMemo(() => {
+    if (!compareYears.length) return null
     return monthlyOf(compareReceipts.filter(passesFilters))
-  }, [compareYear, compareReceipts, passesFilters, monthlyOf])
+  }, [compareYears.length, compareReceipts, passesFilters, monthlyOf])
 
   // ── Distribution aggregations (over the FILTERED receipts) ───────────────────
   function aggregateL1(list) {
@@ -296,6 +298,7 @@ export default function DashboardPage() {
 
   const hasFilters = filterCats.length > 0 || filterVendors.length > 0
   const yearsLabel = useMemo(() => [...years].sort((a, b) => b - a).join(' + '), [years])
+  const compareLabel = useMemo(() => [...compareYears].sort((a, b) => b - a).join(' + '), [compareYears])
 
   // ── Distribution donut/ranking: switchable between category and vendor ────────
   const isVendorDist = distMode === 'vendor'
@@ -339,15 +342,12 @@ export default function DashboardPage() {
             <CheckDropdown icon={Calendar} minOne allLabel="שנה"
               options={availYears.map(y => ({ value: y, label: String(y) }))}
               values={years} onChange={setYears} width={150} />
-            {/* Compare year — single-year view only */}
-            {!isMobile && years.length === 1 && (
-              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                <select value={compareYear || ''} onChange={e => setCompareYear(e.target.value ? +e.target.value : null)}
-                  style={{ height: 36, paddingRight: 12, paddingLeft: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)', outline: 'none', cursor: 'pointer' }}>
-                  <option value="">השוואה: ללא</option>
-                  {availYears.filter(y => y !== years[0]).map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </div>
+            {/* Compare years — checkbox multi-select over ALL years (the current
+                one included): any year(s) against any year(s) */}
+            {!isMobile && (
+              <CheckDropdown icon={TrendingUp} allLabel="השוואה: ללא"
+                options={availYears.map(y => ({ value: y, label: String(y) }))}
+                values={compareYears} onChange={setCompareYears} width={160} />
             )}
             {/* Categories — multi-select */}
             <CheckDropdown icon={Tag} allLabel="כל הקטגוריות"
@@ -408,17 +408,17 @@ export default function DashboardPage() {
         {/* ── Monthly chart ─────────────────────────────────────────────────────── */}
         <Section
           id="dash-monthly"
-          title={`הוצאות חודשיות — ${yearsLabel}${compareYear ? ` מול ${compareYear}` : ''}`}
-          sub={compareYear ? undefined : `סה"כ: ${fmtILS(total)}`}
+          title={`הוצאות חודשיות — ${yearsLabel}${compareLabel ? ` מול ${compareLabel}` : ''}`}
+          sub={compareLabel ? undefined : `סה"כ: ${fmtILS(total)}`}
           action={
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {compareYear && !isMobile && (
+              {compareLabel && !isMobile && (
                 <div style={{ display: 'flex', gap: 12, fontSize: '12px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />{yearsLabel}
                   </span>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />{compareYear}
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />{compareLabel}
                   </span>
                 </div>
               )}
@@ -426,7 +426,7 @@ export default function DashboardPage() {
             </div>
           }
         >
-          <MonthlyBars data={monthlyData} compareData={prevMonthlyData} year={yearsLabel} compareYear={compareYear} chartType={chartType} color="#2563eb" />
+          <MonthlyBars data={monthlyData} compareData={compareMonthly} year={yearsLabel} compareYear={compareLabel || null} chartType={chartType} color="#2563eb" />
         </Section>
 
         {/* ── Distribution donut + ranking (by category OR by vendor) ───────────── */}
