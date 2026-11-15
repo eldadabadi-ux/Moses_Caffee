@@ -8,7 +8,7 @@ import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
 import { docTypeOf } from '../lib/docTypes'
-import { findCandidates, matchInvoice, confirmMatch, unconfirmMatch, normalizeVendor, docNumberOf, TOLERANCE } from '../lib/reconciliation'
+import { findCandidates, matchInvoice, confirmMatch, unconfirmMatch, normalizeVendor, docNumberOf, buildSupplierIndex, supplierKeyOf, TOLERANCE } from '../lib/reconciliation'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import toast from 'react-hot-toast'
 import { ArrowLeftRight, ChevronRight, ChevronLeft, CheckCircle2, AlertTriangle, Clock, RotateCcw, Receipt, Truck, Download } from 'lucide-react'
@@ -45,9 +45,9 @@ function StatusStrip({ result }) {
 }
 
 // ── One supplier invoice card (open = interactive matching) ──────────────────
-function InvoiceCard({ invoice, receipts, autoExpand, onChanged }) {
+function InvoiceCard({ invoice, receipts, supplierIndex, autoExpand, onChanged }) {
   const confirmed = !!invoice.reconciliation
-  const candidates = useMemo(() => findCandidates(receipts, invoice), [receipts, invoice])
+  const candidates = useMemo(() => findCandidates(receipts, invoice, { index: supplierIndex }), [receipts, invoice, supplierIndex])
   const candKey = candidates.map(c => c.id).join(',')
   const [included, setIncluded] = useState(() => new Set(candidates.map(c => c.id)))
   useEffect(() => { setIncluded(new Set(candidates.map(c => c.id))) }, [candKey]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -278,6 +278,10 @@ export default function ReconciliationPage() {
     return () => clearTimeout(t)
   }, [focusInvoice, loading])
 
+  // Supplier identity index (supplier_id ⊇ normalized spelling), shared by every
+  // card and by the waiting grouping so two spellings resolve to one supplier.
+  const supplierIndex = useMemo(() => buildSupplierIndex(receipts), [receipts])
+
   // Invoices shown: those dated in the selected month + ALL still-open ones
   // (so an unconfirmed invoice never disappears just because the month moved).
   const invoices = useMemo(() => {
@@ -290,19 +294,19 @@ export default function ReconciliationPage() {
 
   // Suppliers with open delivery notes in the month and no invoice card shown.
   const waiting = useMemo(() => {
-    const shown = new Set(invoices.map(inv => normalizeVendor(inv.vendor_name)))
+    const shown = new Set(invoices.map(inv => supplierKeyOf(inv, supplierIndex)))
     const map = {}
     receipts.forEach(r => {
       if (docTypeOf(r) !== 'delivery_note' || r.matched_invoice_id) return
       if (!(r.receipt_date || '').startsWith(month)) return
-      const key = normalizeVendor(r.vendor_name)
+      const key = supplierKeyOf(r, supplierIndex)
       if (shown.has(key)) return
       const name = (r.vendor_name || '').trim() || 'ספק לא ידוע'
       if (!map[key]) map[key] = { vendor: name, notes: [] }
       map[key].notes.push(r)
     })
     return Object.values(map).sort((a, b) => a.vendor.localeCompare(b.vendor))
-  }, [receipts, invoices, month])
+  }, [receipts, invoices, month, supplierIndex])
 
   if (loading) return <LoadingSpinner />
 
@@ -347,7 +351,7 @@ export default function ReconciliationPage() {
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {invoices.map(inv => (
-            <InvoiceCard key={inv.id} invoice={inv} receipts={receipts}
+            <InvoiceCard key={inv.id} invoice={inv} receipts={receipts} supplierIndex={supplierIndex}
               autoExpand={inv.id === focusInvoice} onChanged={loadData} />
           ))}
           {waiting.map(w => <WaitingCard key={w.vendor} vendor={w.vendor} notes={w.notes} />)}

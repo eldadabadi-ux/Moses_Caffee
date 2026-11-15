@@ -8,9 +8,9 @@
  * the comparison in the invoice row's `reconciliation` jsonb — so the
  * accountant document is regenerable and the state survives reloads.
  */
-import { docTypeOf } from './docTypes'
+import { docTypeOf } from './docTypes.js'
 // Vendor-name normalization is SSOT in supplierMatch (guardrail 2).
-import { normalizeVendor } from './supplierMatch'
+import { normalizeVendor } from './supplierMatch.js'
 export { normalizeVendor }
 
 const r2 = n => Math.round((Number(n) || 0) * 100) / 100
@@ -33,12 +33,45 @@ export function docRefsOf(invoice) {
 export const docNumberOf = r => r?.doc_number || r?.ai_summary?.doc_number || ''
 
 /**
- * Candidate delivery notes for a summary invoice: same supplier (normalized),
- * not archived, not matched to any invoice yet, dated on/before the invoice
- * and within `windowDays` back (default 60 ≈ a month of notes + slack).
+ * Supplier identity index: normalized vendor name → supplier_id, learned from
+ * every receipt that already carries a supplier_id (Phase 2 linkage). Lets rows
+ * that were never stamped (legacy receipts, email imports) share identity with
+ * their stamped siblings of the same spelling.
  */
-export function findCandidates(receipts, invoice, { windowDays = 60 } = {}) {
-  const vendor = normalizeVendor(invoice.vendor_name)
+export function buildSupplierIndex(receipts) {
+  const index = new Map()
+  for (const r of receipts || []) {
+    if (!r?.supplier_id) continue
+    const norm = normalizeVendor(r.vendor_name)
+    if (norm && !index.has(norm)) index.set(norm, r.supplier_id)
+  }
+  return index
+}
+
+/**
+ * Stable identity key of a receipt's supplier: its supplier_id when set,
+ * otherwise the supplier_id learned for its spelling, otherwise the normalized
+ * spelling itself. Two receipts of the same real supplier share a key even when
+ * vendor_name is spelled differently — so two spellings stop hiding each other's
+ * candidates (the exact-string bug this replaces).
+ */
+export function supplierKeyOf(receipt, index) {
+  if (receipt?.supplier_id) return `id:${receipt.supplier_id}`
+  const norm = normalizeVendor(receipt?.vendor_name)
+  const linked = index && index.get(norm)
+  return linked ? `id:${linked}` : `n:${norm}`
+}
+
+/**
+ * Candidate delivery notes for a summary invoice: same supplier (by identity —
+ * supplier_id when present, normalized spelling as fallback), not archived, not
+ * matched to any invoice yet, dated on/before the invoice and within
+ * `windowDays` back (default 60 ≈ a month of notes + slack). Pass a shared
+ * `index` (buildSupplierIndex) when matching many invoices against one dataset.
+ */
+export function findCandidates(receipts, invoice, { windowDays = 60, index } = {}) {
+  const idx = index || buildSupplierIndex(receipts)
+  const key = supplierKeyOf(invoice, idx)
   const invDate = invoice.receipt_date || ''
   const minDate = invDate
     ? new Date(new Date(invDate).getTime() - windowDays * 86400000).toISOString().slice(0, 10)
@@ -49,7 +82,7 @@ export function findCandidates(receipts, invoice, { windowDays = 60 } = {}) {
       !r.archived_at &&
       docTypeOf(r) === 'delivery_note' &&
       !r.matched_invoice_id &&
-      normalizeVendor(r.vendor_name) === vendor &&
+      supplierKeyOf(r, idx) === key &&
       (!invDate || ((r.receipt_date || '') <= invDate && (r.receipt_date || '') >= minDate)))
     .sort((a, b) => (a.receipt_date || '').localeCompare(b.receipt_date || ''))
 }
