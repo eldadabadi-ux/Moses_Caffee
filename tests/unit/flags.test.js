@@ -59,3 +59,16 @@ test('malformed rows do not crash resolution', () => {
   const f = resolveFlags(rows, ORG_A)
   assert.equal(f.bot_tools, true)         // "yes" coerces to true, and nothing threw
 })
+
+// ── sellable modules (SaaS packaging) ─────────────────────────────────────────
+test('the sellable module flags exist and default ON (existing tenant unaffected)', () => {
+  for (const k of ['reconciliation', 'product_compare', 'insights']) {
+    assert.equal(FLAG_DEFAULTS[k], true, `${k} must default on`)
+  }
+})
+
+test('a module can be switched off for one tenant only', () => {
+  const rows = [{ key: 'insights', org_id: ORG_A, enabled: false }]
+  assert.equal(resolveFlags(rows, ORG_A).insights, false)   // excluded for A
+  assert.equal(resolveFlags(rows, ORG_B).insights, true)    // still sold to B
+})

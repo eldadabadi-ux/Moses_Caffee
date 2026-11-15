@@ -337,9 +337,9 @@ function AppShell() {
             <Route path="/suppliers/merge" element={<SupplierMergePage />} />
             <Route path="/suppliers/:id" element={<SupplierDetailPage />} />
             <Route path="/events/quotes" element={<FlagGate flag="events_book"><EventQuotesPage /></FlagGate>} />
-            <Route path="/reconcile"  element={<ReconciliationPage />} />
-            <Route path="/products"   element={<ProductComparePage />} />
-            <Route path="/insights"   element={<InsightsPage />} />
+            <Route path="/reconcile"  element={<FlagGate flag="reconciliation"><ReconciliationPage /></FlagGate>} />
+            <Route path="/products"   element={<FlagGate flag="product_compare"><ProductComparePage /></FlagGate>} />
+            <Route path="/insights"   element={<FlagGate flag="insights"><InsightsPage /></FlagGate>} />
             <Route path="/archive"    element={<ArchivePage />} />
             <Route path="/settings"   element={<SettingsPage />} />
             <Route path="/admin"      element={<AdminPage />} />

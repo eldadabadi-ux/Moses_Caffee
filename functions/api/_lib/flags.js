@@ -33,6 +33,14 @@ export const FLAG_DEFAULTS = {
   supplier_confirm: true,
   // Price-change detection in the assistant.
   price_alerts: true,
+
+  // ── Sellable modules (SaaS packaging, client request #10). Default ON so an
+  // existing tenant is unaffected; switch OFF per tenant to exclude a module they
+  // did not buy. Each gates a whole page (route + sidebar). The data behind them
+  // is the tenant's own, RLS-limited — the feature being sold is the analysis UI.
+  reconciliation: true,   // "התאמות" — summary-invoice ↔ delivery-note matching
+  product_compare: true,  // "השוואת מוצרים" — cross-supplier price-per-unit report
+  insights: true,         // "תובנות" — the periodic insights report
 }
 
 export const FLAG_KEYS = Object.keys(FLAG_DEFAULTS)

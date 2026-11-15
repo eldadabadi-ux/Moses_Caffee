@@ -9,6 +9,15 @@ import {
   ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb,
 } from 'lucide-react'
 
+// A nav section hidden unless its feature flag is on (SaaS module packaging).
+// Sections not listed here are always shown.
+const NAV_FLAG = {
+  events: 'events_book',
+  reconcile: 'reconciliation',
+  products: 'product_compare',
+  insights: 'insights',
+}
+
 // Navigation tree — every section + its options.
 const NAV = [
   {
@@ -166,7 +175,7 @@ export default function Sidebar({ drawer = false, onNavigate, onClose, onSignOut
 
       {/* Nav tree */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '10px 8px' }}>
-        {NAV.filter(s => s.id !== 'events' || flags.events_book).map(s => {
+        {NAV.filter(s => !NAV_FLAG[s.id] || flags[NAV_FLAG[s.id]]).map(s => {
           const isActive = location.pathname === s.to
           const isOpen = openId === s.id
           const Icon = s.icon
