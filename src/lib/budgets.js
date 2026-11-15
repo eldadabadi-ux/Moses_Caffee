@@ -7,6 +7,14 @@ import { supabase } from './supabase'
 
 export { BUDGET_PERIODS, periodLabel, periodWindow, budgetStatus } from './budgetMath'
 
+/** All of a user's supplier budgets (for the insights report). */
+export async function loadAllBudgets(userId) {
+  const { data, error } = await supabase.from('supplier_budgets')
+    .select('*').eq('user_id', userId)
+  if (error) { console.warn('[budgets] load all failed:', error.message); return [] }
+  return data || []
+}
+
 export async function loadBudget(userId, supplierId) {
   const { data, error } = await supabase.from('supplier_budgets')
     .select('*').eq('user_id', userId).eq('supplier_id', supplierId).maybeSingle()

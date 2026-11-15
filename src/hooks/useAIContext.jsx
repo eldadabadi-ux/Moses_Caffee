@@ -13,6 +13,7 @@ const ROUTE_NAMES = {
   '/suppliers/merge':  'איחוד ספקים',
   '/reconcile':        'התאמות',
   '/products':         'השוואת מוצרים',
+  '/insights':         'תובנות',
   '/events/quotes':    'הצעות מחיר לאירועים',
   '/archive':          'ארכיון',
   '/settings':         'הגדרות',

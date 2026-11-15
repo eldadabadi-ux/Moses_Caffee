@@ -45,6 +45,7 @@ const ArchivePage     = lazy(() => import('./pages/ArchivePage'))
 const AdminPage       = lazy(() => import('./pages/AdminPage'))
 const ReconciliationPage = lazy(() => import('./pages/ReconciliationPage'))
 const ProductComparePage = lazy(() => import('./pages/ProductComparePage'))
+const InsightsPage = lazy(() => import('./pages/InsightsPage'))
 
 // Reactive mobile detection
 function useIsMobile() {
@@ -338,6 +339,7 @@ function AppShell() {
             <Route path="/events/quotes" element={<FlagGate flag="events_book"><EventQuotesPage /></FlagGate>} />
             <Route path="/reconcile"  element={<ReconciliationPage />} />
             <Route path="/products"   element={<ProductComparePage />} />
+            <Route path="/insights"   element={<InsightsPage />} />
             <Route path="/archive"    element={<ArchivePage />} />
             <Route path="/settings"   element={<SettingsPage />} />
             <Route path="/admin"      element={<AdminPage />} />

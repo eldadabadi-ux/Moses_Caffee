@@ -6,7 +6,7 @@ import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox,
+  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb,
 } from 'lucide-react'
 
 // Navigation tree — every section + its options.
@@ -54,6 +54,10 @@ const NAV = [
   },
   {
     id: 'products', label: 'השוואת מוצרים', icon: Scale, to: '/products',
+    children: [],
+  },
+  {
+    id: 'insights', label: 'תובנות', icon: Lightbulb, to: '/insights',
     children: [],
   },
   {
