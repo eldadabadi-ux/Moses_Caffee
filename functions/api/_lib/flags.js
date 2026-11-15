@@ -46,6 +46,15 @@ export const FLAG_DEFAULTS = {
 export const FLAG_KEYS = Object.keys(FLAG_DEFAULTS)
 
 /**
+ * The flags that represent a SELLABLE module — the ones an operator turns on/off
+ * per customer for packaging/pricing (client request #10). A subset of FLAG_KEYS:
+ * the rest (e.g. supplier_confirm) are behaviour toggles, not product modules.
+ */
+export const MODULE_FLAGS = [
+  'bot_tools', 'events_book', 'reconciliation', 'product_compare', 'insights', 'price_alerts',
+]
+
+/**
  * Resolve every flag from the rows a tenant can see.
  *
  * @param {Array} rows [{ key, org_id, enabled }] — globals and this org's overrides

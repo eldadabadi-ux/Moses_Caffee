@@ -5,7 +5,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveFlags, FLAG_DEFAULTS, FLAG_KEYS } from '../../functions/api/_lib/flags.js'
+import { resolveFlags, FLAG_DEFAULTS, FLAG_KEYS, MODULE_FLAGS } from '../../functions/api/_lib/flags.js'
 
 const ORG_A = 'org-a', ORG_B = 'org-b'
 
@@ -71,4 +71,9 @@ test('a module can be switched off for one tenant only', () => {
   const rows = [{ key: 'insights', org_id: ORG_A, enabled: false }]
   assert.equal(resolveFlags(rows, ORG_A).insights, false)   // excluded for A
   assert.equal(resolveFlags(rows, ORG_B).insights, true)    // still sold to B
+})
+
+test('every sellable MODULE_FLAG is a real, known flag key', () => {
+  assert.ok(MODULE_FLAGS.length > 0)
+  for (const k of MODULE_FLAGS) assert.ok(FLAG_KEYS.includes(k), `${k} is not a known flag`)
 })

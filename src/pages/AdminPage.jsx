@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
 import { Building2, UserPlus, ShieldCheck, Check, Copy, ScrollText, RefreshCw, ShieldAlert } from 'lucide-react'
+import FeatureFlagManager from '../components/admin/FeatureFlagManager'
 import toast from 'react-hot-toast'
 
 const AUDIT_LABELS = {
@@ -10,6 +11,8 @@ const AUDIT_LABELS = {
   account_deleted: 'חשבון נמחק',
   mailbox_connected: 'תיבת מייל חוברה',
   mailbox_disconnected: 'תיבת מייל נותקה',
+  flag_set: 'פיצ׳ר עודכן',
+  flag_cleared: 'פיצ׳ר אופס',
 }
 const fmtTs = ts => { try { return new Date(ts).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) } catch { return ts } }
 
@@ -136,6 +139,9 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* ── Per-customer feature modules (SaaS packaging) ─────────────────────── */}
+      <FeatureFlagManager />
 
       {/* ── Audit log (append-only, hash-chained) ─────────────────────────────── */}
       <div style={{ background:'var(--panel)', border:'1px solid var(--border)', borderRadius:16, overflow:'hidden', boxShadow:'var(--shadow-card)' }}>
