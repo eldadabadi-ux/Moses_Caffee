@@ -320,18 +320,22 @@ export default function DashboardPage() {
     <div className="animate-fade-in" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? '14px' : '20px' }}>
 
       {/* ── Header + Filters ──────────────────────────────────────────────────── */}
+      {/* The filter bar lives on its OWN row (never sharing a line with the
+          title): sharing meant that any width change — the clear button
+          appearing, the subtitle numbers changing — could flip the flex wrap
+          and teleport the whole bar (QA 15.11.26 round 4). Stacked rows +
+          fixed-width dropdowns + an always-reserved clear slot = nothing moves. */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: isMobile ? '23px' : '26px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <BarChart2 size={24} color="var(--accent)" />
-              דשבורד
-            </h1>
-            <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>
-              {active.length} קבלות · {fmtILSFull(total)} · {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: isMobile ? '23px' : '26px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <BarChart2 size={24} color="var(--accent)" />
+            דשבורד
+          </h1>
+          <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>
+            {active.length} קבלות · {fmtILSFull(total)} · {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
             {/* VAT display toggle */}
             <button onClick={toggleVatDisplay}
               style={{ height: 36, padding: '0 12px', borderRadius: 8, border: `1px solid ${settings.showWithVat ? 'var(--border)' : 'var(--accent)'}`, background: settings.showWithVat ? 'var(--panel)' : 'var(--accent-bg)', color: settings.showWithVat ? 'var(--text-dim)' : 'var(--accent)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}
@@ -341,13 +345,13 @@ export default function DashboardPage() {
             {/* Years — multi-select (at least one stays selected) */}
             <CheckDropdown icon={Calendar} minOne allLabel="שנה"
               options={availYears.map(y => ({ value: y, label: String(y) }))}
-              values={years} onChange={setYears} width={150} />
+              values={years} onChange={setYears} />
             {/* Compare years — checkbox multi-select over ALL years (the current
                 one included): any year(s) against any year(s) */}
             {!isMobile && (
               <CheckDropdown icon={TrendingUp} allLabel="השוואה: ללא"
                 options={availYears.map(y => ({ value: y, label: String(y) }))}
-                values={compareYears} onChange={setCompareYears} width={160} />
+                values={compareYears} onChange={setCompareYears} />
             )}
             {/* Categories — multi-select */}
             <CheckDropdown icon={Tag} allLabel="כל הקטגוריות"
@@ -357,15 +361,14 @@ export default function DashboardPage() {
             <CheckDropdown icon={Store} allLabel="כל הספקים"
               options={vendorFilterOptions.map(o => ({ value: o.key, label: o.name }))}
               values={filterVendors} onChange={setFilterVendors} />
-            {/* Clear filters */}
-            {hasFilters && (
-              <button onClick={() => { setFilterCats([]); setFilterVendors([]) }}
-                style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid var(--danger)', background: '#fef2f2', color: 'var(--danger)', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <X size={12} /> נקה
-              </button>
-            )}
+            {/* Clear filters — ALWAYS rendered (hidden when idle) so the row's
+                composition never changes and the dropdowns never shift */}
+            <button onClick={() => { setFilterCats([]); setFilterVendors([]) }}
+              style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid var(--danger)', background: '#fef2f2', color: 'var(--danger)', fontSize: '12.5px', cursor: 'pointer', fontFamily: 'var(--font-main)', display: 'flex', alignItems: 'center', gap: 5,
+                visibility: hasFilters ? 'visible' : 'hidden' }}>
+              <X size={12} /> נקה
+            </button>
           </div>
-        </div>
 
         {/* Active filter pills */}
         {hasFilters && (

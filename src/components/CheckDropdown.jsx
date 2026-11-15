@@ -70,22 +70,27 @@ export default function CheckDropdown({ icon: Icon, options = [], values = [], o
 
   return (
     <div ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
+      {/* FIXED width (not max-width) — the control must never move or resize
+          when a selection changes the summary text or reveals the clear X
+          (QA 15.11.26 round 4: the filter row jumped on every pick). The X
+          slot is always rendered so even the inner layout stays put. */}
       <button type="button" onClick={() => setOpen(o => !o)} disabled={!options.length}
-        style={{ height: 36, padding: '0 10px', borderRadius: 8, cursor: options.length ? 'pointer' : 'not-allowed',
+        style={{ height: 36, width: width || 170, padding: '0 10px', borderRadius: 8, cursor: options.length ? 'pointer' : 'not-allowed',
           border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
           background: active ? 'var(--accent-bg)' : 'var(--panel)',
           color: active ? 'var(--accent)' : 'var(--text)', fontSize: '13px', fontFamily: 'var(--font-main)',
-          display: 'flex', alignItems: 'center', gap: 6, maxWidth: width || 190, opacity: options.length ? 1 : 0.5 }}>
+          display: 'flex', alignItems: 'center', gap: 6, opacity: options.length ? 1 : 0.5 }}>
         {Icon && <Icon size={13} style={{ color: active ? 'var(--accent)' : 'var(--text-mute)', flexShrink: 0 }} />}
-        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: active ? 600 : 400 }}>{summary}</span>
-        {active && !minOne && (
-          <span onClick={(e) => { e.stopPropagation(); onChange([]) }} aria-label="נקה" style={{ display: 'flex', color: 'var(--text-mute)', flexShrink: 0 }}><X size={13} /></span>
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: active ? 600 : 400 }}>{summary}</span>
+        {!minOne && (
+          <span onClick={active ? (e) => { e.stopPropagation(); onChange([]) } : undefined} aria-label="נקה"
+            style={{ display: 'flex', color: 'var(--text-mute)', flexShrink: 0, visibility: active ? 'visible' : 'hidden', cursor: active ? 'pointer' : 'default' }}><X size={13} /></span>
         )}
         <ChevronDown size={14} style={{ color: 'var(--text-mute)', flexShrink: 0, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
       </button>
 
       {open && (
-        <div ref={panelRef} style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, transform: `translateX(${shift}px)`, zIndex: 40, minWidth: '100%', width: 'max-content', maxWidth: `min(${PANEL_MAX_W}px, calc(100vw - ${EDGE * 2}px))`,
+        <div ref={panelRef} style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, transform: `translateX(${shift}px)`, zIndex: 40, width: PANEL_MAX_W, maxWidth: `calc(100vw - ${EDGE * 2}px)`,
           background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, boxShadow: 'var(--shadow-modal)',
           maxHeight: 300, overflowY: 'auto', padding: 6 }}>
           {!minOne && (
