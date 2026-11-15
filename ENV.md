@@ -31,6 +31,8 @@ and in local `.env` / `.env.test` files that are git-ignored.
 | `GEMINI_MODEL` | `extractReceipt.js` | optional primary-model override |
 | `GEMINI_FALLBACK_MODEL` | `extractReceipt.js` | optional fallback-model override |
 | `CRON_SECRET` | `functions/api/mail/cron.js` | shared secret the scheduler (Supabase pg_cron) must present |
+| `INBOUND_SECRET` | `functions/api/inbound.js` + the email Worker | shared secret the inbound email Worker must present (set the SAME value on both) |
+| `INBOUND_DOMAIN` | `functions/api/inbound/alias.js` | the domain personal inbound addresses live on (e.g. `receipts-inbox.com`); until set, the address is reserved but inactive |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | `functions/api/mail/connect.js`, `callback.js` | Gmail OAuth app |
 | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | same | Outlook/Graph OAuth app |
 | `MAIL_REDIRECT_URI` | `mail/connect.js` | pinned OAuth redirect (falls back to `${origin}/api/mail/callback`) |

@@ -10,6 +10,7 @@ import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveF
 import { useInstall } from '../hooks/useInstall'
 import { isMobileDevice } from '../lib/isMobileDevice'
 import MailConnectCard from '../components/MailConnectCard'
+import InboundMailCard from '../components/InboundMailCard'
 import MfaCard from '../components/MfaCard'
 import { rescanAllReceipts } from '../lib/rescanReceipts'
 import { downloadBackup, restoreFromObject, readBackupFile } from '../lib/backup'
@@ -265,6 +266,9 @@ export default function SettingsPage() {
 
       {/* Connect mailbox → auto-import receipts from email */}
       <MailConnectCard />
+
+      {/* Self-service inbound address → forward receipts, no OAuth */}
+      <InboundMailCard />
 
       {/* Logo + Business name Card */}
       <div id="set-logo" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>

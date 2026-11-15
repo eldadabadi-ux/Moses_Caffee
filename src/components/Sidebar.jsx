@@ -6,7 +6,7 @@ import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale,
+  ArrowLeftRight, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox,
 } from 'lucide-react'
 
 // Navigation tree — every section + its options.
@@ -63,6 +63,7 @@ const NAV = [
   {
     id: 'settings', label: 'הגדרות', icon: Settings, to: '/settings',
     children: [
+      { label: 'קליטת מייל',     icon: Inbox,      anchor: 'set-inbound' },
       { label: 'לוגו ושם העסק',  icon: Building2,  anchor: 'set-logo' },
       { label: 'שיעור מע"מ',     icon: Percent,    anchor: 'set-vat' },
       { label: 'הצגת מחירים',    icon: Receipt,    anchor: 'set-display' },
