@@ -9,7 +9,7 @@
  * transports the message.
  *
  * Deploy: see README.md. Requires two values in the Worker's environment:
- *   INBOUND_API_URL  e.g. https://moses-caffee.pages.dev/api/inbound
+ *   INBOUND_API_URL  e.g. https://app.eldadai.co.il/api/inbound
  *   INBOUND_SECRET   the same secret set on the Pages project (wrangler secret)
  */
 import PostalMime from 'postal-mime'

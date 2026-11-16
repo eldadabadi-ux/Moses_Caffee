@@ -21,7 +21,7 @@ export async function buildBackupObject(user) {
   const receipts = recRes.data || []
   const categories = catRes.data || []
   return {
-    app: 'moses-caffee',
+    app: 'eldadai-receipts',
     backup_version: 1,
     exported_at: new Date().toISOString(),
     user_id: user.id,
@@ -36,7 +36,7 @@ export async function buildBackupObject(user) {
 function backupFilename() {
   const d = new Date()
   const p = (n) => String(n).padStart(2, '0')
-  return `moses-backup-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`
+  return `receipts-backup-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`
 }
 
 export function backupBlob(obj) {
@@ -63,7 +63,8 @@ export async function readBackupFile(file) {
 
 /** Restore — upsert categories (parents first) then receipts, by id. */
 export async function restoreFromObject(obj, user) {
-  if (!obj || obj.app !== 'moses-caffee' || !Array.isArray(obj.receipts)) {
+  // 'moses-caffee' was the app marker before the eldadai-receipts rename — old backups must stay restorable
+  if (!obj || !['eldadai-receipts', 'moses-caffee'].includes(obj.app) || !Array.isArray(obj.receipts)) {
     throw new Error('קובץ גיבוי לא תקין')
   }
   const stamp = (arr) => (arr || []).map(x => ({ ...x, user_id: user.id }))

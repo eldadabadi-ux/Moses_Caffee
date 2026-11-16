@@ -5,7 +5,7 @@ compatibility_date = "2026-01-01"
 # The app endpoint that receives parsed attachments. Point it at the live Pages
 # project (or a preview URL while testing).
 [vars]
-INBOUND_API_URL = "https://moses-caffee.pages.dev/api/inbound"
+INBOUND_API_URL = "https://app.eldadai.co.il/api/inbound"
 
 # INBOUND_SECRET is a SECRET, not a var — set it with:
 #   npx wrangler secret put INBOUND_SECRET

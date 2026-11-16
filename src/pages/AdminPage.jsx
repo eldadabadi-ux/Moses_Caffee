@@ -123,7 +123,7 @@ export default function AdminPage() {
           <p style={{ margin:'0 0 12px', fontSize:14, color:'var(--text-mute)' }}>הוקמו בהפעלה זו — שלח ללקוח את פרטי הכניסה:</p>
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
             {created.map((c, i) => {
-              const creds = `אתר: https://moses-caffee.pages.dev\nאימייל: ${c.email}\nסיסמה: ${c.password}`
+              const creds = `אתר: ${window.location.origin}\nאימייל: ${c.email}\nסיסמה: ${c.password}`
               return (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 14px', background:'var(--success-tint-1)', border:'1px solid var(--success-tint-border)', borderRadius:10 }}>
                   <Check size={16} color="var(--ok)" style={{ flexShrink:0 }} />

@@ -62,7 +62,7 @@ function step(label, cmd) {
 }
 const die = (msg) => { console.error('\n' + c.r('עצירה: ') + msg + '\n'); process.exit(1) }
 
-console.log('\n' + c.b('Moses Caffee - release') + '\n')
+console.log('\n' + c.b('eldadai-receipts - release') + '\n')
 
 // ── 1. preconditions ─────────────────────────────────────────────────────────
 if (sh('git status --porcelain')) die('Working tree has uncommitted changes. Commit or stash them first.')
