@@ -1,5 +1,10 @@
 # Environment variables — the full server surface
 
+> Retired 17.11.2026 with the OAuth mail-scan channel (replaced by the inbound
+> email Worker): `CRON_SECRET`, `GOOGLE_CLIENT_ID/SECRET`,
+> `MICROSOFT_CLIENT_ID/SECRET`, `MAIL_REDIRECT_URI`, `MAIL_TOKEN_KEY` — safe to
+> delete from the Pages project settings.
+
 There was no single list of the variables this system needs; this file is it.
 Names only — values live in the Cloudflare Pages project settings (production)
 and in local `.env` / `.env.test` files that are git-ignored.
@@ -30,13 +35,8 @@ and in local `.env` / `.env.test` files that are git-ignored.
 | `GEMINI_API_KEY` | `functions/api/_lib/extractReceipt.js` | receipt OCR/extraction |
 | `GEMINI_MODEL` | `extractReceipt.js` | optional primary-model override |
 | `GEMINI_FALLBACK_MODEL` | `extractReceipt.js` | optional fallback-model override |
-| `CRON_SECRET` | `functions/api/mail/cron.js` | shared secret the scheduler (Supabase pg_cron) must present |
 | `INBOUND_SECRET` | `functions/api/inbound.js` + the email Worker | shared secret the inbound email Worker must present (set the SAME value on both) |
-| `INBOUND_DOMAIN` | `functions/api/inbound/alias.js` | the domain personal inbound addresses live on (e.g. `receipts-inbox.com`); until set, the address is reserved but inactive |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | `functions/api/mail/connect.js`, `callback.js` | Gmail OAuth app |
-| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | same | Outlook/Graph OAuth app |
-| `MAIL_REDIRECT_URI` | `mail/connect.js` | pinned OAuth redirect (falls back to `${origin}/api/mail/callback`) |
-| `MAIL_TOKEN_KEY` | `functions/api/_lib/mailCrypto.js` | AES-GCM key for stored refresh tokens — rotating it invalidates every stored token |
+| `INBOUND_DOMAIN` | `functions/api/inbound/alias.js` | the domain personal inbound addresses live on (`eldadai.co.il`); until set, the address is reserved but inactive |
 | `ALLOWED_ORIGIN` | `functions/api/_lib/response.js` | CORS allow-list |
 | `SUPERADMIN_EMAIL` | `functions/api/admin/onboard.js`, `audit.js` | platform-owner account |
 

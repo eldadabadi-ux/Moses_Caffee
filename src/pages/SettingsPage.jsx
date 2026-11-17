@@ -10,7 +10,6 @@ import { fileToSquareLogo } from '../lib/imageUtils'
 import { isFolderSupported, pickDir, savedDirName, clearDir } from '../lib/saveFolder'
 import { useInstall } from '../hooks/useInstall'
 import { isMobileDevice } from '../lib/isMobileDevice'
-import MailConnectCard from '../components/MailConnectCard'
 import InboundMailCard from '../components/InboundMailCard'
 import MfaCard from '../components/MfaCard'
 import { rescanAllReceipts } from '../lib/rescanReceipts'
@@ -266,15 +265,8 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {flags.mail_ingest && (
-        <>
-          {/* Connect mailbox → auto-import receipts from email */}
-          <MailConnectCard />
-
-          {/* Self-service inbound address → forward receipts, no OAuth */}
-          <InboundMailCard />
-        </>
-      )}
+      {/* Self-service inbound address → forward receipts, no OAuth */}
+      {flags.mail_ingest && <InboundMailCard />}
 
       {/* Logo + Business name Card */}
       <div id="set-logo" style={{ scrollMarginTop: 76, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden', boxShadow: 'var(--shadow-card)' }}>

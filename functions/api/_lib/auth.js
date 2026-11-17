@@ -86,7 +86,7 @@ export async function requireMember(request, env) {
 
 /**
  * Constant-time string comparison — prevents timing attacks when comparing
- * shared secrets (e.g. CRON_SECRET). Returns false fast only on the length
+ * shared secrets (e.g. INBOUND_SECRET). Returns false fast only on the length
  * check; the per-character loop runs over the full length regardless of where
  * the first mismatch is, so elapsed time doesn't leak how many chars matched.
  */
