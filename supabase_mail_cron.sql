@@ -9,9 +9,9 @@
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
--- 2) Schedule the scan. ⚠️ Replace <<CRON_SECRET>> with the SAME value you set as
---    the CRON_SECRET environment variable on the Cloudflare Pages project
---    "moses-caffee". (Re-running this block updates the schedule.)
+-- 2) Schedule the scan. ⚠️ Replace <<CRON_SECRET>> with the SAME value set as the
+--    CRON_SECRET environment variable on the Cloudflare Pages project.
+--    (Re-running this block updates the schedule.)
 select cron.unschedule('mail-scan') where exists (select 1 from cron.job where jobname = 'mail-scan');
 
 select cron.schedule(
@@ -19,7 +19,7 @@ select cron.schedule(
   '*/30 * * * *',
   $$
   select net.http_post(
-    url     := 'https://moses-caffee.pages.dev/api/mail/cron',
+    url     := 'https://app.eldadai.co.il/api/mail/cron',
     headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', '<<CRON_SECRET>>')
   );
   $$

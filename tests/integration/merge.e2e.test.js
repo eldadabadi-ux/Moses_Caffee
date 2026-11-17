@@ -16,7 +16,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createClient } from '@supabase/supabase-js'
 
-const SITE = process.env.MERGE_SITE || 'https://moses-caffee.pages.dev'
+const SITE = process.env.MERGE_SITE || 'https://app.eldadai.co.il'
 const URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
 const ANON = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY

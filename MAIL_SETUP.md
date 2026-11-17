@@ -25,26 +25,26 @@
 1. [console.cloud.google.com](https://console.cloud.google.com) → צור פרויקט.
 2. **APIs & Services → Library** → הפעל **Gmail API**.
 3. **OAuth consent screen**: User type = **External**; מלא שם אפליקציה, מייל תמיכה, לוגו, דומיין
-   (`moses-caffee.pages.dev`), קישור למדיניות הפרטיות (`/privacy`) ולתנאי השימוש.
+   (`app.eldadai.co.il`), קישור למדיניות הפרטיות (`/privacy`) ולתנאי השימוש.
    - Scopes → הוסף `.../auth/gmail.readonly`.
    - **Test users** → הוסף את המיילים של Moshe והלקוחות הראשונים (עד 100). במצב "Testing" הפיצ'ר
      עובד מלא — רק מוצגת אזהרת "אפליקציה לא מאומתת" שאפשר לאשר.
 4. **Credentials → Create Credentials → OAuth client ID** → Web application.
-   - **Authorized redirect URI**: `https://moses-caffee.pages.dev/api/mail/callback`
+   - **Authorized redirect URI**: `https://app.eldadai.co.il/api/mail/callback`
    - שמור את **Client ID** ו-**Client Secret**.
 
 ## 3) Microsoft (Outlook) — אופציונלי
 
 1. [portal.azure.com](https://portal.azure.com) → **Microsoft Entra ID → App registrations → New registration**.
    - Supported account types: *Accounts in any organizational directory and personal Microsoft accounts*.
-   - Redirect URI (Web): `https://moses-caffee.pages.dev/api/mail/callback`
+   - Redirect URI (Web): `https://app.eldadai.co.il/api/mail/callback`
 2. **API permissions → Microsoft Graph → Delegated** → `Mail.Read`, `offline_access`, `openid`, `email` → Grant.
 3. **Certificates & secrets → New client secret** → שמור את הערך.
 4. שמור את **Application (client) ID**.
 
 ---
 
-## 4) סודות ב-Cloudflare Pages (פרויקט `moses-caffee`)
+## 4) סודות ב-Cloudflare Pages
 
 Settings → Environment variables (Production **וגם** Preview), הצפן כ-Secret:
 
@@ -55,7 +55,7 @@ Settings → Environment variables (Production **וגם** Preview), הצפן כ-
 | `MICROSOFT_CLIENT_ID` | מ-Azure (רק אם מפעילים Outlook) |
 | `MICROSOFT_CLIENT_SECRET` | מ-Azure |
 | `MAIL_TOKEN_KEY` | מחרוזת אקראית חזקה (≥32 תווים) — מפתח ההצפנה של האסימונים |
-| `MAIL_REDIRECT_URI` | `https://moses-caffee.pages.dev/api/mail/callback` (אופציונלי; ברירת מחדל = origin נוכחי) |
+| `MAIL_REDIRECT_URI` | `https://app.eldadai.co.il/api/mail/callback` (אופציונלי; ברירת מחדל = origin נוכחי) |
 | `CRON_SECRET` | מחרוזת אקראית — מגן על `/api/mail/cron` (זהה לזה שב-SQL של pg_cron) |
 
 > כבר קיימים בפרויקט: `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_URL`/`VITE_SUPABASE_URL`, מפתח Gemini.
