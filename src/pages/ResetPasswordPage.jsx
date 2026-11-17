@@ -14,10 +14,12 @@ import toast from 'react-hot-toast'
 export default function ResetPasswordPage() {
   const navigate = useNavigate()
   const { settings } = useSettings()
-  const [phase, setPhase]   = useState('verifying') // verifying | ready | invalid
+  const [phase, setPhase]   = useState('verifying') // verifying | mfa | ready | invalid
   const [pw, setPw]         = useState('')
   const [pw2, setPw2]       = useState('')
   const [saving, setSaving] = useState(false)
+  const [mfaCode, setMfaCode]     = useState('')
+  const [mfaFactor, setMfaFactor] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -51,7 +53,16 @@ export default function ResetPasswordPage() {
         if (ok) {
           // Clean the token out of the URL bar.
           try { window.history.replaceState({}, '', '/reset-password') } catch {}
-          setPhase('ready')
+          // An MFA-enrolled account may not change its password from the AAL1
+          // recovery session alone — step up with a TOTP code first.
+          const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+          if (aal?.nextLevel === 'aal2' && aal.nextLevel !== aal.currentLevel) {
+            const { data: f } = await supabase.auth.mfa.listFactors()
+            const totp = f?.totp?.find(x => x.status === 'verified')
+            if (cancelled) return
+            if (totp) { setMfaFactor(totp); setPhase('mfa'); return }
+          }
+          if (!cancelled) setPhase('ready')
         } else {
           setPhase('invalid')
         }
@@ -62,6 +73,21 @@ export default function ResetPasswordPage() {
     establish()
     return () => { cancelled = true }
   }, [])
+
+  async function handleMfaSubmit(e) {
+    e.preventDefault()
+    if (mfaCode.trim().length < 6) { toast.error('הזן קוד בן 6 ספרות'); return }
+    setSaving(true)
+    try {
+      const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: mfaFactor.id, code: mfaCode.trim() })
+      if (error) throw error
+      setPhase('ready')
+    } catch {
+      toast.error('קוד שגוי — נסה שוב')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -114,6 +140,22 @@ export default function ResetPasswordPage() {
               חזרה לכניסה
             </button>
           </div>
+        )}
+
+        {phase === 'mfa' && (
+          <form onSubmit={handleMfaSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <p style={{ textAlign: 'center', fontSize: '15px', color: 'var(--text-dim)', lineHeight: 1.6, margin: 0 }}>
+              לחשבון זה מופעל אימות דו-שלבי. הזן את הקוד מאפליקציית האימות כדי להמשיך.
+            </p>
+            <input type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={mfaCode}
+              onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))} placeholder="123456"
+              style={{ ...FS, textAlign: 'center', letterSpacing: '6px', fontSize: '20px' }}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'} onBlur={e => e.target.style.borderColor = 'var(--border)'} />
+            <button type="submit" disabled={saving}
+              style={{ height: '50px', background: saving ? 'var(--panel-2)' : 'var(--accent)', color: saving ? 'var(--text-mute)' : 'white', border: 'none', borderRadius: '10px', fontSize: '18px', fontWeight: 700, fontFamily: 'var(--font-main)', cursor: saving ? 'not-allowed' : 'pointer' }}>
+              {saving ? 'מאמת…' : 'אמת קוד'}
+            </button>
+          </form>
         )}
 
         {phase === 'ready' && (
