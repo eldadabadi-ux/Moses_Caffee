@@ -25,6 +25,6 @@ export const clearPageCache = () => { store.clear() }
  */
 export const invalidateReceiptData = () => {
   for (const key of [...store.keys()]) {
-    if (key === 'receipts' || key === 'archive' || key === 'dash:meta' || key.startsWith('dashyr:')) store.delete(key)
+    if (key === 'receipts' || key === 'archive' || key === 'suppliers' || key === 'dash:meta' || key.startsWith('dashyr:')) store.delete(key)
   }
 }

@@ -11,6 +11,7 @@ const ROUTE_NAMES = {
   '/categories':       'קטגוריות',
   '/suppliers':        'ספקים',
   '/suppliers/merge':  'איחוד ספקים',
+  '/suppliers/budgets': 'הגבלת תקציב לספק',
   '/compare':          'השוואת ספקים',
   '/reconcile':        'התאמות',
   '/products':         'השוואת מוצרים',

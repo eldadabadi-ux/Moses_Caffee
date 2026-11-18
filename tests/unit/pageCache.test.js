@@ -11,6 +11,7 @@ test('invalidateReceiptData clears every receipts-derived key', () => {
   clearPageCache()
   setCached('receipts', [1])
   setCached('archive', [2])
+  setCached('suppliers', { receipts: [9], contacts: [] })
   setCached('dash:meta', { suppliers: [] })
   setCached('dashyr:2025', [3])
   setCached('dashyr:2026', [4])
@@ -18,7 +19,7 @@ test('invalidateReceiptData clears every receipts-derived key', () => {
 
   invalidateReceiptData()
 
-  for (const k of ['receipts', 'archive', 'dash:meta', 'dashyr:2025', 'dashyr:2026']) {
+  for (const k of ['receipts', 'archive', 'suppliers', 'dash:meta', 'dashyr:2025', 'dashyr:2026']) {
     assert.equal(hasCached(k), false, k + ' should be cleared')
   }
   assert.deepEqual(getCached('categories'), { categories: [5] })

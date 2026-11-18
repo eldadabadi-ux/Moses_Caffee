@@ -6,7 +6,7 @@ import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Equal, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb, Menu,
+  ArrowLeftRight, Equal, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb, Menu, Wallet,
 } from 'lucide-react'
 
 // A nav section hidden unless its feature flag is on (SaaS module packaging).
@@ -54,6 +54,7 @@ const NAV = [
     children: [
       { label: 'הוסף ספק',   icon: Plus,  action: 'suppliers-add' },
       { label: 'איחוד ספקים', icon: Merge, to: '/suppliers/merge' },
+      { label: 'הגבלת תקציב', icon: Wallet, to: '/suppliers/budgets' },
     ],
   },
   {
