@@ -5,7 +5,10 @@ const HEB_MONTHS = ['ינו','פבר','מרץ','אפר','מאי','יוני','י�
 const HEB_MONTHS_FULL = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 
-export default function MonthlyBars({ data, compareData, year, compareYear, color = '#2563eb', compareColor = '#f59e0b', chartType = 'bar' }) {
+// One distinct color per year in a multi-year stack (oldest year gets the first).
+export const YEAR_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#0ea5e9', '#d946ef']
+
+export default function MonthlyBars({ data, compareData, year, compareYear, color = '#2563eb', compareColor = '#f59e0b', chartType = 'bar', series = null }) {
   const svgRef   = useRef(null)
   const wrapRef  = useRef(null)
   const tipRef   = useRef(null)
@@ -35,7 +38,13 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
 
     const months = d3.range(1, 13)
-    const allVals = [...data.map(d => d.total), ...(compareData || []).map(d => d.total)]
+    const stacked = Array.isArray(series) && series.length > 1
+    const stackTotals = stacked
+      ? months.map(m => series.reduce((s, sr) => s + (sr.data[m - 1]?.total || 0), 0))
+      : []
+    const allVals = stacked
+      ? [...stackTotals, ...(compareData || []).map(d => d.total)]
+      : [...data.map(d => d.total), ...(compareData || []).map(d => d.total)]
     const maxVal  = Math.max(d3.max(allVals) || 0, 1)
 
     const xScale = d3.scaleBand().domain(months).range([0, W]).paddingInner(compareData ? 0.25 : 0.35)
@@ -100,7 +109,7 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         .attr('height', d => d.total > 0 ? H - yScale(d.total) : 0)
     }
 
-    function drawLine(dataset, strokeColor) {
+    function drawLine(dataset, strokeColor, lineLabel) {
       const cx = d => xScale(d.month) + xScale.bandwidth() / 2
       const line = d3.line().x(cx).y(d => yScale(d.total)).curve(d3.curveMonotoneX)
       const path = g.append('path').datum(dataset)
@@ -115,7 +124,7 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         .style('cursor', 'pointer')
         .on('mouseenter', function (e, d) {
           d3.select(this).attr('r', 6.5)
-          const yr = strokeColor === color ? year : compareYear
+          const yr = lineLabel ?? (strokeColor === color ? year : compareYear)
           tip.style('display', 'block').html(
             `<div style="font-weight:700;margin-bottom:4px">${HEB_MONTHS_FULL[d.month-1]} ${yr}</div>` +
             `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
@@ -128,7 +137,48 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
     }
 
     const bw = compareData ? xScale.bandwidth() / 2 - 2 : xScale.bandwidth()
-    if (chartType === 'line') {
+    if (stacked && chartType === 'line') {
+      // Multi-year line mode: one line per year, same palette as the stack.
+      series.forEach((sr, i) => drawLine(sr.data, YEAR_COLORS[i % YEAR_COLORS.length], String(sr.year)))
+      if (compareData) drawLine(compareData, compareColor, compareYear)
+    } else if (stacked) {
+      // One column per month, a colored segment per year (client request
+      // 18.11.26): the cut between years is visible inside a single bar.
+      for (const m of months) {
+        let y0 = H
+        series.forEach((sr, i) => {
+          const d = sr.data[m - 1] || { total: 0, count: 0 }
+          if (!(d.total > 0)) return
+          const hPx = H - yScale(d.total)
+          const segY = y0 - hPx
+          const fill = YEAR_COLORS[i % YEAR_COLORS.length]
+          g.append('rect')
+            .attr('x', xScale(m)).attr('width', bw)
+            .attr('y', y0).attr('height', 0)
+            .attr('fill', fill).attr('opacity', 0.9)
+            .on('mouseenter', function (event) {
+              d3.select(this).attr('opacity', 1)
+              const stackTotal = stackTotals[m - 1]
+              tip.style('display', 'block').html(
+                `<div style="font-weight:700;margin-bottom:4px">${HEB_MONTHS_FULL[m - 1]} ${sr.year}</div>` +
+                `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
+                `<div style="color:var(--text-mute);font-size:11px;margin-top:2px">${d.count} קבלות · סה״כ החודש בכל השנים: ${fmtILS(stackTotal)}</div>`)
+              const svgRect = svgRef.current.getBoundingClientRect()
+              tip.style('left', (event.clientX - svgRect.left - 70) + 'px').style('top', (segY + margin.top - 84) + 'px')
+            })
+            .on('mouseleave', function () { d3.select(this).attr('opacity', 0.9); tip.style('display', 'none') })
+            .transition().duration(600).delay(m * 30).ease(d3.easeCubicOut)
+            .attr('y', segY).attr('height', hPx)
+          y0 = segY
+        })
+        if (y0 === H) {   // empty month placeholder, same as the single-year look
+          g.append('rect').attr('x', xScale(m)).attr('width', bw)
+            .attr('y', H - 2).attr('height', 2).attr('rx', 1)
+            .attr('fill', 'var(--border)').attr('opacity', 0.4)
+        }
+      }
+      if (compareData) drawBars(compareData, bw + 4, compareColor, 'B')
+    } else if (chartType === 'line') {
       drawLine(data, color)
       if (compareData) drawLine(compareData, compareColor)
     } else {
@@ -138,8 +188,11 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
 
     // Value labels on top of bars (desktop only, bar mode, skip if too many)
     if (chartType === 'bar' && dims.w > 480) {
+      const labelData = stacked
+        ? months.map(m => ({ month: m, total: stackTotals[m - 1] })).filter(d => d.total > 0)
+        : data.filter(d => d.total > 0)
       g.selectAll('.val-label')
-        .data(data.filter(d => d.total > 0))
+        .data(labelData)
         .join('text')
         .attr('class', 'val-label')
         .attr('x', d => xScale(d.month) + bw / 2)
@@ -153,11 +206,28 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         .transition().delay(800).duration(300)
         .attr('opacity', 1)
     }
-  }, [data, compareData, dims, year, compareYear, color, compareColor, chartType])
+  }, [data, compareData, dims, year, compareYear, color, compareColor, chartType, series])
+
+  const legendItems = Array.isArray(series) && series.length > 1
+    ? [
+        ...series.map((sr, i) => ({ label: String(sr.year), color: YEAR_COLORS[i % YEAR_COLORS.length] })),
+        ...(compareData && compareYear ? [{ label: `השוואה: ${compareYear}`, color: compareColor }] : []),
+      ]
+    : null
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
       <svg ref={svgRef} style={{ display: 'block', width: '100%' }} />
+      {legendItems && (
+        <div dir="rtl" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px', justifyContent: 'center', padding: '6px 4px 0', fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-main)' }}>
+          {legendItems.map(it => (
+            <span key={it.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 10, height: 10, borderRadius: 3, background: it.color, display: 'inline-block' }} />
+              {it.label}
+            </span>
+          ))}
+        </div>
+      )}
       <div ref={tipRef} style={{
         display: 'none', position: 'absolute', pointerEvents: 'none',
         background: 'var(--panel)', border: '1px solid var(--border)',

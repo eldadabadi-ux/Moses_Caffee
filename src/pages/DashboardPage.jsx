@@ -243,6 +243,17 @@ export default function DashboardPage() {
   }, [settings.showWithVat])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthlyData = useMemo(() => monthlyOf(active), [active, monthlyOf])
+  // With more than one year selected the chart shows ONE column per month,
+  // segmented by year (client request 18.11.26) — side-by-side year columns
+  // read as unrelated bars. Oldest year first so the stack grows forward in
+  // time from the baseline up.
+  const monthlySeries = useMemo(() => {
+    if (years.length < 2) return null
+    return [...years].sort((a, b) => a - b).map(y => ({
+      year: y,
+      data: monthlyOf(active.filter(r => String(r.receipt_date || '').startsWith(String(y)))),
+    }))
+  }, [active, years, monthlyOf])
   const compareMonthly = useMemo(() => {
     if (!compareYears.length) return null
     return monthlyOf(compareReceipts.filter(passesFilters))
@@ -416,7 +427,8 @@ export default function DashboardPage() {
           sub={compareLabel ? undefined : `סה"כ: ${fmtILS(total)}`}
           action={
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {compareLabel && !isMobile && (
+              {/* In stacked mode MonthlyBars draws its own per-year legend. */}
+              {compareLabel && !isMobile && !monthlySeries && (
                 <div style={{ display: 'flex', gap: 12, fontSize: '12px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <span style={{ width: 10, height: 10, borderRadius: 2, background: '#2563eb', display: 'inline-block' }} />{yearsLabel}
@@ -430,7 +442,7 @@ export default function DashboardPage() {
             </div>
           }
         >
-          <MonthlyBars data={monthlyData} compareData={compareMonthly} year={yearsLabel} compareYear={compareLabel || null} chartType={chartType} color="#2563eb" />
+          <MonthlyBars data={monthlyData} series={monthlySeries} compareData={compareMonthly} year={yearsLabel} compareYear={compareLabel || null} chartType={chartType} color="#2563eb" />
         </Section>
 
         {/* ── Distribution donut + ranking (by category OR by vendor) ───────────── */}
