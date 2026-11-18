@@ -61,6 +61,26 @@ export function sliceReceipt(r) {
 export const countsAsDoc = (r) => !r._slice || r._slice.i === 1
 
 /**
+ * Every calendar year the given rows touch — the document year, plus every
+ * year an installment spread reaches into. This is what makes a future year
+ * EXIST in year pickers the moment a payment lands in it.
+ */
+export function yearsSpanned(rows) {
+  const years = new Set()
+  for (const r of rows || []) {
+    const y0 = parseInt(String(r.receipt_date || '').slice(0, 4), 10)
+    if (!y0) continue
+    years.add(y0)
+    const n = installmentsOf(r)
+    if (n) {
+      const yEnd = parseInt(addMonths(r.receipt_date, n - 1).slice(0, 4), 10)
+      for (let y = y0 + 1; y <= yEnd; y++) years.add(y)
+    }
+  }
+  return [...years].sort((a, b) => b - a)
+}
+
+/**
  * Expand a list of receipts for analytics. Options:
  *   from / to — 'YYYY-MM-DD' bounds; slices OUTSIDE the window are dropped
  *               (pass the window you are displaying, e.g. the calendar year).

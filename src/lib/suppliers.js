@@ -6,6 +6,7 @@ import { supabase } from './supabase'
 import { flattenItems, vendorComposition } from './itemAggregation'
 import { isExpenseDoc } from './docTypes'
 import { isCafeBook } from './books'
+import { sliceReceipt } from './installments'
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
@@ -81,8 +82,13 @@ export function deriveVendorStats(receipts, contacts = []) {
     v.rawNames.add((r.vendor_name || '').trim())
     v.total += amt; v.count += 1
     if (d) v.dates.push(d)
-    if ((d || '').slice(0, 7) === curYM) v.thisMonth += amt
-    if ((d || '').startsWith(`${curY}`)) v.thisYear += amt
+    // Installment purchases hit the month/year sums slice by slice (decision A).
+    for (const s of sliceReceipt(r)) {
+      const sd = s.receipt_date || d || ''
+      const sAmt = parseFloat(s.amount) || 0
+      if (sd.slice(0, 7) === curYM) v.thisMonth += sAmt
+      if (sd.startsWith(`${curY}`)) v.thisYear += sAmt
+    }
   }
 
   return Object.values(map).map(v => {

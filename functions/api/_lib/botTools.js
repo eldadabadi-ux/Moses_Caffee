@@ -84,7 +84,7 @@ async function sbGet(url, key, path) {
  * never leak into the café's numbers. Pass book:'events' for the catering book,
  * or book:'all' to deliberately span both.
  */
-async function loadReceipts(ctx, { from, to, book } = {}) {
+async function loadReceipts(ctx, { from, to, book, spill } = {}) {
   const filters = [scopeOf(ctx)]
   // Only well-formed dates reach the query at all — anything else is dropped
   // rather than passed through as a filter fragment. A malformed date is reported
@@ -102,8 +102,20 @@ async function loadReceipts(ctx, { from, to, book } = {}) {
   const wanted = book === 'all' ? null : (book === 'events' ? 'events' : DEFAULT_BOOK)
   const bookPred = bookPredicate(book)
   if (bookPred) filters.push(bookPred)
-  const rows = await sbGet(ctx.url, ctx.key,
+  let rows = await sbGet(ctx.url, ctx.key,
     `receipts?${filters.join('&')}&select=${RECEIPT_FIELDS}&order=receipt_date.desc.nullslast&limit=${MAX_ROWS + 1}`)
+  // For tools that SPREAD installments: a from-filter must also pull earlier
+  // installment documents whose monthly slices reach into the window (≤60
+  // payments = at most 5 years back) — otherwise "how much in 2027" misses a
+  // 2026 purchase paid into 2027. Deduped by id (the stub layer in tests
+  // returns everything for every query).
+  if (spill && DATE_RE.test(String(from || ''))) {
+    const fromY = parseInt(String(from).slice(0, 4), 10)
+    const extra = await sbGet(ctx.url, ctx.key,
+      `receipts?${scopeOf(ctx)}&installments=gt.1&receipt_date=lt.${q(from)}&receipt_date=gte.${q(`${fromY - 5}-01-01`)}${bookPred ? '&' + bookPred : ''}&select=${RECEIPT_FIELDS}&limit=500`)
+    const seen = new Set(rows.map(r => r.id))
+    rows = [...rows, ...extra.filter(r => !seen.has(r.id))]
+  }
   const truncated = rows.length > MAX_ROWS
   // Keep the client-side book filter too: a belt-and-suspenders guard, and the
   // only line that scopes the book in tests that stub the REST layer.
@@ -513,7 +525,7 @@ async function toolComparePrices(ctx, args) {
 }
 
 async function toolSupplierReport(ctx, args) {
-  const loaded = await loadReceipts(ctx, args)
+  const loaded = await loadReceipts(ctx, { ...args, spill: true })
   const { rows } = loaded
   const suppliers = await loadSuppliers(ctx)
   const byId = Object.fromEntries(suppliers.map(s => [s.id, s.name]))
@@ -960,6 +972,12 @@ export async function buildOrientation(ctx) {
     pending_documents: rows.filter(r => r.status === 'pending').length,
     installment_documents: rows.filter(r => installmentsOf(r)).length,
     date_range: dates.length ? `${dates[0]} … ${dates[dates.length - 1]}` : 'אין תאריכים',
+    spend_spread_until: (() => {   // installment slices can land in FUTURE months/years
+      const spread = expandInstallments(rows.filter(isExpenseDoc)).map(r => r.receipt_date).filter(Boolean).sort()
+      const last = spread[spread.length - 1]
+      return last && dates.length && last > dates[dates.length - 1]
+        ? `${last} (רכישות בתשלומים נפרסות קדימה — supplier_report יראה את החודשים העתידיים)` : undefined
+    })(),
     total_spend: ils(total),
     suppliers: names,
     categories: cats,

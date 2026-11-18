@@ -9,7 +9,7 @@ import { supabase } from './supabase'
 import { getCached, setCached } from './pageCache'
 import { isExpenseDoc } from './docTypes'
 import { isCafeBook } from './books'
-import { expandInstallments } from './installments'
+import { expandInstallments, yearsSpanned } from './installments'
 
 const COLS = 'id, amount, amount_before_vat, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type, book, archived_at, installments'
 
@@ -70,9 +70,11 @@ export async function loadDashMeta(userId, fallbackYear) {
     // Canonical supplier names — a merged supplier must appear once, not once
     // per OCR spelling.
     supabase.from('suppliers').select('id, name').eq('user_id', userId),
-    supabase.from('receipts').select('receipt_date').eq('user_id', userId).not('receipt_date', 'is', null),
+    supabase.from('receipts').select('receipt_date, installments').eq('user_id', userId).not('receipt_date', 'is', null),
   ])
-  const years = [...new Set((allDates || []).map(r => parseInt(r.receipt_date.slice(0, 4))))].filter(Boolean).sort((a, b) => b - a)
+  // A year exists the moment money lands in it — including a FUTURE year that
+  // only installment slices reach (client request 18.11.26).
+  const years = yearsSpanned(allDates || [])
   const meta = { categories: cats || [], suppliers: sups || [], availYears: years.length ? years : [fallbackYear] }
   setCached('dash:meta', meta)
   return meta

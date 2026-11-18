@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { installmentsOf, addMonths, sliceReceipt, countsAsDoc, expandInstallments } from '../../functions/api/_lib/installments.js'
+import { installmentsOf, addMonths, sliceReceipt, countsAsDoc, expandInstallments, yearsSpanned } from '../../functions/api/_lib/installments.js'
 
 const base = { id: 'r1', amount: 6790, amount_before_vat: 5753.39, vat_amount: 1036.61, receipt_date: '2026-11-17', items: [{ name: 'מקרר' }] }
 
@@ -50,4 +50,18 @@ test('expandInstallments drops slices outside the window', () => {
 test('a 3-payment amount that does not divide evenly stays exact', () => {
   const out = sliceReceipt({ id: 'x', amount: 100, amount_before_vat: 85.47, vat_amount: 14.53, receipt_date: '2026-05-01', installments: 3 })
   assert.deepEqual(out.map(s => s.amount), [33.33, 33.33, 33.34])
+})
+
+test('yearsSpanned includes every future year an installment spread reaches', () => {
+  const rows = [
+    { receipt_date: '2025-03-10', installments: null },
+    { receipt_date: '2026-11-17', installments: 10 },   // reaches 2027-08
+    { receipt_date: '2026-12-01', installments: 26 },   // reaches 2029-01
+  ]
+  assert.deepEqual(yearsSpanned(rows), [2029, 2028, 2027, 2026, 2025])
+})
+
+test('yearsSpanned without installments is just the document years', () => {
+  assert.deepEqual(yearsSpanned([{ receipt_date: '2026-01-01' }, { receipt_date: '2024-06-06' }]), [2026, 2024])
+  assert.deepEqual(yearsSpanned([]), [])
 })
