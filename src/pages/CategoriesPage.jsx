@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useTenant } from '../hooks/useTenant'
-import { getCached, setCached, hasCached } from '../lib/pageCache'
+import { getCached, setCached, hasCached, invalidateReceiptData } from '../lib/pageCache'
 import { recategorizeAll } from '../lib/recategorize'
 import { classifyReceipt } from '../../functions/api/_lib/classifyReceipt'
 import { normalizeCategoryName, categoryKey, cleanCategoryName } from '../lib/categoryNormalize'
@@ -257,6 +257,7 @@ export default function CategoriesPage() {
         const { data: ins } = await supabase.from('categories').insert(rows).select('id')
         if (ins?.length) changed = true
       }
+      if (changed) invalidateReceiptData()   // merges rewrite receipts' category fields
       return changed
     } catch (e) { console.warn('[categories] sync:', e?.message); return false }
   }
@@ -311,6 +312,7 @@ export default function CategoriesPage() {
       })
       if (error) throw error
       toast.success('קטגוריה נוספה')
+      invalidateReceiptData()   // dash:meta holds the category dropdown
       setNewName(''); setAddingTo(null)
       load()
       scheduleRecategorize()   // re-sort existing receipts into the new category
@@ -328,6 +330,7 @@ export default function CategoriesPage() {
     try {
       const { error } = await supabase.from('categories').update({ name }).eq('id', id)
       if (error) throw error
+      invalidateReceiptData()
       toast.success('קטגוריה עודכנה'); setEditId(null); setEditName(''); load()
       scheduleRecategorize()
     } catch (err) { toast.error('שגיאה: ' + err.message) } finally { setSaving(false) }
@@ -337,6 +340,7 @@ export default function CategoriesPage() {
     try {
       const { error } = await supabase.from('categories').delete().eq('id', deleteId)
       if (error) throw error
+      invalidateReceiptData()
       toast.success('קטגוריה נמחקה'); setDeleteId(null); load()
     } catch (err) { toast.error('שגיאה: ' + err.message) }
   }

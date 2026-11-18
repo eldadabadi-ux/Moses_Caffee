@@ -10,6 +10,7 @@
  * needs it is fetched by id inside the throttled loop.
  */
 import { supabase } from './supabase'
+import { invalidateReceiptData } from './pageCache'
 import { receiptScanImage } from './receiptImage'
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -115,5 +116,6 @@ export async function rescanAllReceipts(user, vatRate = 18, { onProgress, signal
     await sleep(THROTTLE_MS)
   }
 
+  if (fixed) invalidateReceiptData()
   return { total: list.length, fixed, failed, skipped, changes }
 }

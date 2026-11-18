@@ -7,12 +7,14 @@
  * delete removes the row entirely.
  */
 import { supabase } from './supabase'
+import { invalidateReceiptData } from './pageCache'
 
 export async function archiveReceipts(ids) {
   if (!ids?.length) return
   const { error } = await supabase
     .from('receipts').update({ archived_at: new Date().toISOString() }).in('id', ids)
   if (error) throw error
+  invalidateReceiptData()
 }
 
 export async function restoreReceipts(ids) {
@@ -20,12 +22,14 @@ export async function restoreReceipts(ids) {
   const { error } = await supabase
     .from('receipts').update({ archived_at: null }).in('id', ids)
   if (error) throw error
+  invalidateReceiptData()
 }
 
 export async function permanentDeleteReceipts(ids) {
   if (!ids?.length) return
   const { error } = await supabase.from('receipts').delete().in('id', ids)
   if (error) throw error
+  invalidateReceiptData()
 }
 
 export async function loadArchivedReceipts() {

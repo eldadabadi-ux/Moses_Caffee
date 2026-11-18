@@ -16,6 +16,7 @@ import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { HelpCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
+import { invalidateReceiptData } from '../../lib/pageCache'
 
 const pill = (busy, accent) => ({
   padding: '5px 11px', borderRadius: 999, fontSize: '12.5px', fontWeight: 600,
@@ -49,6 +50,7 @@ export default function SupplierConfirmQueue({ receipts, onResolved }) {
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.message || 'שמירת הספק נכשלה')
       const ans = await res.json()
       toast.success(supplierId ? `שויך ל${ans.supplier_name}` : `נוצר ספק: ${ans.supplier_name}`)
+      invalidateReceiptData()
       onResolved?.()
     } catch (e) {
       toast.error(e.message || 'שגיאה')

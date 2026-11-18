@@ -5,9 +5,9 @@ import { useAuth } from '../hooks/useAuth'
 import { useFeatureFlags } from '../lib/flags'
 import { useTenant } from '../hooks/useTenant'
 import { useSettings } from '../hooks/useSettings'
-import { getCached, setCached, hasCached } from '../lib/pageCache'
+import { getCached, setCached, hasCached, invalidateReceiptData } from '../lib/pageCache'
 import { normalizeCategoryName, categoryKey } from '../lib/categoryNormalize'
-import { archiveReceipts } from '../lib/archive'
+import { archiveReceipts, restoreReceipts, permanentDeleteReceipts } from '../lib/archive'
 import ImageViewer from '../components/ImageViewer'
 import { downloadFile } from '../lib/downloadFile'
 import { compressImage, downscaleForUpload, dataUrlToBlob } from '../lib/imageUtils'
@@ -665,6 +665,7 @@ export default function ReceiptsPage() {
       // that used to sit here hid real write failures (guardrail 1, audit M1).
       const { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols })
       if (error) throw error
+      invalidateReceiptData()
       if (reviewDocType === 'summary_invoice') {
         window.dispatchEvent(new Event('reconcile-changed'))
         toast((tt) => (
@@ -708,6 +709,7 @@ export default function ReceiptsPage() {
       })
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.message || 'שמירת הספק נכשלה')
       const r = await res.json()
+      invalidateReceiptData()
       setScanSupplier({ outcome: 'linked', supplier_id: r.supplier_id, supplier_name: r.supplier_name, suggestion: null })
       if (supplierId) setReviewVendor(r.supplier_name)   // adopt the canonical spelling
       toast.success(supplierId ? `שויך ל${r.supplier_name}` : 'נוצר ספק חדש')
@@ -768,12 +770,14 @@ export default function ReceiptsPage() {
       const { error } = await supabase.from('receipts').update({ ...payload, ...vatCols, doc_type: docType, ...approve }).eq('id', editId)
       if (error) { toast.error('שגיאה בעדכון: ' + (error.message || '')); return }
       toast.success(approve.status ? 'הקבלה אושרה ונשמרה' : 'קבלה עודכנה')
+      invalidateReceiptData()
       setReceipts(prev => { const next = prev.map(r => r.id === editId ? { ...r, ...payload, ...vatCols, doc_type: docType, ...approve } : r); setCached('receipts', next); return next })
     } else {
       const resp = await supabase.from('receipts').insert({ ...payload, org_id: orgId || null, ...vatCols, doc_type: docType }).select().single()
       if (resp.error) { toast.error('שגיאה בשמירה: ' + (resp.error.message || '')); return }
       toast.success('קבלה נשמרה')
-      setReceipts(prev => [resp.data, ...prev])
+      invalidateReceiptData()
+      setReceipts(prev => { const next = [resp.data, ...prev]; setCached('receipts', next); return next })
     }
     setShowModal(false); setEditId(null); resetForm()
   }
@@ -782,6 +786,7 @@ export default function ReceiptsPage() {
   async function approveReceipt(id) {
     const { error } = await supabase.from('receipts').update({ status: 'ready' }).eq('id', id)
     if (error) { toast.error('שגיאה באישור'); return }
+    invalidateReceiptData()
     setReceipts(prev => { const next = prev.map(r => r.id === id ? { ...r, status: 'ready' } : r); setCached('receipts', next); return next })
     toast.success('המסמך אושר')
   }
@@ -792,6 +797,7 @@ export default function ReceiptsPage() {
     if (!ids.length) return
     const { error } = await supabase.from('receipts').update({ status: 'ready' }).in('id', ids)
     if (error) { toast.error('שגיאה באישור: ' + (error.message || '')); return }
+    invalidateReceiptData()
     setReceipts(prev => { const next = prev.map(r => r.status === 'pending' ? { ...r, status: 'ready' } : r); setCached('receipts', next); return next })
     toast.success(`${ids.length} מסמכים אושרו ✓`)
   }
@@ -810,6 +816,7 @@ export default function ReceiptsPage() {
         if (DOC_COL_RE.test(error.message || '')) { toast.error('נדרש עדכון בסיס נתונים — יש להריץ את supabase_doctype.sql ב-Supabase', { duration: 7000 }); return }
         throw error
       }
+      invalidateReceiptData()
       setReceipts(prev => { const next = prev.map(r => selectedIds.has(r.id) ? { ...r, doc_type: docType } : r); setCached('receipts', next); return next })
       toast.success(`${ids.length} מסמכים סומנו כ"${docTypeLabel(docType)}"`)
       setSelectedIds(new Set()); setSelectMode(false)
@@ -844,8 +851,7 @@ export default function ReceiptsPage() {
   // "Delete" = soft-delete to the archive (recoverable). Permanent removal happens
   // from the archive view, behind a type-to-confirm step.
   async function archiveReceipt() {
-    const { error } = await supabase.from('receipts').update({ archived_at: new Date().toISOString() }).eq('id', deleteId)
-    if (error) { toast.error('שגיאה'); return }
+    try { await archiveReceipts([deleteId]) } catch { toast.error('שגיאה'); return }
     toast.success('הקבלה הועברה לארכיון')
     const next = receipts.filter(r => r.id !== deleteId)
     setReceipts(next); setCached('receipts', next)
@@ -874,8 +880,7 @@ export default function ReceiptsPage() {
   }
 
   async function restoreReceipt(id) {
-    const { error } = await supabase.from('receipts').update({ archived_at: null }).eq('id', id)
-    if (error) { toast.error('שגיאה'); return }
+    try { await restoreReceipts([id]) } catch { toast.error('שגיאה'); return }
     toast.success('הקבלה שוחזרה')
     setArchived(prev => prev.filter(r => r.id !== id))
     loadData()  // refresh the active list + cache
@@ -885,12 +890,13 @@ export default function ReceiptsPage() {
     if (permBusy || !permDeleteId) return
     setPermBusy(true)
     try {
-      const rec = archived.find(r => r.id === permDeleteId)
-      const { error } = await supabase.from('receipts').delete().eq('id', permDeleteId)
-      if (error) throw error
+      // The trash can is offered both on the live list and in the archive.
+      const rec = archived.find(r => r.id === permDeleteId) || receipts.find(r => r.id === permDeleteId)
+      await permanentDeleteReceipts([permDeleteId])
       if (rec?.storage_path) { try { await deleteReceiptFile(rec.storage_path) } catch {} }
       toast.success('הקבלה נמחקה לצמיתות')
       setArchived(prev => prev.filter(r => r.id !== permDeleteId))
+      setReceipts(prev => { const next = prev.filter(r => r.id !== permDeleteId); setCached('receipts', next); return next })
       setPermDeleteId(null); setPermText('')
     } catch (err) {
       toast.error('שגיאה במחיקה: ' + (err?.message || ''))
@@ -1322,6 +1328,7 @@ export default function ReceiptsPage() {
                     )}
                     <button onClick={() => openEdit(r)} title="עריכה" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>e.currentTarget.style.background='var(--panel-2)'} onMouseLeave={e=>e.currentTarget.style.background='none'}><Pencil size={14} /></button>
                     <button onClick={() => setDeleteId(r.id)} title="העבר לארכיון" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='var(--accent-bg)';e.currentTarget.style.color='var(--accent)'}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-mute)'}}><Archive size={14} /></button>
+                    <button onClick={() => { setPermText(''); setPermDeleteId(r.id) }} title="מחק לצמיתות" style={{ padding: isMobile ? '8px' : '6px', background:'none', border:'none', cursor:'pointer', color:'var(--danger)', borderRadius:'6px', display:'flex', alignItems:'center' }} onMouseEnter={e=>{e.currentTarget.style.background='#fef2f2'}} onMouseLeave={e=>{e.currentTarget.style.background='none'}}><Trash2 size={15} /></button>
                   </>
                 )}
               </div>

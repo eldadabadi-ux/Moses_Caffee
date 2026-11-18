@@ -9,6 +9,7 @@
  * accountant document is regenerable and the state survives reloads.
  */
 import { docTypeOf } from './docTypes.js'
+import { invalidateReceiptData } from './pageCache.js'
 // Vendor-name normalization is SSOT in supplierMatch (guardrail 2).
 import { normalizeVendor } from './supplierMatch.js'
 export { normalizeVendor }
@@ -172,6 +173,7 @@ export async function confirmMatch(supabase, invoice, result, includedIds) {
   }
   const { error: e2 } = await supabase.from('receipts').update({ reconciliation: snapshot }).eq('id', invoice.id)
   if (e2) throw mark(e2)
+  invalidateReceiptData()
   return snapshot
 }
 
@@ -181,6 +183,7 @@ export async function unconfirmMatch(supabase, invoiceId) {
   if (e1) throw e1
   const { error: e2 } = await supabase.from('receipts').update({ reconciliation: null }).eq('id', invoiceId)
   if (e2) throw e2
+  invalidateReceiptData()
 }
 
 /** Summary invoices that still need attention: unconfirmed, or confirmed with a mismatch. */

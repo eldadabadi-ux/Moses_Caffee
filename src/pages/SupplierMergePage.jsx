@@ -13,6 +13,7 @@ import { supabase } from '../lib/supabase'
 import { Store, Merge, AlertTriangle, ChevronLeft, Check, RefreshCw } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import { initialChoices, buildMergeGroups } from '../lib/mergeGroups'
+import { invalidateReceiptData } from '../lib/pageCache'
 import toast from 'react-hot-toast'
 
 const fmtILS = n => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`
@@ -122,6 +123,7 @@ export default function SupplierMergePage() {
         }] }),
       })
       toast.success(`"${member.name}" הופרד לספק נפרד (${r.receipts_linked || 0} קבלות)`, { id: progress })
+      invalidateReceiptData()
       await load()
     } catch (e) { toast.error(e.message, { id: progress }) }
     finally { setBusy(false) }
@@ -166,6 +168,7 @@ export default function SupplierMergePage() {
           queue = queue.filter(g => remaining.includes(g.canonical))
           if (queue.length) toast.loading(`ממזג… נותרו ${queue.length} קבוצות`, { id: progress })
         }
+        invalidateReceiptData()
         toast.success(`${linked} קבלות קושרו${absorbed ? ` · ${absorbed} ספקים כפולים אוחדו` : ''}${created ? ` · ${created} ספקים נוצרו` : ''}`, { id: progress })
         if (problems.length) toast.error(`${problems.length} בעיות — ראה קונסול`)
         if (problems.length) console.warn('[merge] problems:', problems)

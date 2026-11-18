@@ -15,3 +15,16 @@ export const getCached = (key) => store.get(key)
 export const setCached = (key, value) => { store.set(key, value) }
 export const hasCached = (key) => store.has(key)
 export const clearPageCache = () => { store.clear() }
+
+/**
+ * Every cache key that is derived from the receipts table. Any mutation of a
+ * receipt (create / edit / approve / archive / restore / delete / re-link /
+ * re-categorize) MUST call invalidateReceiptData() so the dashboard, insights
+ * and dropdowns never show pre-mutation numbers. The mutating page may re-seed
+ * its own key afterwards; everyone else refetches on next mount.
+ */
+export const invalidateReceiptData = () => {
+  for (const key of [...store.keys()]) {
+    if (key === 'receipts' || key === 'archive' || key === 'dash:meta' || key.startsWith('dashyr:')) store.delete(key)
+  }
+}

@@ -4,6 +4,7 @@
  * Called after the user changes the category tree.
  */
 import { supabase } from './supabase'
+import { invalidateReceiptData } from './pageCache'
 import { normalizeCategoryName, categoryKey } from './categoryNormalize'
 
 export async function recategorizeAll() {
@@ -81,5 +82,6 @@ export async function recategorizeAll() {
     if (!error) changed++
   }
 
+  if (changed) invalidateReceiptData()
   return { changed, total: receipts.length }
 }

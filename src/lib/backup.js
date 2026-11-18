@@ -5,6 +5,7 @@
  * "backup now" / "restore" buttons in Settings.
  */
 import { supabase } from './supabase'
+import { invalidateReceiptData } from './pageCache'
 import { downloadFile } from './downloadFile'
 import { saveToDir } from './saveFolder'
 
@@ -94,5 +95,6 @@ export async function restoreFromObject(obj, user) {
   }
 
   if (obj.settings) { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(obj.settings)) } catch {} }
+  if (restored.receipts || restored.categories) invalidateReceiptData()
   return restored
 }
