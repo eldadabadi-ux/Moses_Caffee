@@ -9,23 +9,42 @@ import { supabase } from './supabase'
 import { getCached, setCached } from './pageCache'
 import { isExpenseDoc } from './docTypes'
 import { isCafeBook } from './books'
+import { expandInstallments } from './installments'
 
-/** Café-book expense receipts of one calendar year, cached under dashyr:<year>. */
+const COLS = 'id, amount, amount_before_vat, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type, book, archived_at, installments'
+
+/**
+ * Café-book expense receipts of one calendar year, cached under dashyr:<year>.
+ * Installment documents are returned SPREAD: one virtual slice per month that
+ * falls inside the year (see installments.js). A document bought late last
+ * year in 10 payments must show its slices THIS year, so a second query pulls
+ * earlier installment rows whose spread can reach this window (≤60 payments —
+ * the DB constraint — means at most 5 years back).
+ */
 export async function loadYearReceipts(userId, year) {
   const key = 'dashyr:' + year
   const cached = getCached(key)
   if (cached) return cached
   // doc_type is selected so summary invoices (חשבונית מרכזת) can be EXCLUDED
   // from all totals — they aggregate delivery notes that are already counted.
-  // Pre-migration the column doesn't exist → retry without it.
+  // Pre-migration the columns don't exist → retry without them.
   let { data: recs, error } = await supabase
     .from('receipts')
-    .select('id, amount, amount_before_vat, receipt_date, category_id, category_text, vendor_name, supplier_id, items, doc_type, book, archived_at')
+    .select(COLS)
     .eq('user_id', userId)
     .gte('receipt_date', `${year}-01-01`)
     .lte('receipt_date', `${year}-12-31`)
     .order('receipt_date')
-  if (error) {
+  let spill = []
+  if (!error) {
+    ;({ data: spill } = await supabase
+      .from('receipts')
+      .select(COLS)
+      .eq('user_id', userId)
+      .gt('installments', 1)
+      .gte('receipt_date', `${year - 5}-01-01`)
+      .lt('receipt_date', `${year}-01-01`))
+  } else {
     ;({ data: recs } = await supabase
       .from('receipts')
       .select('id, amount, receipt_date, category_id, category_text, vendor_name, items')
@@ -35,9 +54,11 @@ export async function loadYearReceipts(userId, year) {
       .order('receipt_date'))
   }
   // Catering events are a separate book — the café dashboard never shows them.
-  const filtered = (recs || []).filter(r => isExpenseDoc(r) && isCafeBook(r))
-  setCached(key, filtered)
-  return filtered
+  const rows = [...(recs || []), ...(spill || [])].filter(r => isExpenseDoc(r) && isCafeBook(r))
+  const spread = expandInstallments(rows, { from: `${year}-01-01`, to: `${year}-12-31` })
+    .sort((a, b) => (a.receipt_date || '').localeCompare(b.receipt_date || ''))
+  setCached(key, spread)
+  return spread
 }
 
 /** Categories, canonical suppliers and the available years, cached under dash:meta. */

@@ -15,6 +15,7 @@ import { useSettings } from '../hooks/useSettings'
 import { deriveVendorStats, waLink, telLink, gmailComposeLink } from '../lib/suppliers'
 import { normalizeVendor } from '../lib/supplierMatch'
 import { loadBudget, saveBudget, deleteBudget, budgetStatus, BUDGET_PERIODS, periodLabel } from '../lib/budgets'
+import { expandInstallments } from '../lib/installments'
 import { isExpenseDoc } from '../lib/docTypes'
 import { isCafeBook } from '../lib/books'
 import { signedReceiptUrl } from '../lib/storage'
@@ -63,7 +64,7 @@ export default function SupplierDetailPage() {
         supabase.from('suppliers').select('*').eq('id', id).maybeSingle(),
         supabase.from('supplier_aliases').select('alias').eq('supplier_id', id),
         supabase.from('receipts')
-          .select('id, vendor_name, supplier_id, receipt_date, amount, category_text, items, archived_at, created_at, doc_type, doc_number, book, storage_path, receipt_image, status')
+          .select('id, vendor_name, supplier_id, receipt_date, amount, category_text, items, archived_at, created_at, doc_type, doc_number, book, storage_path, receipt_image, status, installments')
           .eq('user_id', user.id),
         loadBudget(user.id, id),
       ])
@@ -97,10 +98,9 @@ export default function SupplierDetailPage() {
   const year = new Date().getFullYear()
   const monthly = useMemo(() => {
     const sums = Array.from({ length: 12 }, () => 0)
-    for (const r of myReceipts) {
-      if (r.archived_at || !isExpenseDoc(r) || !isCafeBook(r)) continue
+    const rows = myReceipts.filter(r => !r.archived_at && isExpenseDoc(r) && isCafeBook(r))
+    for (const r of expandInstallments(rows, { from: `${year}-01-01`, to: `${year}-12-31` })) {
       const d = r.receipt_date || ''
-      if (!d.startsWith(String(year))) continue
       sums[Number(d.slice(5, 7)) - 1] += parseFloat(r.amount) || 0
     }
     return sums.map((total, i) => ({ month: i + 1, total }))

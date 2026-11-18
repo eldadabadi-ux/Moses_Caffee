@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { getCached, hasCached } from '../lib/pageCache'
 import { loadYearReceipts, loadDashMeta } from '../lib/dashboardData'
+import { countsAsDoc } from '../lib/installments'
 import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X, Store } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
@@ -236,7 +237,7 @@ export default function DashboardPage() {
       const m = parseInt(r.receipt_date.slice(5, 7))
       if (!map[m]) map[m] = { month: m, total: 0, count: 0 }
       map[m].total += amt(r)
-      map[m].count += 1
+      if (countsAsDoc(r)) map[m].count += 1
     })
     return Array.from({ length: 12 }, (_, i) => map[i + 1] || { month: i + 1, total: 0, count: 0 })
   }, [settings.showWithVat])  // eslint-disable-line react-hooks/exhaustive-deps
@@ -253,7 +254,7 @@ export default function DashboardPage() {
     list.forEach(r => {
       const n = resolveL1(r)
       if (!map[n]) map[n] = { name: n, total: 0, count: 0 }
-      map[n].total += amt(r); map[n].count += 1
+      map[n].total += amt(r); if (countsAsDoc(r)) map[n].count += 1
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
       .map(d => ({ ...d, id: l1Cats.find(c => c.name === d.name)?.id }))
@@ -277,7 +278,7 @@ export default function DashboardPage() {
       const name = supplierNameOf(r) || 'לא ידוע'
       if (!map[name]) map[name] = { name, total: 0, count: 0 }
       map[name].total += amt(r)
-      map[name].count += 1
+      if (countsAsDoc(r)) map[name].count += 1
     })
     return Object.values(map).sort((a, b) => b.total - a.total)
   }, [active, supplierNameOf, settings.showWithVat])
@@ -332,7 +333,7 @@ export default function DashboardPage() {
             דשבורד
           </h1>
           <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>
-            {active.length} קבלות · {fmtILSFull(total)} · {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
+            {active.filter(countsAsDoc).length} קבלות · {fmtILSFull(total)} · {settings.showWithVat ? 'כולל מע"מ' : 'ללא מע"מ'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -393,7 +394,7 @@ export default function DashboardPage() {
       <div style={{ display: 'flex', gap: isMobile ? '10px' : '14px', flexWrap: 'wrap' }}>
         <KpiCard label="סה״כ הוצאות" value={fmtILS(total)} sub={`שנת ${yearsLabel}`} icon={ShekelSign} color="var(--ok)" trend={yoy} />
         <KpiCard label="ממוצע חודשי" value={fmtILS(avgMonthly)} sub={bestMonth ? `חודש שיא: ${bestMonth}` : undefined} icon={Calendar} color="var(--accent)" />
-        <KpiCard label="מספר קבלות" value={active.length} sub={`${active.filter(r => r.ai_extracted).length} נסרקו ב-AI`} icon={BarChart2} color="#7c3aed" />
+        <KpiCard label="מספר קבלות" value={active.filter(countsAsDoc).length} sub={`${active.filter(r => countsAsDoc(r) && r.ai_extracted).length} נסרקו ב-AI`} icon={BarChart2} color="#7c3aed" />
         {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1Data.length} sub={`${vendorDist.length} ספקים`} icon={Tag} color="#d97706" />}
       </div>
 

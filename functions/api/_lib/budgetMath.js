@@ -6,6 +6,7 @@
  */
 import { isExpenseDoc } from './docTypes.js'
 import { isCafeBook } from './books.js'
+import { expandInstallments } from './installments.js'
 
 export const BUDGET_PERIODS = [
   { value: 'monthly',   label: 'חודשי'  },
@@ -51,9 +52,10 @@ export function periodWindow(period, now = new Date()) {
 export function budgetStatus(budget, receipts, now = new Date()) {
   if (!budget || !(Number(budget.amount) > 0)) return null
   const w = periodWindow(budget.period, now)
-  const used = r2((receipts || [])
-    .filter(r => !r.archived_at && isExpenseDoc(r) && isCafeBook(r))
-    .filter(r => { const d = r.receipt_date || ''; return d >= w.from && d <= w.to })
+  // Installment purchases hit the budget month by month (decision A, 18.11.26) —
+  // the slice that falls inside the window counts, not the whole document.
+  const rows = (receipts || []).filter(r => !r.archived_at && isExpenseDoc(r) && isCafeBook(r))
+  const used = r2(expandInstallments(rows, { from: w.from, to: w.to })
     .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0))
   const amount = r2(budget.amount)
   const pct = Math.round((used / amount) * 100)

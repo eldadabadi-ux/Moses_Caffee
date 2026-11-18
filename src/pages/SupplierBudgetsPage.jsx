@@ -43,7 +43,7 @@ export default function SupplierBudgetsPage() {
         loadSuppliers(user.id),
         loadAllBudgets(user.id),
         supabase.from('receipts')
-          .select('id, vendor_name, supplier_id, receipt_date, amount, archived_at, doc_type, book')
+          .select('id, vendor_name, supplier_id, receipt_date, amount, archived_at, doc_type, book, installments')
           .eq('user_id', user.id),
         supabase.from('supplier_aliases').select('supplier_id, alias'),
       ])

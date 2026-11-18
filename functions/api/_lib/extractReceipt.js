@@ -473,6 +473,11 @@ ${multiPageNote}
 - **עסקה פטורה ממע"מ / מע"מ 0%** (מודפס "פטור ממע"מ", "עוסק פטור", "מע"מ 0%"): החזר amount_before_vat = total_amount ו-vat_amount = 0 — אל תמציא מע"מ.
 - ודא ש: amount_before_vat + vat_amount = total_amount
 
+### תשלומים (installments):
+- אם מודפס שהעסקה שולמה בתשלומים / קרדיט — למשל "3 תשלומים", "ב-6 תשלומים שווים", "תשלום 1 מתוך 5", "קרדיט 10 תשלומים" — החזר את **מספר התשלומים הכולל** (מספר שלם, 2 ומעלה).
+- "תשלום 2 מתוך 8" פירושו installments = 8 (המספר שאחרי "מתוך").
+- אם אין שום אזכור של תשלומים — החזר 1.
+
 ### האם מחירי השורות כוללים מע"מ? (items_include_vat) — חובה!
 קבע האם הסכומים בשורות הפריטים (unit_price, price) **כוללים** מע"מ:
 - קבלה צרכנית (סופרמרקט, מסעדה, קופה רושמת, תחנת דלק): המחירים בדרך כלל **כוללים** מע"מ → **true**
@@ -561,6 +566,7 @@ ${multiPageNote}
   "amount_before_vat": מספר לפני מע"מ (0 אם לא מופיע בקבלה),
   "vat_amount": סכום המע"מ (0 אם לא מופיע בקבלה),
   "items_include_vat": true אם מחירי השורות כוללים מע"מ אחרת false,
+  "installments": מספר התשלומים אם מודפס על המסמך אחרת 1,
   "currency": "קוד מטבע — ILS אם שקלים, אחרת USD/EUR/GBP וכו'",
   "original_amount": total_amount,
   "category": "הקטגוריה הראשית של הקבלה כולה לפי סוג הספק (למשל: תחבורה ודלק / מסעדות ואירוח / מוצרי מזון ומכולת)",
@@ -619,6 +625,7 @@ async function callGemini(apiKey, model, images, mimeType, prompt) {
           amount_before_vat: { type: 'NUMBER' },
           vat_amount:        { type: 'NUMBER' },
           items_include_vat: { type: 'BOOLEAN' },
+          installments:      { type: 'INTEGER' },
           currency:          { type: 'STRING' },
           original_amount:   { type: 'NUMBER' },
           category:          { type: 'STRING' },

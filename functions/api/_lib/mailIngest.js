@@ -5,6 +5,7 @@
  */
 import { extractReceipt, getSupabaseUrl } from './extractReceipt.js'
 import { resolveSupplier } from './supplierResolve.js'
+import { installmentsOf } from './installments.js'
 
 const rnd = () => Math.random().toString(36).slice(2, 10)
 
@@ -125,6 +126,7 @@ export async function ingestReceipt({ db, env, conn, vatRate = 18, mimeType, b64
       // ReceiptsPage — the user answers once and the spelling is learned.
       ...(supplier?.outcome === 'ask' && supplier.suggestion?.scanned ? { supplier_suggestion: supplier.suggestion } : {}),
       ...(fx ? { currency: result.currency, fx_rate: fx.rate, fx_date: fx.date, fx_source: fx.source, original_total: totalOrig, is_fx_estimate: true } : {}) },
+    installments: installmentsOf({ installments: result.installments }),
     source: 'email',
     status: 'pending',
     storage_path: bytes ? storagePath : null,

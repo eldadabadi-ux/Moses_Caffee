@@ -55,7 +55,9 @@ const fmtILS  = n => `₪${parseFloat(n || 0).toLocaleString('he-IL', { minimumF
 
 // All receipt columns EXCEPT the heavy base64 receipt_image — the list never
 // pulls image bytes; thumbnails load lazily from storage_path (audit C1).
-const RECEIPT_COLS = 'id, user_id, vendor_name, supplier_id, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation, book'
+const saneInstallments = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n >= 2 ? Math.min(n, 60) : null }
+
+const RECEIPT_COLS = 'id, user_id, vendor_name, supplier_id, receipt_date, amount, currency, category_id, category_text, items, ai_extracted, ai_summary, archived_at, created_at, org_id, source, status, storage_path, source_meta, external_erp_id, sync_status, amount_before_vat, vat_amount, vat_rate, doc_type, doc_number, matched_invoice_id, reconciliation, book, installments'
 // Foreign-currency helpers (for receipts from abroad)
 const CUR_SYMBOL = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'Fr', AUD: 'A$', CAD: 'C$', ILS: '₪' }
 const fmtCur = (n, code) => {
@@ -103,6 +105,7 @@ export default function ReceiptsPage() {
   const [reviewTotal, setReviewTotal]   = useState('')        // total WITH vat
   const [reviewBeforeVat, setReviewBeforeVat] = useState('')  // amount before vat
   const [reviewVatAmount, setReviewVatAmount] = useState('')  // vat amount
+  const [reviewInstallments, setReviewInstallments] = useState('')  // credit-card installments (count)
   const [reviewItems, setReviewItems]   = useState([])
   const [reviewDocType, setReviewDocType] = useState('receipt')   // receipt | delivery_note | summary_invoice
   const [reviewDocNumber, setReviewDocNumber] = useState('')      // printed doc number (if detected)
@@ -506,6 +509,7 @@ export default function ReceiptsPage() {
       setReviewDocNumber(result.doc_number || '')
       setReviewDocRefs(Array.isArray(result.doc_refs) ? result.doc_refs : [])
       setReviewCurrency(result.currency || 'ILS')
+      setReviewInstallments(saneInstallments(result.installments) ? String(result.installments) : '')
       setScanSupplier(result.supplier || null)   // canonical supplier match / question
       setReviewBook(bookView)                    // file it where the user is working
       setReviewFx(result.fx || null)   // foreign-currency receipts: { rate, date, source, currency }
@@ -663,7 +667,7 @@ export default function ReceiptsPage() {
       const docCols = { doc_type: reviewDocType, doc_number: reviewDocNumber || null }
       // The migration is authoritative — these columns exist. The retry ladder
       // that used to sit here hid real write failures (guardrail 1, audit M1).
-      const { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols })
+      const { error } = await supabase.from('receipts').insert({ ...base, org_id: orgId || null, ...vatCols, ...docCols, installments: saneInstallments(reviewInstallments) })
       if (error) throw error
       invalidateReceiptData()
       if (reviewDocType === 'summary_invoice') {
@@ -682,7 +686,7 @@ export default function ReceiptsPage() {
           : fx ? `קבלה נשמרה! (הומרה לשקלים לפי שער יציג)` : 'קבלה נשמרה!')
       }
       setShowReview(false); setReviewItems([]); setReviewImage(null); setReviewPages([])
-      setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null)
+      setReviewBeforeVat(''); setReviewVatAmount(''); setReviewCurrency('ILS'); setReviewFx(null); setReviewInstallments('')
       setReviewDocType('receipt'); setReviewDocNumber(''); setReviewDocRefs([]); setScanSupplier(null)
       setReviewBook(bookView)
       loadData()
@@ -758,6 +762,7 @@ export default function ReceiptsPage() {
       amount: totalAmt, currency: 'ILS',
       category_text: catName, category_id, ...imgPatch,
       items: cleanItems.length ? cleanItems : null,
+      installments: saneInstallments(form.installments),
     }
     const vatCols = { amount_before_vat: beforeAmt, vat_amount: vatAmt, vat_rate: vatRate }
     const docType = DOC_TYPES.some(t => t.value === form.doc_type) ? form.doc_type : 'receipt'
@@ -904,7 +909,7 @@ export default function ReceiptsPage() {
   }
 
   function resetForm() {
-    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt' })
+    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt', installments:'' })
     setImagePreview(null)
   }
 
@@ -923,6 +928,7 @@ export default function ReceiptsPage() {
       amount_before_vat: before, vat_amount: vat,
       items: Array.isArray(r.items) ? r.items.map(it => ({ ...it })) : [],
       doc_type: docTypeOf(r),
+      installments: r.installments ? String(r.installments) : '',
     })
     // Preview loads from Storage (no base64 in the row); for a row that hasn't
     // been backfilled yet, pull its legacy inline image by id (single row only).
@@ -1311,6 +1317,11 @@ export default function ReceiptsPage() {
                   <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
                     לפני מע"מ {fmtILS(amtBefore(r))}
                   </span>
+                  {saneInstallments(r.installments) && (
+                    <span style={{ fontSize:'11.5px', fontWeight:700, color:'var(--accent)', background:'var(--accent-bg)', borderRadius:6, padding:'2px 7px', whiteSpace:'nowrap' }}>
+                      ב-{r.installments} תשלומים
+                    </span>
+                  )}
                 </div>
                 {/* Action buttons — hidden in select mode; archive view shows restore + permanent delete */}
                 {selecting ? null : archiveView ? (
@@ -1549,6 +1560,16 @@ export default function ReceiptsPage() {
                   style={{ ...FS, height:'40px', fontSize:'14px', background:'var(--panel)', color:'var(--text-mute)' }} dir="ltr" placeholder="0.00" />
               </div>
             </div>
+            <div>
+              <label style={LS}>תשלומים</label>
+              <input type="number" min="1" max="60" value={reviewInstallments} onChange={e => setReviewInstallments(e.target.value)}
+                style={{ ...FS, height:'40px', fontSize:'14px', width:120 }} dir="ltr" placeholder="1" />
+              {saneInstallments(reviewInstallments) && (
+                <div style={{ marginTop:5, fontSize:'12px', color:'var(--text-mute)', lineHeight:1.5 }}>
+                  ההוצאה תיפרס בניתוחים על {saneInstallments(reviewInstallments)} חודשים ({fmtILS(Math.round(((parseFloat(reviewTotal) || 0) / saneInstallments(reviewInstallments)) * 100) / 100)} לחודש); המסמך עצמו נשאר שלם לדוח המע"מ.
+                </div>
+              )}
+            </div>
             {reviewItems.length > 0 && (
               <div>
                 <label style={LS}>פירוט הקבלה ({reviewItems.length} פריטים)</label>
@@ -1646,6 +1667,17 @@ export default function ReceiptsPage() {
               <label style={LS}>מע"מ (₪)</label>
               <input type="number" value={form.vat_amount} onChange={e => setVatField(e.target.value)} style={FS} dir="ltr" placeholder="אוטומטי" />
             </div>
+          </div>
+
+          {/* Credit-card installments — analytics spread only (decision A) */}
+          <div>
+            <label style={LS}>תשלומים</label>
+            <input type="number" min="1" max="60" value={form.installments} onChange={e => setForm(p => ({ ...p, installments: e.target.value }))} style={{ ...FS, width:130 }} dir="ltr" placeholder="1" />
+            {saneInstallments(form.installments) && (
+              <div style={{ marginTop:5, fontSize:'12px', color:'var(--text-mute)', lineHeight:1.5 }}>
+                ההוצאה תיפרס בניתוחים על {saneInstallments(form.installments)} חודשים; המסמך נשאר שלם לדוח המע"מ.
+              </div>
+            )}
           </div>
 
           {/* Document type */}

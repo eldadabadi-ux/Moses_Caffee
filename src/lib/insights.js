@@ -15,6 +15,7 @@ import { openIssues } from './reconciliation.js'
 import { budgetStatus, periodLabel } from './budgetMath.js'
 import { isExpenseDoc, docTypeOf } from './docTypes.js'
 import { isCafeBook } from './books.js'
+import { expandInstallments } from './installments.js'
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 const ils = (n) => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`
@@ -52,7 +53,8 @@ const cafeExpense = (r) => !r.archived_at && isExpenseDoc(r) && isCafeBook(r)
 const vatOf = (r) => Number(r.vat_amount ?? r.ai_summary?.vat_amount) || 0
 
 /** Spend in a window (café expense docs). */
-const spendIn = (receipts, w) => r2(receipts.filter(r => cafeExpense(r) && inWindow(r, w)).reduce((s, r) => s + (parseFloat(r.amount) || 0), 0))
+const spendIn = (receipts, w) => r2(expandInstallments(receipts.filter(cafeExpense), { from: w.from, to: w.to })
+  .reduce((s, r) => s + (parseFloat(r.amount) || 0), 0))
 
 /** Per-base price rises within the window, per product+supplier. */
 function priceAlerts(flat, w, minPct = 10) {
@@ -88,6 +90,10 @@ export function buildInsights(receipts, { suppliers = [], budgets = [], period =
   const { cur, prev } = insightWindow(period, now)
   const all = Array.isArray(receipts) ? receipts : []
   const curRows = all.filter(r => cafeExpense(r) && inWindow(r, cur))
+  // Analytics slices for the window — installment purchases contribute their
+  // monthly part here (the VAT summary below stays DOCUMENT-dated on purpose:
+  // input VAT is claimed at the document date, not per payment).
+  const curSpread = expandInstallments(all.filter(cafeExpense), { from: cur.from, to: cur.to })
 
   // 1. spend trend
   const total = spendIn(all, cur), prevTotal = spendIn(all, prev)
@@ -103,7 +109,7 @@ export function buildInsights(receipts, { suppliers = [], budgets = [], period =
   //    unlinked under the scanned spelling.
   const byId = Object.fromEntries((suppliers || []).map(s => [s.id, s.name]))
   const supMap = {}
-  for (const r of curRows) {
+  for (const r of curSpread) {
     const name = (r.supplier_id && byId[r.supplier_id]) || (r.vendor_name || '').trim() || 'לא ידוע'
     supMap[name] = (supMap[name] || 0) + (parseFloat(r.amount) || 0)
   }
