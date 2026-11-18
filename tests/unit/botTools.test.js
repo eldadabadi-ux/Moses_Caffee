@@ -492,3 +492,32 @@ test('budget status says so when no budgets are defined', async () => {
   const out = await runTool('budget_status', {}, CTX)
   assert.match(out.note, /לא הוגדרו תקציבי ספקים/)
 })
+
+// ── receipt_detail — the assistant answers about ONE document in full ─────────
+test('receipt_detail finds a document by supplier+date and returns its items', async () => {
+  const res = await runTool('receipt_detail', { supplier: 'קטיף', date: '2026-06-10' }, CTX)
+  assert.equal(res.found, true)
+  assert.equal(res.date, '2026-06-10')
+  assert.equal(res.supplier, 'קטיף ירקות קצוצים בע"מ')
+  assert.equal(res.items.length, 1)
+  assert.equal(res.items[0].name, 'חלב טרי')
+})
+
+test('receipt_detail says so when nothing matches', async () => {
+  const res = await runTool('receipt_detail', { doc_number: 'אין-כזה-770' }, CTX)
+  assert.equal(res.found, false)
+})
+
+// ── search_items — item-level recall across all documents ─────────────────────
+test('search_items returns every purchase of a product, newest first, with totals', async () => {
+  const res = await runTool('search_items', { product: 'חלב' }, CTX)
+  assert.equal(res.matches, 3)          // r1+r2+r3 (archived r3 still counts)
+  assert.equal(res.purchases[0].date, '2026-08-10')
+  assert.ok(res.total_spend.includes('372'))   // 120+156+96
+})
+
+test('search_items with a supplier filter narrows to that supplier', async () => {
+  const res = await runTool('search_items', { product: 'חלב', supplier: 'מיזן' }, CTX)
+  assert.equal(res.matches, 1)
+  assert.equal(res.purchases[0].supplier, 'מיזן סחר ושיווק מזון איכותי בע"מ')
+})

@@ -27,6 +27,7 @@ import { docTypeOf, isExpenseDoc } from './docTypes.js'
 import { bookOf, DEFAULT_BOOK, bookLabel } from './books.js'
 import { quoteTotals } from './quotes.js'
 import { budgetStatus, periodLabel } from './budgetMath.js'
+import { expandInstallments, countsAsDoc, installmentsOf } from './installments.js'
 
 const MAX_ROWS = 4000          // hard cap on receipts pulled for one tool call
 const MAX_LIST = 60            // rows returned to the model in a listing
@@ -37,7 +38,7 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
 const RECEIPT_FIELDS =
   'id,vendor_name,supplier_id,receipt_date,amount,currency,category_text,items,doc_type,book,archived_at,created_at,' +
-  'doc_number,matched_invoice_id,reconciliation,amount_before_vat,vat_amount'
+  'doc_number,matched_invoice_id,reconciliation,amount_before_vat,vat_amount,installments,status,source'
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -247,6 +248,40 @@ const periodKey = (date, granularity) => {
 
 export const TOOL_DEFS = [
   {
+    name: 'receipt_detail',
+    description:
+      'כל הפרטים של מסמך בודד — כל השדות, כל שורות הפריטים, פירוט מע"מ, סטטוס התאמה, ' +
+      'תשלומים, מקור (סריקה/מייל, כולל מאיזו כתובת מייל הגיע) וסטטוס אישור. ' +
+      'אתר לפי מספר מסמך, או לפי ספק + תאריך. השתמש כשנשאלת על מסמך ספציפי.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        doc_number: { type: 'string', description: 'מספר המסמך/החשבונית' },
+        supplier: { type: 'string', description: 'שם ספק (גם איות חלקי)' },
+        date: { type: 'string', description: 'תאריך המסמך YYYY-MM-DD' },
+        id: { type: 'string', description: 'מזהה פנימי (אם הוחזר מכלי אחר)' },
+      },
+    },
+  },
+  {
+    name: 'search_items',
+    description:
+      'חיפוש בשורות הפריטים של כל המסמכים: כל הקניות של מוצר נתון — תאריך, ספק, כמות, ' +
+      'מחיר ליחידה ולשורה ומחיר ליחידת בסיס. השתמש לשאלות "מתי קניתי X", "כמה X קנינו החודש", ' +
+      '"באיזה מחיר קניתי X לאורך זמן".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        product: { type: 'string', description: 'שם המוצר (התאמה חלקית) — חובה' },
+        supplier: { type: 'string', description: 'סינון לפי ספק (אופציונלי)' },
+        from: { type: 'string' }, to: { type: 'string' },
+        book: { type: 'string', enum: ['cafe', 'events', 'all'], description: 'ברירת מחדל: cafe' },
+        limit: { type: 'integer', description: 'מקסימום שורות (ברירת מחדל 40)' },
+      },
+      required: ['product'],
+    },
+  },
+  {
     name: 'query_receipts',
     description:
       'שליפת קבלות/תעודות משלוח/חשבוניות מרכזות לפי מסננים, כולל שורות המוצרים. ' +
@@ -406,6 +441,9 @@ async function toolQueryReceipts(ctx, args) {
       amount: ils(r.amount),
       type: docTypeOf(r),
       doc_number: r.doc_number || undefined,
+      installments: installmentsOf(r) || undefined,
+      pending: r.status === 'pending' ? true : undefined,
+      source: r.source || undefined,
       reconciliation: reconStatusOf(r) || undefined,
       vat: vatOf(r) || undefined,
       category: r.category_text || '',
@@ -483,7 +521,11 @@ async function toolSupplierReport(ctx, args) {
   const filter = args.supplier ? resolveSupplierFilter(args.supplier, suppliers, rows) : null
   if (args.supplier && !filter) return { note: `לא נמצא ספק בשם "${args.supplier}"` }
 
-  const scoped = rows.filter(r => matchesSupplier(r, filter) && isExpenseDoc(r))
+  const docsOnly = rows.filter(r => matchesSupplier(r, filter) && isExpenseDoc(r))
+  // Installment purchases contribute 1/n to each month they span (decision A).
+  const win = { from: DATE_RE.test(String(args.from || '')) ? args.from : undefined,
+                to:   DATE_RE.test(String(args.to || ''))   ? args.to   : undefined }
+  const scoped = expandInstallments(docsOnly, win)
   const byPeriod = {}, byCategory = {}, byProduct = {}
   let total = 0, docs = 0
 
@@ -491,9 +533,9 @@ async function toolSupplierReport(ctx, args) {
     const date = r.receipt_date || (r.created_at || '').slice(0, 10)
     const key = periodKey(date, gran) || '(חסר תאריך)'
     const amt = num(r.amount) || 0
-    total += amt; docs++
+    total += amt; if (countsAsDoc(r)) docs++
     ;(byPeriod[key] ||= { period: key, total: 0, documents: 0 })
-    byPeriod[key].total += amt; byPeriod[key].documents++
+    byPeriod[key].total += amt; if (countsAsDoc(r)) byPeriod[key].documents++
     byCategory[r.category_text || 'שונות'] = (byCategory[r.category_text || 'שונות'] || 0) + amt
     for (const it of (Array.isArray(r.items) ? r.items : [])) {
       const n = (it.item_name || '').trim()
@@ -767,7 +809,106 @@ async function toolBudgetStatus(ctx, args) {
   }
 }
 
+
+// Every field of one document — the assistant must be able to answer about the
+// smallest detail of a specific receipt (client fixes 18.11.26 §3).
+async function toolReceiptDetail(ctx, args) {
+  const scope = scopeOf(ctx)
+  const fullById = async (id) =>
+    (await sbGet(ctx.url, ctx.key, `receipts?${scope}&id=eq.${q(id)}&select=*&limit=1`))[0] || null
+
+  let row = null
+  if (args.id) row = await fullById(args.id)
+  if (!row && args.doc_number) {
+    const rows = await sbGet(ctx.url, ctx.key,
+      `receipts?${scope}&doc_number=eq.${q(args.doc_number)}&select=*&order=receipt_date.desc&limit=5`)
+    // Client-side guard too (same belt-and-suspenders as the book filter — and
+    // the only line that filters in tests that stub the REST layer).
+    row = rows.find(r => String(r.doc_number || '') === String(args.doc_number)) || null
+  }
+  if (!row && (args.supplier || args.date)) {
+    const { rows } = await loadReceipts(ctx, { book: 'all' })
+    const suppliers = await loadSuppliers(ctx)
+    const filter = args.supplier ? resolveSupplierFilter(args.supplier, suppliers, rows) : null
+    if (args.supplier && !filter) return { found: false, note: `לא נמצא ספק בשם "${args.supplier}"` }
+    const wantDate = DATE_RE.test(String(args.date || '')) ? args.date : null
+    const hit = rows.find(r => matchesSupplier(r, filter) && (!wantDate || r.receipt_date === wantDate))
+    if (hit) row = await fullById(hit.id)
+  }
+  if (!row) return { found: false, note: 'לא נמצא מסמך מתאים — נסה query_receipts לרשימה' }
+
+  const suppliers = await loadSuppliers(ctx)
+  const byId = Object.fromEntries(suppliers.map(s => [s.id, s.name]))
+  const inst = installmentsOf(row)
+  return {
+    found: true,
+    id: row.id,
+    date: row.receipt_date || '(חסר תאריך)',
+    supplier: supplierNameOf(row, byId),
+    vendor_as_scanned: row.vendor_name || '',
+    amount: ils(row.amount),
+    before_vat: row.amount_before_vat != null ? ils(row.amount_before_vat) : undefined,
+    vat: vatOf(row) || undefined,
+    vat_rate: row.vat_rate || undefined,
+    currency: row.currency || 'ILS',
+    type: docTypeOf(row),
+    doc_number: row.doc_number || undefined,
+    book: bookLabel(bookOf(row)),
+    status: row.status === 'pending' ? 'ממתין לאישור' : 'מאושר',
+    source: row.source || 'ידני',
+    email_from: row.source_meta?.from || undefined,
+    email_subject: row.source_meta?.subject || undefined,
+    archived: !!row.archived_at,
+    installments: inst || undefined,
+    monthly_part: inst ? ils((num(row.amount) || 0) / inst) : undefined,
+    reconciliation: reconStatusOf(row) || undefined,
+    category: row.category_text || '',
+    items: (Array.isArray(row.items) ? row.items : []).map(i => ({
+      name: i.item_name, qty: i.quantity, unit: i.unit || undefined,
+      unit_price: i.unit_price ? ils(i.unit_price) : undefined,
+      line_total: ils(i.price),
+      per_base: i.price_per_base_unit != null ? `${ils(i.price_per_base_unit)}/${unitLabel(i.base_unit)}` : undefined,
+      category: [i.category_l1, i.category_l2, i.category_l3].filter(Boolean).join(' › ') || undefined,
+    })),
+  }
+}
+
+// Item-level search across every document (client fixes 18.11.26 §3: the
+// assistant must know every line ever bought, not just document totals).
+async function toolSearchItems(ctx, args) {
+  const want = (args.product || '').trim().toLowerCase()
+  if (!want) return { matches: 0, note: 'נדרש שם מוצר לחיפוש (product)' }
+  const loaded = await loadReceipts(ctx, args)
+  const suppliers = await loadSuppliers(ctx)
+  const byId = Object.fromEntries(suppliers.map(s => [s.id, s.name]))
+  const filter = args.supplier ? resolveSupplierFilter(args.supplier, suppliers, loaded.rows) : null
+  if (args.supplier && !filter) return { matches: 0, note: `לא נמצא ספק בשם "${args.supplier}"` }
+
+  const flat = flatten(loaded.rows.filter(r => matchesSupplier(r, filter)), byId)
+    .filter(f => f.name.toLowerCase().includes(want))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  const limit = Math.min(Math.max(1, args.limit || 40), 100)
+  const spend = flat.reduce((s, f) => s + (f.price || 0), 0)
+  return {
+    book: bookLabel(loaded.book) || 'הכל',
+    matches: flat.length,
+    total_spend: ils(spend),
+    note: [loaded.truncated ? `נסרקו ${MAX_ROWS} המסמכים האחרונים בלבד` : null, dateNote(loaded.badDates)]
+      .filter(Boolean).join(' · ') || undefined,
+    showing: Math.min(flat.length, limit),
+    purchases: flat.slice(0, limit).map(f => ({
+      date: f.date, supplier: f.supplier, name: f.name,
+      qty: f.qty || undefined, unit: f.unit || undefined,
+      unit_price: f.unitPrice ? ils(f.unitPrice) : undefined,
+      line_total: ils(f.price),
+      per_base: f.perBase != null ? `${ils(f.perBase)}/${unitLabel(f.base)}` : undefined,
+    })),
+  }
+}
+
 const EXECUTORS = {
+  receipt_detail: toolReceiptDetail,
+  search_items: toolSearchItems,
   query_receipts: toolQueryReceipts,
   compare_product_prices: toolComparePrices,
   supplier_report: toolSupplierReport,
@@ -816,6 +957,8 @@ export async function buildOrientation(ctx) {
     archived: rows.filter(r => r.archived_at).length,
     delivery_notes: rows.filter(r => docTypeOf(r) === 'delivery_note').length,
     summary_invoices: rows.filter(r => docTypeOf(r) === 'summary_invoice').length,
+    pending_documents: rows.filter(r => r.status === 'pending').length,
+    installment_documents: rows.filter(r => installmentsOf(r)).length,
     date_range: dates.length ? `${dates[0]} … ${dates[dates.length - 1]}` : 'אין תאריכים',
     total_spend: ils(total),
     suppliers: names,
