@@ -19,6 +19,7 @@ import { expandInstallments } from '../lib/installments'
 import { isExpenseDoc } from '../lib/docTypes'
 import { isCafeBook } from '../lib/books'
 import { signedReceiptUrl } from '../lib/storage'
+import BudgetAlert from '../components/BudgetAlert'
 import MonthlyBars from '../components/charts/MonthlyBars'
 import ReceiptThumb from '../components/ReceiptThumb'
 import ImageViewer from '../components/ImageViewer'
@@ -157,6 +158,10 @@ export default function SupplierDetailPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Budget alert at the top of the file — a supplier over its cap must be
+          visible on arrival, not only after scrolling to the budget card. */}
+      {status && <BudgetAlert status={status} periodLabel={periodLabel(budget.period)} />}
+
       {/* ── Header ── */}
       <div style={card}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>

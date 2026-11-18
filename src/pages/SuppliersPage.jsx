@@ -4,8 +4,11 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { loadSuppliers, upsertSupplier, deleteSupplier, deriveVendorStats, waLink, telLink, gmailComposeLink } from '../lib/suppliers'
+import { loadAllBudgets, budgetStatus, periodLabel } from '../lib/budgets'
+import { groupReceiptsBySupplier } from '../lib/supplierMatch'
 import { getCached, setCached, hasCached } from '../lib/pageCache'
-import { Store, Phone, Mail, MapPin, Pencil, Plus, Trash2, Package, CalendarDays, MessageCircle, Receipt, Merge } from 'lucide-react'
+import { Store, Phone, Mail, MapPin, Pencil, Plus, Trash2, Package, CalendarDays, MessageCircle, Receipt, Merge, Wallet } from 'lucide-react'
+import BudgetAlert from '../components/BudgetAlert'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
@@ -21,6 +24,11 @@ export default function SuppliersPage() {
   const isMobile = window.innerWidth < 768
   const [receipts, setReceipts] = useState(() => getCached('suppliers')?.receipts || [])
   const [contacts, setContacts] = useState(() => getCached('suppliers')?.contacts || [])
+  // Budget caps + confirmed spellings — the card must warn when a supplier
+  // passes its cap (client fix 18.11.26), and the cap is measured over the
+  // supplier's receipts, including rows not yet linked by supplier_id.
+  const [budgets, setBudgets]   = useState(() => getCached('suppliers')?.budgets || [])
+  const [aliases, setAliases]   = useState(() => getCached('suppliers')?.aliases || [])
   const [loading, setLoading]   = useState(() => !hasCached('suppliers'))
   const [search, setSearch]     = useState('')
   const [edit, setEdit]         = useState(null)   // supplier being edited (form object) or null
@@ -31,16 +39,20 @@ export default function SuppliersPage() {
     try {
       // doc_type is needed so summary invoices don't double-count supplier spend;
       // pre-migration the column doesn't exist → retry without it.
-      let [{ data: recs, error: recsErr }, sup] = await Promise.all([
+      let [{ data: recs, error: recsErr }, sup, buds, { data: ali }] = await Promise.all([
         supabase.from('receipts').select('id, vendor_name, supplier_id, receipt_date, amount, category_text, items, archived_at, created_at, doc_type, book, installments').eq('user_id', user.id),
         loadSuppliers(user.id),
+        loadAllBudgets(user.id),
+        supabase.from('supplier_aliases').select('supplier_id, alias'),
       ])
       if (recsErr) {
         ;({ data: recs } = await supabase.from('receipts').select('id, vendor_name, receipt_date, amount, category_text, items, archived_at, created_at').eq('user_id', user.id))
       }
       setReceipts(recs || [])
       setContacts(sup || [])
-      setCached('suppliers', { receipts: recs || [], contacts: sup || [] })
+      setBudgets(buds || [])
+      setAliases(ali || [])
+      setCached('suppliers', { receipts: recs || [], contacts: sup || [], budgets: buds || [], aliases: ali || [] })
     } catch (e) { console.error('[suppliers] load', e?.message) }
     finally { setLoading(false) }
   }, [user])
@@ -76,6 +88,24 @@ export default function SuppliersPage() {
     navigate(`/receipts?${p.toString()}`)
   }, [navigate])
   const contactByName = useMemo(() => { const m = {}; contacts.forEach(c => { m[(c.name || '').trim()] = c }); return m }, [contacts])
+
+  // Budget state per supplier — the SAME derivation the budgets screen, the
+  // insights report and the assistant use (budgetStatus over this supplier's
+  // receipts), so a card never shows a different number than the budgets page.
+  const budgetBySupplier = useMemo(() => {
+    if (!budgets.length) return new Map()
+    const bySupplier = groupReceiptsBySupplier(receipts, contacts, aliases)
+    const m = new Map()
+    for (const b of budgets) {
+      const st = budgetStatus(b, bySupplier.get(b.supplier_id) || [])
+      if (st) m.set(b.supplier_id, { budget: b, status: st })
+    }
+    return m
+  }, [budgets, receipts, contacts, aliases])
+
+  const overCount = useMemo(
+    () => [...budgetBySupplier.values()].filter(b => b.status.state === 'over').length,
+    [budgetBySupplier])
 
   // Union of vendors-from-receipts + manual-only contacts
   const rows = useMemo(() => {
@@ -129,7 +159,18 @@ export default function SuppliersPage() {
           <h1 style={{ margin: 0, fontSize: isMobile ? '23px' : '26px', fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 8 }}>
             <Store size={24} color="var(--accent)" /> ספקים
           </h1>
-          <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>{rows.length} ספקים · עלויות מחושבות מהקבלות</p>
+          <p style={{ margin: '2px 0 0', fontSize: '15px', color: 'var(--text-mute)' }}>
+            {rows.length} ספקים · עלויות מחושבות מהקבלות
+            {overCount > 0 && (
+              <>
+                {' · '}
+                <button onClick={() => navigate('/suppliers/budgets')}
+                  style={{ border: 'none', background: 'none', padding: 0, color: 'var(--danger)', fontWeight: 700, fontSize: 'inherit', fontFamily: 'var(--font-main)', cursor: 'pointer' }}>
+                  <Wallet size={14} style={{ verticalAlign: '-2px' }} /> {overCount} בחריגה מהתקציב
+                </button>
+              </>
+            )}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => navigate('/suppliers/merge')} title="אחד ספקים שנסרקו בכמה איותים"
@@ -154,8 +195,11 @@ export default function SuppliersPage() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(330px, 1fr))', gap: '14px' }}>
-        {rows.map((row) => { const { name, stats: s, contact } = row; return (
-          <div key={row.key} style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+        {rows.map((row) => { const { name, stats: s, contact } = row
+          const supId = contact?.id || s?.supplierId || null
+          const bg = supId ? budgetBySupplier.get(supId) : null
+          return (
+          <div key={row.key} style={{ background: 'var(--panel)', border: `1px solid ${bg?.status.state === 'over' ? 'var(--danger)' : 'var(--border)'}`, borderRadius: 14, boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
             {/* Title row — the name opens the supplier card page (client request #8) */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Store size={18} color="var(--accent)" /></div>
@@ -170,6 +214,9 @@ export default function SuppliersPage() {
               <button onClick={() => setEdit({ id: contact?.id, name, phone: contact?.phone || '', whatsapp: contact?.whatsapp || '', email: contact?.email || '', address: contact?.address || '', supplies: contact?.supplies || '', notes: contact?.notes || '' })}
                 title="עריכת פרטי קשר" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-mute)', padding: 5, display: 'flex', flexShrink: 0 }}><Pencil size={15} /></button>
             </div>
+
+            {/* Budget alert — only when the cap is passed or close (18.11.26) */}
+            {bg && <BudgetAlert status={bg.status} periodLabel={periodLabel(bg.budget.period)} compact />}
 
             {/* Contact actions */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

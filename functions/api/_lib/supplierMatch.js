@@ -275,3 +275,32 @@ export function clusterVendors(rows = []) {
       (b.members.length + b.review.length) - (a.members.length + a.review.length) ||
       b.members[0].count - a.members[0].count)
 }
+
+/**
+ * Group receipts by the supplier they belong to — linked rows by supplier_id,
+ * plus not-yet-linked rows whose scanned spelling equals a canonical name or a
+ * confirmed alias (the same rule the supplier page uses; nothing fuzzy here —
+ * a guess belongs in the confirm queue, not in a spend figure).
+ *
+ * Extracted 18.11.26 so the budgets screen and the supplier cards derive a
+ * supplier's spend from exactly one mapping (guardrail 2).
+ *
+ * @param {Array} receipts  rows with { supplier_id, vendor_name }
+ * @param {Array} suppliers canonical rows with { id, name }
+ * @param {Array} aliases   rows with { supplier_id, alias }
+ * @returns {Map<string, Array>} supplier id → its receipts
+ */
+export function groupReceiptsBySupplier(receipts, suppliers, aliases = []) {
+  const nameTo = new Map()
+  for (const s of suppliers || []) { const k = normalizeVendor(s.name); if (k) nameTo.set(k, s.id) }
+  // A canonical name always wins over an alias pointing elsewhere.
+  for (const a of aliases || []) { const k = normalizeVendor(a.alias); if (k && !nameTo.has(k)) nameTo.set(k, a.supplier_id) }
+  const out = new Map()
+  for (const r of receipts || []) {
+    const id = r.supplier_id || nameTo.get(normalizeVendor(r.vendor_name))
+    if (!id) continue
+    if (!out.has(id)) out.set(id, [])
+    out.get(id).push(r)
+  }
+  return out
+}

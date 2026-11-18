@@ -7,7 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   normalizeVendor, vendorSkeleton, vendorSimilarity, matchVendor, clusterVendors,
-  isJunkVendor, AUTO_THRESHOLD, ASK_THRESHOLD,
+  isJunkVendor, groupReceiptsBySupplier, AUTO_THRESHOLD, ASK_THRESHOLD,
 } from '../../functions/api/_lib/supplierMatch.js'
 
 // ── normalizeVendor ──────────────────────────────────────────────────────────
@@ -216,4 +216,36 @@ test('clustering is stable and loses nothing', () => {
   ]
   const total = clusterVendors(rows).reduce((n, c) => n + c.members.length + c.review.length, 0)
   assert.equal(total, rows.length)
+})
+
+// ── groupReceiptsBySupplier ──────────────────────────────────────────────────
+// The mapping behind every per-supplier spend figure (budget caps included):
+// linked rows by id, unlinked rows by canonical name or confirmed alias.
+const SUPS = [{ id: 's1', name: 'קטיף ירקות בע"מ' }, { id: 's2', name: 'חלב ומוצריו' }]
+const ALI  = [{ supplier_id: 's1', alias: 'קטיף ירקות קצוצים' }]
+
+test('groupReceiptsBySupplier matches by id, by canonical name and by alias', () => {
+  const m = groupReceiptsBySupplier([
+    { id: 'r1', supplier_id: 's2', vendor_name: 'משהו אחר לגמרי' },
+    { id: 'r2', supplier_id: null, vendor_name: 'קטיף ירקות בעמ' },
+    { id: 'r3', supplier_id: null, vendor_name: 'קטיף ירקות קצוצים' },
+    { id: 'r4', supplier_id: null, vendor_name: 'ספק שאינו מוכר' },
+  ], SUPS, ALI)
+  assert.deepEqual((m.get('s1') || []).map(r => r.id), ['r2', 'r3'])
+  assert.deepEqual((m.get('s2') || []).map(r => r.id), ['r1'])   // id wins over the name
+  assert.equal([...m.values()].flat().length, 3)                 // the unknown one is dropped
+})
+
+test('a canonical name beats an alias pointing at another supplier', () => {
+  const m = groupReceiptsBySupplier(
+    [{ id: 'r1', vendor_name: 'חלב ומוצריו' }],
+    SUPS,
+    [{ supplier_id: 's1', alias: 'חלב ומוצריו' }])
+  assert.deepEqual((m.get('s2') || []).map(r => r.id), ['r1'])
+  assert.equal(m.has('s1'), false)
+})
+
+test('groupReceiptsBySupplier tolerates empty and missing inputs', () => {
+  assert.equal(groupReceiptsBySupplier(null, null).size, 0)
+  assert.equal(groupReceiptsBySupplier([{ id: 'r1', vendor_name: '' }], SUPS).size, 0)
 })

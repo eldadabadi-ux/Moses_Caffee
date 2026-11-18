@@ -13,6 +13,7 @@ export {
   vendorSimilarity,
   matchVendor,
   clusterVendors,
+  groupReceiptsBySupplier,
   isJunkVendor,
   levenshtein,
   AUTO_THRESHOLD,

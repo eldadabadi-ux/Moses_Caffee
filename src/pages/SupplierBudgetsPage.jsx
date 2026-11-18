@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { loadSuppliers } from '../lib/suppliers'
 import { loadAllBudgets, saveBudget, deleteBudget, budgetStatus, BUDGET_PERIODS } from '../lib/budgets'
-import { normalizeVendor } from '../lib/supplierMatch'
+import { groupReceiptsBySupplier } from '../lib/supplierMatch'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import { Wallet, Search, Trash2, Check } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -54,19 +54,11 @@ export default function SupplierBudgetsPage() {
 
   useEffect(() => { load() }, [load])
 
-  // supplier_id → its receipts (linked, or unlinked with a matching spelling).
-  const bySupplier = useMemo(() => {
-    const nameTo = new Map()
-    for (const s of suppliers) { const k = normalizeVendor(s.name); if (k) nameTo.set(k, s.id) }
-    for (const a of aliases)   { const k = normalizeVendor(a.alias); if (k && !nameTo.has(k)) nameTo.set(k, a.supplier_id) }
-    const m = new Map()
-    const push = (id, r) => { if (!m.has(id)) m.set(id, []); m.get(id).push(r) }
-    for (const r of receipts) {
-      const id = r.supplier_id || nameTo.get(normalizeVendor(r.vendor_name))
-      if (id) push(id, r)
-    }
-    return m
-  }, [suppliers, aliases, receipts])
+  // supplier_id → its receipts (linked, or unlinked with a matching spelling) —
+  // shared with the supplier cards so both screens cap the same spend.
+  const bySupplier = useMemo(
+    () => groupReceiptsBySupplier(receipts, suppliers, aliases),
+    [suppliers, aliases, receipts])
 
   const budgetOf = useMemo(() => new Map(budgets.map(b => [b.supplier_id, b])), [budgets])
 
