@@ -16,6 +16,7 @@ import AIChatWidget from './components/AIChatWidget'
 import CookieConsent from './components/CookieConsent'
 import Sidebar, { SidebarRail } from './components/Sidebar'
 import MfaGate from './components/MfaGate'
+import LegacyDomainNotice from './components/LegacyDomainNotice'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
 
 /**
@@ -401,6 +402,8 @@ export default function App() {
             </Routes>
           </Suspense>
           <CookieConsent />
+          {/* Old moses-caffee.pages.dev visitors: passkeys cannot work there. */}
+          <LegacyDomainNotice />
         </BrowserRouter>
         </TenantProvider>
       </SettingsProvider>
