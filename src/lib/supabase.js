@@ -15,5 +15,9 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: false,
+    // Passkeys (WebAuthn) — Face ID / Touch ID / Windows Hello sign-in. The API
+    // is in beta at Supabase and refuses to run without this opt-in. The
+    // password flow is untouched and remains the fallback (19.11.26).
+    experimental: { passkey: true },
   },
 })

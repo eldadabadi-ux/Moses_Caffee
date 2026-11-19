@@ -12,6 +12,7 @@ import { useInstall } from '../hooks/useInstall'
 import { isMobileDevice } from '../lib/isMobileDevice'
 import InboundMailCard from '../components/InboundMailCard'
 import MfaCard from '../components/MfaCard'
+import PasskeyCard from '../components/PasskeyCard'
 import { rescanAllReceipts } from '../lib/rescanReceipts'
 import { downloadBackup, restoreFromObject, readBackupFile } from '../lib/backup'
 import ShekelSign from '../components/icons/ShekelSign'
@@ -551,6 +552,9 @@ export default function SettingsPage() {
         </div>
       </div>
       )}
+
+      {/* Biometric sign-in — passkeys (client request 19.11.26) */}
+      <PasskeyCard />
 
       {/* Two-factor authentication (A.5.17) */}
       <div style={{ scrollMarginTop: 76 }}><MfaCard /></div>

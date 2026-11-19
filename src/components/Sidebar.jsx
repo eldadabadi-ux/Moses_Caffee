@@ -6,7 +6,7 @@ import { useReconcileAlerts } from '../hooks/useReconcileAlerts'
 import {
   Receipt, BarChart2, Tag, Settings, Camera, Plus, FileSpreadsheet,
   RefreshCw, ChevronDown, ChevronRight, LogOut, X, PieChart, TrendingUp, Layers,
-  ArrowLeftRight, Equal, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb, Menu, Wallet,
+  ArrowLeftRight, Equal, Percent, FolderOpen, Bell, Building2, ScanLine, Database, Store, Archive, Merge, FileText, Scale, Inbox, Lightbulb, Menu, Wallet, Fingerprint,
 } from 'lucide-react'
 
 // A nav section hidden unless its feature flag is on (SaaS module packaging).
@@ -91,6 +91,7 @@ const NAV = [
       { label: 'תזכורת חודשית',  icon: Bell,       anchor: 'set-reminder' },
       { label: 'דיוק סריקה',     icon: ScanLine,   anchor: 'set-rescan' },
       { label: 'גיבוי ושחזור',   icon: Database,   anchor: 'set-backup' },
+      { label: 'כניסה ביומטרית', icon: Fingerprint, anchor: 'set-passkeys' },
     ],
   },
 ]

@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Navigate, Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
+import { biometricAvailable, signInWithPasskey, passkeyErrorText } from '../lib/passkeys'
+import { Fingerprint } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function LoginPage() {
@@ -12,6 +14,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [resetSent, setResetSent] = useState(false)
+  // Biometric sign-in is offered only where the device can actually verify the
+  // user (Face ID / Touch ID / Windows Hello), never as a dead button.
+  const [canPasskey, setCanPasskey] = useState(false)
+  useEffect(() => { biometricAvailable().then(setCanPasskey) }, [])
 
   if (user) return <Navigate to="/" replace />
 
@@ -26,6 +32,17 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handlePasskey() {
+    if (loading) return
+    setLoading(true)
+    try {
+      await signInWithPasskey()           // the auth listener routes on success
+    } catch (err) {
+      const msg = passkeyErrorText(err)
+      if (msg) toast.error(msg)
+    } finally { setLoading(false) }
   }
 
   async function handleReset(e) {
@@ -105,6 +122,19 @@ export default function LoginPage() {
             >
               {loading ? 'נכנס...' : 'כניסה'}
             </button>
+            {canPasskey && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '6px 0 2px' }}>
+                  <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                  <span style={{ fontSize: '13px', color: 'var(--text-mute)' }}>או</span>
+                  <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                </div>
+                <button type="button" onClick={handlePasskey} disabled={loading}
+                  style={{ height: '50px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'var(--panel)', color: 'var(--accent)', border: '1.5px solid var(--accent)', borderRadius: '10px', fontSize: '17px', fontWeight: 700, fontFamily: 'var(--font-main)', cursor: loading ? 'not-allowed' : 'pointer' }}>
+                  <Fingerprint size={20} /> כניסה עם זיהוי ביומטרי
+                </button>
+              </>
+            )}
             <button type="button" onClick={() => { setMode('reset'); setResetSent(false) }} style={LINK}>
               שכחתי סיסמה
             </button>

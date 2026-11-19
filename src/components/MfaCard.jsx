@@ -6,6 +6,7 @@
  */
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { listPasskeys } from '../lib/passkeys'
 import toast from 'react-hot-toast'
 import { ShieldCheck, ShieldOff, Loader2 } from 'lucide-react'
 
@@ -58,7 +59,20 @@ export default function MfaCard() {
 
   async function disable() {
     if (busy || !factor) return
-    if (!window.confirm('לכבות אימות דו-שלבי? החשבון יהיה פחות מאובטח.')) return
+    // Turning 2FA off mid-migration to passkeys is the one way to get locked
+    // out: one enrolled device, that device lost, and the only second factor is
+    // gone. Allowed with no passkeys at all (that is simply "no 2FA"), blocked
+    // while exactly one device carries the account (19.11.26).
+    let passkeys = []
+    try { passkeys = await listPasskeys() } catch { /* passkeys unavailable → behave as before */ }
+    if (passkeys.length === 1) {
+      toast.error('רשום מכשיר ביומטרי שני לפני כיבוי האימות הדו-שלבי — אחרת אובדן המכשיר יחסום את הכניסה')
+      return
+    }
+    const warning = passkeys.length >= 2
+      ? 'לכבות אימות דו-שלבי? הכניסה תתבצע בזיהוי ביומטרי מהמכשירים הרשומים ובסיסמה.'
+      : 'לכבות אימות דו-שלבי? החשבון יהיה פחות מאובטח.'
+    if (!window.confirm(warning)) return
     setBusy(true)
     try {
       const { error } = await supabase.auth.mfa.unenroll({ factorId: factor.id })

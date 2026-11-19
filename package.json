@@ -1,7 +1,7 @@
 {
   "name": "eldadai-receipts",
   "private": true,
-  "version": "2.4.0",
+  "version": "2.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,7 +19,7 @@
     "migrations": "node --env-file=.env.test scripts/migrations.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.101.1",
+    "@supabase/supabase-js": "^2.105.0",
     "d3": "^7.9.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.7.0",
