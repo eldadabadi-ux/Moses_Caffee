@@ -1,6 +1,6 @@
 /**
  * supplierMatch — unit tests over the REAL vendor names found in the live
- * Moses_Caffee database (30 Aug 2026), where one supplier appears under many
+ * eldadai-receipts database (30 Aug 2026), where one supplier appears under many
  * OCR spellings. Run: node --test tests/unit/supplierMatch.test.js
  */
 import test from 'node:test'

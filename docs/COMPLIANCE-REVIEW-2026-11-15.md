@@ -1,4 +1,4 @@
-# סקירת ציות ואבטחה — Moses Caffee (מנהל קבלות)
+# סקירת ציות ואבטחה — מנהל קבלות (מנהל קבלות)
 
 **גרסת מערכת נסקרת:** v1.96.1 (חיה בפרודקשן) · **תאריך:** 15.11.2026
 **היקף:** ISO/IEC 27001:2022 · GDPR · חוק הגנת הפרטיות התשמ"א-1981 + תיקון 13 · תקנות הגנת הפרטיות (אבטחת מידע) התשע"ז-2017 · היבטי חוק הגנת הצרכן
@@ -171,4 +171,4 @@
 **למתכנת הבכיר:** (1) אימות רשימת הטבלאות המלאה ב-delete.js מול הסכימה (כולל סדר FK). (2) קוד הסקירה: guardOwner, mailCrypto, botTools-scoping, inbound. (3) הוספת שער npm-audit ל-ship. (4) בדיקת רגרסיה לניווט אחרי עדכון react-router.
 
 ## 9. נספח ראיות
-קבצים מרכזיים: `src/pages/PrivacyPage.jsx`, `TermsPage.jsx`, `AccessibilityPage.jsx`, `src/components/CookieConsent.jsx`, `functions/api/account/delete.js`, `functions/api/chat.js`, `functions/api/scan-receipt.js`, `functions/api/admin/{flags,clients,onboard}.js`, `functions/api/_lib/{auth,audit,mailCrypto,rateLimit}.js`, `public/_headers`, `supabase_*.sql` (14 טבלאות), `tests/security/rls.pentest.test.js` (30✓), `tests/unit` (227✓), `docs/SECURITY-REPORT-ISO27001-2026.md`, `docs/ARCHITECTURE-AUDIT-2026.md`. סביבת ייצור: https://moses-caffee.pages.dev (v1.96.1).
+קבצים מרכזיים: `src/pages/PrivacyPage.jsx`, `TermsPage.jsx`, `AccessibilityPage.jsx`, `src/components/CookieConsent.jsx`, `functions/api/account/delete.js`, `functions/api/chat.js`, `functions/api/scan-receipt.js`, `functions/api/admin/{flags,clients,onboard}.js`, `functions/api/_lib/{auth,audit,mailCrypto,rateLimit}.js`, `public/_headers`, `supabase_*.sql` (14 טבלאות), `tests/security/rls.pentest.test.js` (30✓), `tests/unit` (227✓), `docs/SECURITY-REPORT-ISO27001-2026.md`, `docs/ARCHITECTURE-AUDIT-2026.md`. סביבת ייצור: https://app.eldadai.co.il (v1.96.1).

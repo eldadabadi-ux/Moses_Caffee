@@ -1,4 +1,4 @@
-# Contributing — receipts-app ("Moses Coffee")
+# Contributing — receipts-app ("מנהל קבלות")
 
 This project follows two non-negotiable engineering principles. The full, binding rules live in
 [`CLAUDE.md` → Engineering Guardrails](./CLAUDE.md) (auto-loaded by Claude Code) and the current
@@ -23,5 +23,5 @@ technical-debt map is in [`docs/ARCHITECTURE-AUDIT-2026.md`](./docs/ARCHITECTURE
 
 ## Deploy
 
-`npm run deploy` → Cloudflare Pages project `moses-caffee`, branch `master`. Architectural refactors
+`npm run deploy` → Cloudflare Pages project `eldadai-receipts`, branch `master`. Architectural refactors
 from the audit are done in severity order (Critical → Major) with a no-behavior-change verification each.

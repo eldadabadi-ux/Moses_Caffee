@@ -32,7 +32,7 @@ export async function getIlsRate(currency) {
   if (!cur || cur === 'ILS') return null
   try {
     const res = await fetch(BOI_URL, {
-      headers: { 'Accept': 'application/json', 'User-Agent': 'MosesCaffee-Receipts/1.0' },
+      headers: { 'Accept': 'application/json', 'User-Agent': 'EldadAI-Receipts/1.0' },
       cf: { cacheTtl: 3600, cacheEverything: true },   // BOI updates ~daily — cache 1h
     })
     if (!res.ok) return null

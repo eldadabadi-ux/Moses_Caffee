@@ -1,9 +1,9 @@
-# receipts-app ("Moses Coffee") — Claude Working Rules
+# receipts-app ("מנהל קבלות") — Claude Working Rules
 
 ## Architecture quick reference
 - **Frontend:** React 19 + Vite + Tailwind (PWA).
 - **Backend:** Cloudflare Pages Functions (`functions/api/`) + Supabase (Postgres + RLS + Auth).
-- **Deploy:** `npm run deploy` → Cloudflare Pages project `moses-caffee`, branch `master`.
+- **Deploy:** `npm run deploy` → Cloudflare Pages project `eldadai-receipts`, branch `master`.
   **OpenNext/native tooling note:** builds/deploys for the sister site run from WSL; keep Node tooling
   consistent.
 - **Multi-tenant:** `org_id` (via `organizations` + `memberships` + `current_org_ids()`), layered over

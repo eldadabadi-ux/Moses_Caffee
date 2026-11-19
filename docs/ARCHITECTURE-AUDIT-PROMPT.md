@@ -1,4 +1,4 @@
-# Architecture & Quality Audit — Prompt לשיחה חדשה | receipts-app (Moses Coffee)
+# Architecture & Quality Audit — Prompt לשיחה חדשה | receipts-app (מנהל קבלות)
 
 > הודעה ראשונה לשיחה חדשה עם Claude Code.
 > פתח את השיחה כשתיקיית העבודה היא: `C:\Users\Eldad Abadi\Desktop\claude code projects\receipts-app`
@@ -10,7 +10,7 @@
 PROMPT — העתק מכאן
 ════════════════════════════════════════
 
-אתה פועל כ-Senior Staff Engineer. בצע על הפרויקט הזה (receipts-app / Moses Coffee) את אותו תהליך ביקורת-ושיפור ארכיטקטורה שבוצע בהצלחה על פרויקט ה-CRM המשפטי שלי (crm-law) — ביקורת קריאה-בלבד, Blueprint, אישור שלי, ביצוע מדורג עם סביבת בדיקות, ותיעוד.
+אתה פועל כ-Senior Staff Engineer. בצע על הפרויקט הזה (receipts-app / מנהל קבלות) את אותו תהליך ביקורת-ושיפור ארכיטקטורה שבוצע בהצלחה על פרויקט ה-CRM המשפטי שלי (crm-law) — ביקורת קריאה-בלבד, Blueprint, אישור שלי, ביצוע מדורג עם סביבת בדיקות, ותיעוד.
 
 ## שני עקרונות מחייבים (ללא חריגים)
 
@@ -23,8 +23,8 @@ PROMPT — העתק מכאן
 |-----|-----|
 | נתיב | `C:\Users\Eldad Abadi\Desktop\claude code projects\receipts-app` |
 | Stack | React 19 + Vite 8 + Tailwind v4, Supabase (RLS), Cloudflare Pages Functions |
-| Deploy | `npm run deploy` → פרויקט `moses-caffee`, branch `master` |
-| GitHub | `eldadabadi-ux/Moses_Caffee` (repo קיים ומחובר) |
+| Deploy | `npm run deploy` → פרויקט `eldadai-receipts`, branch `master` |
+| GitHub | `eldadabadi-ux/eldadai-receipts` (repo קיים ומחובר) |
 | Multi-tenant | `organizations` + `memberships`, עמודת `org_id`, פונקציית `current_org_ids()` (SECURITY DEFINER) |
 | OCR | Tesseract.js מקומי בדפדפן + נתיבי שרת (`functions/api/scan-receipt.js`) |
 | AI Bot | `functions/api/chat.js` — אותה תבנית כמו בבוט של ה-CRM |
@@ -79,7 +79,7 @@ PROMPT — העתק מכאן
 
 1. **נתוני production אמיתיים** — אסור לגעת/לשנות נתונים. SQL migrations מוצגים לי לביצוע ידני ב-Supabase SQL Editor בלבד.
 2. **Secrets** — רק בדשבורד Cloudflare. לעולם לא בקוד, לא ב-git, לא בפלט.
-3. **גיבוי** — commit+push ל-`Moses_Caffee` בכל אבן-דרך. לפני כל commit: ודא שאין קבצי סודות ב-staging (`git check-ignore`, סריקת diff).
+3. **גיבוי** — commit+push ל-`eldadai-receipts` בכל אבן-דרך. לפני כל commit: ודא שאין קבצי סודות ב-staging (`git check-ignore`, סריקת diff).
 4. **npm overrides** — אם תצטרך override לתלות: **ממוקד לחבילה** (nested), לא גלובלי. לקח מ-crm-law: override גלובלי של brace-expansion 5.x שבר eslint ו-build (minimatch ישן צריך default callable).
 5. **בסוף** — עדכן את `docs/SECURITY-REPORT-ISO27001-2026.md` (סעיף חדש + גרסה) רק עם מה שבאמת בוצע; מה שדורש אותי → טבלת "פעולות לטיפולך".
 6. הרץ `npm audit` לאימות שאין Critical/High חדשים (הפרויקט היה נקי ב-4.7.2026).

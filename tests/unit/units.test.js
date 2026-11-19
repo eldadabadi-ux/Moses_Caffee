@@ -1,6 +1,6 @@
 /**
  * units — tests over the unit spellings and product names actually present in
- * the live Moses_Caffee data (30 Aug 2026).
+ * the live eldadai-receipts data (30 Aug 2026).
  * Run: node --test tests/unit/units.test.js
  */
 import test from 'node:test'

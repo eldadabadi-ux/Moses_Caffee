@@ -1,4 +1,4 @@
-# ISO/IEC 27001:2022 — Prompt לשיחה חדשה | receipts-app (Moses Coffee)
+# ISO/IEC 27001:2022 — Prompt לשיחה חדשה | receipts-app (מנהל קבלות)
 
 > הודעה ראשונה לשיחה החדשה עם Claude Code.
 > פתח Claude Code כשהתיקיית העבודה היא: `C:\Users\Eldad Abadi\Desktop\claude code projects\receipts-app`
@@ -18,12 +18,12 @@ PROMPT — העתק מכאן
 
 | שדה | ערך |
 |-----|-----|
-| שם | receipts-app (moses-caffee) |
+| שם | receipts-app (eldadai-receipts) |
 | נתיב | `C:\Users\Eldad Abadi\Desktop\claude code projects\receipts-app` |
 | גרסה | 1.70.1 |
 | Frontend | React 19 + Vite 8 + Tailwind CSS v4 |
 | מסד נתונים | Supabase (PostgreSQL + RLS + Auth) |
-| Deploy | Cloudflare Pages (`npm run deploy` → project: `moses-caffee`) |
+| Deploy | Cloudflare Pages (`npm run deploy` → project: `eldadai-receipts`) |
 | OCR / AI | Tesseract.js — רץ **מקומית בדפדפן** (אין קריאות לAPI חיצוני) |
 | Multi-tenant | כן — טבלאות `organizations` + `memberships` + `org_id` על כל טבלה |
 | סוג נתונים | תמונות קבלות (base64 ב-DB), נתוני ספקים, סכומים, פריטי מע"מ |
@@ -84,7 +84,7 @@ PROMPT — העתק מכאן
 
 1. **אל תיגע בנתוני production** ללא גיבוי ואישורי מפורש
 2. **Secrets** — אך ורק ב-Cloudflare Pages dashboard (Environment Variables), לעולם לא ב-code
-3. **Deploy** — `npm run deploy` → project `moses-caffee` → branch `master`
+3. **Deploy** — `npm run deploy` → project `eldadai-receipts` → branch `master`
 4. **SQL Migrations** — הצג SQL לביצוע ידני בלבד (Supabase → SQL Editor)
 5. **security headers** — חשוב לוודא שמיוצרים אוטומטית ב-build ולא רק ב-dist ידני
 6. **לא** Windows Server / Apache — זה Cloudflare Pages, אין `.htaccess`

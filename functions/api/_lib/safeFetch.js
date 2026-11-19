@@ -92,7 +92,7 @@ export async function safeFetch(rawUrl, opts = {}) {
     try {
       res = await fetch(current, {
         method,
-        headers: { 'User-Agent': 'MosesCaffee-ReceiptBot/1.0', Accept: '*/*', ...headers },
+        headers: { 'User-Agent': 'EldadAI-ReceiptBot/1.0', Accept: '*/*', ...headers },
         redirect: 'manual',
         signal: ctrl.signal,
       })

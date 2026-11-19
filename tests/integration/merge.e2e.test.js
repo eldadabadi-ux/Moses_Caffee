@@ -8,7 +8,7 @@
  *             (proves unchecking excludes it from relinking AND folding)
  *
  * ⚠️  Runs against the LIVE site + LIVE Supabase (synthetic PENTEST_* fixtures,
- *     always torn down). Target host via MERGE_SITE (default moses-caffee).
+ *     always torn down). Target host via MERGE_SITE (default eldadai-receipts).
  * Run:  npm run test:merge    (needs .env.test; skips cleanly without it)
  */
 import './_env.js'
