@@ -205,7 +205,7 @@ export default function EventQuotesPage() {
       </div>
 
       {/* ── Period scope ───────────────────────────────────────────────────── */}
-      {quotes.length > 0 && (
+      {true && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <CheckDropdown icon={Calendar} allLabel="כל השנים" width={isMobile ? 150 : 170}
             options={availYears.map(y => ({ value: y, label: String(y) }))}
@@ -214,7 +214,7 @@ export default function EventQuotesPage() {
             options={HEB_MONTHS.map((lbl, i) => ({ value: i + 1, label: lbl }))}
             values={perMonths} onChange={setPerMonths} />
           <span style={{ fontSize: 12.5, color: 'var(--text-mute)', whiteSpace: 'nowrap' }}>
-            מוצג: {periodLabel} · {visible.length} אירועים
+            {quotes.length === 0 ? 'התצוגה מתחילה בחודש הנוכחי' : `מוצג: ${periodLabel} · ${visible.length} אירועים`}
           </span>
           {!isDefaultPeriod && (
             <button onClick={() => { setPerYears([new Date().getFullYear()]); setPerMonths([new Date().getMonth() + 1]) }}
@@ -226,7 +226,7 @@ export default function EventQuotesPage() {
       )}
 
       {/* ── Events per month, split by year ────────────────────────────────── */}
-      {hasEventsInChart && (
+      {true && (
         <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 16px', boxShadow: 'var(--shadow-card)' }}>
           <div style={{ margin: '0 0 6px', fontSize: 14.5, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 7 }}>
             <Calendar size={15} color="var(--accent)" /> מספר אירועים בכל חודש
@@ -237,6 +237,11 @@ export default function EventQuotesPage() {
           {monthlySeries.length === 1 && (
             <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-dim)', paddingTop: 4 }}>{chartYears[0]}</div>
           )}
+          {!hasEventsInChart && (
+            <div style={{ textAlign: 'center', fontSize: 12.5, color: 'var(--text-mute)', paddingTop: 6, lineHeight: 1.6 }}>
+              הגרף יתמלא מעצמו: כל הצעה שתקבל תאריך אירוע תיספר בחודש שלה, וכל שנה תקבל צבע משלה.
+            </div>
+          )}
         </div>
       )}
 
@@ -244,7 +249,7 @@ export default function EventQuotesPage() {
         <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-mute)', background: 'var(--panel)', border: '1px dashed var(--border)', borderRadius: 'var(--r-card)' }}>
           <FileText size={34} style={{ opacity: 0.35 }} />
           <p style={{ fontWeight: 600, color: 'var(--text)', margin: '10px 0 4px' }}>אין עדיין הצעות מחיר</p>
-          <p style={{ fontSize: 14, margin: 0 }}>צור הצעה ראשונה לאירוע קייטרינג</p>
+          <p style={{ fontSize: 14, margin: 0 }}>צור הצעה ראשונה לאירוע קייטרינג — היא תופיע כאן ותיספר בגרף שלמעלה</p>
         </div>
       )}
 

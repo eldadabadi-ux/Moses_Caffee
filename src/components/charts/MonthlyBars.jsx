@@ -91,7 +91,7 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         .attr('height', 0)
         .attr('rx', 4).attr('ry', 4)
         .attr('fill', d => d.total === 0 ? 'var(--border)' : fillColor)
-        .attr('opacity', d => d.total === 0 ? 0.4 : 0.9)
+        .attr('opacity', d => d.total === 0 ? 1 : 0.9)
         .on('mouseenter', function(event, d) {
           if (d.total === 0) return
           d3.select(this).attr('opacity', 1).attr('y', yScale(d.total) - 3).attr('height', H - yScale(d.total) + 3)
@@ -111,8 +111,8 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
           tip.style('display', 'none')
         })
         .transition().duration(600).delay((_, i) => i * 40).ease(d3.easeBackOut.overshoot(0.5))
-        .attr('y', d => d.total > 0 ? yScale(d.total) : H)
-        .attr('height', d => d.total > 0 ? H - yScale(d.total) : 0)
+        .attr('y', d => d.total > 0 ? yScale(d.total) : H - 4)
+        .attr('height', d => d.total > 0 ? H - yScale(d.total) : 4)
     }
 
     function drawLine(dataset, strokeColor, lineLabel) {
@@ -179,8 +179,8 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         })
         if (y0 === H) {   // empty month placeholder, same as the single-year look
           g.append('rect').attr('x', xScale(m)).attr('width', bw)
-            .attr('y', H - 2).attr('height', 2).attr('rx', 1)
-            .attr('fill', 'var(--border)').attr('opacity', 0.4)
+            .attr('y', H - 4).attr('height', 4).attr('rx', 2)
+            .attr('fill', 'var(--border)')
         }
       }
       if (compareData) drawBars(compareData, bw + 4, compareColor, 'B')
