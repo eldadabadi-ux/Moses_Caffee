@@ -118,7 +118,7 @@ export default function DatePickerDialog({
 
   // ── Styles ────────────────────────────────────────────────────────────────
   const overlayStyle = {
-    position: 'fixed', inset: 0, zIndex: 60,
+    position: 'fixed', inset: 0, zIndex: 1300,   // above Modal (1000) and the cookie bar (1200)
     background: 'rgba(15,23,42,0.55)',
     backdropFilter: 'blur(4px)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
