@@ -59,18 +59,14 @@ export default function MfaCard() {
 
   async function disable() {
     if (busy || !factor) return
-    // Turning 2FA off mid-migration to passkeys is the one way to get locked
-    // out: one enrolled device, that device lost, and the only second factor is
-    // gone. Allowed with no passkeys at all (that is simply "no 2FA"), blocked
-    // while exactly one device carries the account (19.11.26).
+    // Switching the authenticator off is how an account moves to passkey-only
+    // sign-in (a passkey session is aal1, so an enrolled TOTP factor keeps
+    // demanding its code). It cannot lock anyone out — the password login and
+    // the email reset both stay available — so this warns, it does not block.
     let passkeys = []
     try { passkeys = await listPasskeys() } catch { /* passkeys unavailable → behave as before */ }
-    if (passkeys.length === 1) {
-      toast.error('רשום מכשיר ביומטרי שני לפני כיבוי האימות הדו-שלבי — אחרת אובדן המכשיר יחסום את הכניסה')
-      return
-    }
-    const warning = passkeys.length >= 2
-      ? 'לכבות אימות דו-שלבי? הכניסה תתבצע בזיהוי ביומטרי מהמכשירים הרשומים ובסיסמה.'
+    const warning = passkeys.length
+      ? `לכבות את האימות הדו-שלבי? הכניסה תתבצע בזיהוי ביומטרי (${passkeys.length} מכשירים רשומים) או בסיסמה, בלי קוד מאפליקציית האימות. שים לב: מרגע זה די בסיסמה לבדה כדי להיכנס — ודא שהיא חזקה וייחודית.`
       : 'לכבות אימות דו-שלבי? החשבון יהיה פחות מאובטח.'
     if (!window.confirm(warning)) return
     setBusy(true)
