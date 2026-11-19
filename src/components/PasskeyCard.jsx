@@ -9,7 +9,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   passkeysSupported, biometricAvailable, listPasskeys, registerPasskey,
-  deletePasskey, deviceLabel, passkeyErrorText,
+  deletePasskey, deviceLabel, passkeyErrorText, isAlreadyRegistered,
 } from '../lib/passkeys'
 import { supabase } from '../lib/supabase'
 import toast from 'react-hot-toast'
@@ -54,7 +54,8 @@ export default function PasskeyCard() {
       await refresh()
     } catch (e) {
       const msg = passkeyErrorText(e)
-      if (msg) toast.error(msg)
+      // A synced passkey already covering this device is good news, not an error.
+      if (msg) isAlreadyRegistered(e) ? toast(msg, { icon: '🔐' }) : toast.error(msg)
     } finally { setBusy(false) }
   }
 
@@ -136,7 +137,11 @@ export default function PasskeyCard() {
             {keys.length === 1 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 10, border: '1px solid #d9770655', background: '#d9770614', color: '#d97706', fontSize: 13, fontWeight: 600, lineHeight: 1.5 }}>
                 <AlertTriangle size={15} style={{ flexShrink: 0 }} />
-                מומלץ לרשום מכשיר שני (למשל גם טלפון וגם מחשב) — כך אובדן מכשיר אחד אינו חוסם את הכניסה.
+                <span>
+                  מומלץ לרשום מכשיר שני (למשל גם טלפון וגם מחשב) — כך אובדן מכשיר אחד אינו חוסם את הכניסה.
+                  אם ה-Passkey נשמר בחשבון Google או ב-iCloud הוא כבר מסונכרן למכשירים האחרים, וניסיון רישום
+                  נוסף מהם יוחזר בהודעה "המכשיר כבר רשום" — וזה תקין.
+                </span>
               </div>
             )}
 

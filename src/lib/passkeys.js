@@ -52,6 +52,11 @@ export function deviceLabel(ua = navigator.userAgent) {
   return browser ? `${os} · ${browser}` : os
 }
 
+/** A credential that already exists on the account — informational, not a failure. */
+export function isAlreadyRegistered(error) {
+  return /InvalidStateError|(already|previously) registered|duplicate|exclude/i.test(String(error?.message || error || ''))
+}
+
 /**
  * Hebrew for the handful of outcomes a user can actually cause. A cancelled
  * ceremony is not an error worth shouting about — the caller can ignore null.
@@ -59,7 +64,12 @@ export function deviceLabel(ua = navigator.userAgent) {
 export function passkeyErrorText(error) {
   const msg = String(error?.message || error || '')
   if (/NotAllowedError|abort|cancel/i.test(msg)) return null            // user dismissed the prompt
-  if (/InvalidStateError|already registered|duplicate/i.test(msg)) return 'המכשיר הזה כבר רשום'
+  // Not a failure worth alarming anyone: a passkey saved in Google Password
+  // Manager / iCloud Keychain syncs to the user's other devices, so the second
+  // device already HAS the credential and can sign in right now.
+  if (/InvalidStateError|(already|previously) registered|duplicate|exclude/i.test(msg)) {
+    return 'המכשיר הזה כבר רשום — אפשר להיכנס איתו בזיהוי ביומטרי כבר עכשיו'
+  }
   if (/does not support|not supported/i.test(msg)) return 'המכשיר או הדפדפן אינם תומכים בכניסה ביומטרית'
   if (/not enabled|disabled|experimental/i.test(msg)) return 'יש להפעיל Passkeys בפרויקט Supabase (Authentication → Passkeys)'
   if (/no (credentials|passkey)|not found/i.test(msg)) return 'לא נמצא Passkey במכשיר הזה — היכנס עם סיסמה ולאחר מכן רשום אותו בהגדרות'
