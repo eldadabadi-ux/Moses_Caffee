@@ -14,6 +14,10 @@ import { compressImage, downscaleForUpload, dataUrlToBlob } from '../lib/imageUt
 import { isPdf, pdfToImages } from '../lib/pdfUtils'
 import { buildExcelBlob, pdfBlob as buildPdfBlob } from '../lib/receiptExport'
 import ReceiptScanAnimation from '../components/ReceiptScanAnimation'
+import CheckDropdown from '../components/CheckDropdown'
+
+// Month names for the period picker (the list opens on the current month).
+const HEB_MONTHS = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 import toast from 'react-hot-toast'
 import {
   Plus, Receipt, Camera, Download, Trash2, Pencil, X, ZoomIn,
@@ -79,6 +83,12 @@ export default function ReceiptsPage() {
   const [categories, setCategories]     = useState([])
   const [loading, setLoading]           = useState(() => !hasCached('receipts'))
   const [search, setSearch]             = useState('')
+    // The list opens on the CURRENT month and widens on demand (client request
+  // 19.11.26). Both defaults are read from the clock at mount, so the view
+  // rolls over by itself at the start of every month and every year — nothing
+  // is deleted or archived, only the opening scope changes.
+  const [perYears, setPerYears]         = useState(() => [new Date().getFullYear()])
+  const [perMonths, setPerMonths]       = useState(() => [new Date().getMonth() + 1])
   const [filterFrom, setFilterFrom]     = useState('')
   const [filterTo, setFilterTo]         = useState('')
   const [showFilters, setShowFilters]   = useState(false) // mobile: collapse filters
@@ -167,6 +177,7 @@ export default function ReceiptsPage() {
     const q = params.get('q')
     if (q) {
       setSearch(q)
+      setPerMonths([])            // a search arriving from elsewhere must see the whole year
       const u = new URL(window.location.href); u.searchParams.delete('q')
       window.history.replaceState({}, '', u.toString())
     }
@@ -179,6 +190,9 @@ export default function ReceiptsPage() {
     const nm = params.get('supplierName')
     if (id || nm) {
       setSupplierFilter({ id: id || null, name: nm || '' })
+      // "show this supplier's documents" means all of them — the current-month
+      // scope would answer a different question than the one that was asked.
+      setPerYears([]); setPerMonths([])
       const u = new URL(window.location.href)
       u.searchParams.delete('supplier'); u.searchParams.delete('supplierName')
       window.history.replaceState({}, '', u.toString())
@@ -258,8 +272,35 @@ export default function ReceiptsPage() {
         matchSupplier = vendorSimilarity(r.vendor_name, supplierFilter.name) >= AUTO_THRESHOLD
       }
     }
-    return matchSearch && matchDoc && matchBook && matchSupplier && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
-  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter, bookView, flags.events_book])
+    // Period scope — years and months are independent: no month selected means
+    // the whole year. The archive is a separate view of old material, so it is
+    // never narrowed to the current month.
+    let matchPeriod = true
+    if (!archiveView) {
+      const y = parseInt(date.slice(0, 4), 10)
+      const m = parseInt(date.slice(5, 7), 10)
+      if (perYears.length && !perYears.includes(y)) matchPeriod = false
+      if (matchPeriod && perMonths.length && !perMonths.includes(m)) matchPeriod = false
+    }
+    return matchSearch && matchDoc && matchBook && matchSupplier && matchPeriod && (!filterFrom || (date && date >= filterFrom)) && (!filterTo || (date && date <= filterTo))
+  }), [archiveView, archived, receipts, search, filterFrom, filterTo, docFilter, supplierFilter, bookView, flags.events_book, perYears, perMonths])
+
+  // Years that actually carry documents, newest first, with the current year
+  // always offered so a fresh year is selectable before its first receipt.
+  const availYears = useMemo(() => {
+    const ys = new Set([new Date().getFullYear()])
+    for (const r of receipts) { const y = parseInt(String(r.receipt_date || '').slice(0, 4), 10); if (y) ys.add(y) }
+    return [...ys].sort((a, b) => b - a)
+  }, [receipts])
+  // True while the page shows what it opens on — the reset button is pointless then.
+  const isDefaultPeriod = perYears.length === 1 && perYears[0] === new Date().getFullYear() &&
+                          perMonths.length === 1 && perMonths[0] === new Date().getMonth() + 1
+  const periodLabel = useMemo(() => {
+    const ys = perYears.length ? [...perYears].sort((a, b) => b - a).join(' + ') : 'כל השנים'
+    if (!perMonths.length) return ys
+    const ms = [...perMonths].sort((a, b) => a - b).map(m => HEB_MONTHS[m - 1]).join(', ')
+    return `${ms} ${ys}`
+  }, [perYears, perMonths])
 
   // Existing top-level (L1) category names — used to flag AI-proposed NEW
   // categories in the scan review + drive the category autocomplete.
@@ -1008,7 +1049,9 @@ export default function ReceiptsPage() {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px' }}>
         <div>
           <h1 style={{ fontSize: isMobile ? '23px' : '26px', fontWeight:700, color:'var(--text)', margin:0 }}>קבלות</h1>
-          <p style={{ fontSize:'15px', color:'var(--text-mute)', marginTop:'2px' }}>{receipts.length} קבלות</p>
+          <p style={{ fontSize:'15px', color:'var(--text-mute)', marginTop:'2px' }}>
+            {archiveView ? `${archived.length} בארכיון` : `${filtered.length} מסמכים מתוך ${receipts.length}`}
+          </p>
         </div>
         {/* Desktop / tablet actions */}
         {!isMobile && (
@@ -1078,6 +1121,27 @@ export default function ReceiptsPage() {
           <button onClick={() => setHideReconcileBanner(true)} aria-label="סגור" style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-mute)', padding:4, display:'flex' }}>
             <X size={15} />
           </button>
+        </div>
+      )}
+
+      {/* ── Period scope — the list opens on this month ─────────────────────── */}
+      {!archiveView && (
+        <div style={{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
+          <CheckDropdown icon={CalendarDays} allLabel="כל השנים" width={isMobile ? 150 : 170}
+            options={availYears.map(y => ({ value: y, label: String(y) }))}
+            values={perYears} onChange={setPerYears} />
+          <CheckDropdown icon={Filter} allLabel="כל השנה" width={isMobile ? 150 : 170}
+            options={HEB_MONTHS.map((lbl, i) => ({ value: i + 1, label: lbl }))}
+            values={perMonths} onChange={setPerMonths} />
+          <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
+            מוצג: {periodLabel} · {filtered.length} מסמכים
+          </span>
+          {!isDefaultPeriod && (
+            <button onClick={() => { setPerYears([new Date().getFullYear()]); setPerMonths([new Date().getMonth() + 1]) }}
+              style={{ padding:'6px 12px', background:'none', border:'1px solid var(--border)', borderRadius:'6px', fontSize:'12px', color:'var(--text-mute)', cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+              חזרה לחודש הנוכחי
+            </button>
+          )}
         </div>
       )}
 
@@ -1233,12 +1297,21 @@ export default function ReceiptsPage() {
             : <Receipt size={40} style={{ margin:'0 auto 12px', display:'block', opacity:0.3 }} />}
           <p style={{ fontWeight:600, color:'var(--text)', fontSize:'15px' }}>
             {archiveView ? (archivedLoading ? 'טוען ארכיון…' : 'הארכיון ריק')
-              : (receipts.length === 0 ? 'אין קבלות עדיין' : 'אין תוצאות לסינון הנוכחי')}
+              : (receipts.length === 0 ? 'אין קבלות עדיין'
+                : (perMonths.length ? `אין קבלות ב${periodLabel}` : 'אין תוצאות לסינון הנוכחי'))}
           </p>
           <p style={{ fontSize:'13px', marginTop:'6px' }}>
             {archiveView ? 'קבלות שתמחק יופיעו כאן — ניתן לשחזר או למחוק לצמיתות'
-              : (receipts.length === 0 ? 'לחץ על כפתור המצלמה כדי לסרוק קבלה' : 'שנה את מסנני החיפוש')}
+              : (receipts.length === 0 ? 'לחץ על כפתור המצלמה כדי לסרוק קבלה'
+                : (perMonths.length ? 'הקבלות הקודמות שמורות — ניתן להרחיב את התצוגה' : 'שנה את מסנני החיפוש'))}
           </p>
+          {/* A fresh month looks empty; show the way out instead of a dead end. */}
+          {!archiveView && receipts.length > 0 && perMonths.length > 0 && (
+            <button onClick={() => setPerMonths([])}
+              style={{ marginTop:12, padding:'9px 18px', borderRadius:10, border:'none', background:'var(--accent)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)' }}>
+              הצג את כל השנה
+            </button>
+          )}
         </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
