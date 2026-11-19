@@ -64,7 +64,8 @@ export async function readBackupFile(file) {
 
 /** Restore — upsert categories (parents first) then receipts, by id. */
 export async function restoreFromObject(obj, user) {
-  // 'moses-caffee' was the app marker before the eldadai-receipts rename — old backups must stay restorable
+  // The second value is the marker older backup files were written with,
+  // before the rename — those files must stay restorable.
   if (!obj || !['eldadai-receipts', 'moses-caffee'].includes(obj.app) || !Array.isArray(obj.receipts)) {
     throw new Error('קובץ גיבוי לא תקין')
   }

@@ -1,5 +1,5 @@
 # Cloudflare Pages configuration
-name = "moses-caffee"
+name = "eldadai-receipts"
 pages_build_output_dir = "dist"
 
 # Platform-owner email (not a secret; also hardcoded as a fallback in onboard.js).
