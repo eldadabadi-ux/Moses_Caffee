@@ -8,7 +8,13 @@ const fmtILS = n => `₪${Math.round(n).toLocaleString('he-IL')}`
 // One distinct color per year in a multi-year stack (oldest year gets the first).
 export const YEAR_COLORS = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444', '#0ea5e9', '#d946ef']
 
-export default function MonthlyBars({ data, compareData, year, compareYear, color = '#2563eb', compareColor = '#f59e0b', chartType = 'bar', series = null }) {
+export default function MonthlyBars({ data, compareData, year, compareYear, color = '#2563eb', compareColor = '#f59e0b', chartType = 'bar', series = null, unit = 'ils', countNoun = '\u05e7\u05d1\u05dc\u05d5\u05ea' }) {
+  // 'ils' plots money and names the document count underneath; 'count' plots
+  // the count itself, so there is nothing to repeat on a second line.
+  const isCount = unit === 'count'
+  const fmtVal = isCount ? (n => `${Math.round(n)}`) : fmtILS
+  const subLine = (d) => isCount ? '' :
+    `<div style="color:var(--text-mute);font-size:11px;margin-top:2px">${d.count} ${countNoun}</div>`
   const svgRef   = useRef(null)
   const wrapRef  = useRef(null)
   const tipRef   = useRef(null)
@@ -54,7 +60,7 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
     g.append('g').attr('class', 'grid').call(
       d3.axisLeft(yScale).ticks(4)
         .tickSize(-W)
-        .tickFormat(v => v >= 1000 ? `₪${Math.round(v/1000)}k` : `₪${v}`)
+        .tickFormat(v => isCount ? (Number.isInteger(v) ? String(v) : '') : (v >= 1000 ? `₪${Math.round(v/1000)}k` : `₪${v}`))
     )
     .call(gg => {
       gg.select('.domain').remove()
@@ -92,8 +98,8 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
           const yr = label === 'A' ? year : compareYear
           tip.style('display', 'block').html(
             `<div style="font-weight:700;margin-bottom:4px">${HEB_MONTHS_FULL[d.month-1]} ${yr}</div>` +
-            `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
-            `<div style="color:var(--text-mute);font-size:11px;margin-top:2px">${d.count} קבלות</div>`
+            `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtVal(d.total)}${isCount ? ' ' + countNoun : ''}</div>` +
+            subLine(d)
           )
           const svgRect = svgRef.current.getBoundingClientRect()
           const x = event.clientX - svgRect.left
@@ -127,8 +133,8 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
           const yr = lineLabel ?? (strokeColor === color ? year : compareYear)
           tip.style('display', 'block').html(
             `<div style="font-weight:700;margin-bottom:4px">${HEB_MONTHS_FULL[d.month-1]} ${yr}</div>` +
-            `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
-            `<div style="color:var(--text-mute);font-size:11px;margin-top:2px">${d.count} קבלות</div>`)
+            `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtVal(d.total)}${isCount ? ' ' + countNoun : ''}</div>` +
+            subLine(d))
           const r = svgRef.current.getBoundingClientRect()
           tip.style('left', (e.clientX - r.left - 70) + 'px').style('top', (yScale(d.total) + margin.top - 80) + 'px')
         })
@@ -161,8 +167,8 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
               const stackTotal = stackTotals[m - 1]
               tip.style('display', 'block').html(
                 `<div style="font-weight:700;margin-bottom:4px">${HEB_MONTHS_FULL[m - 1]} ${sr.year}</div>` +
-                `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtILS(d.total)}</div>` +
-                `<div style="color:var(--text-mute);font-size:11px;margin-top:2px">${d.count} קבלות · סה״כ החודש בכל השנים: ${fmtILS(stackTotal)}</div>`)
+                `<div style="color:var(--ok);font-size:15px;font-weight:700">${fmtVal(d.total)}${isCount ? ' ' + countNoun : ''}</div>` +
+                `<div style="color:var(--text-mute);font-size:11px;margin-top:2px">${isCount ? '' : d.count + ' ' + countNoun + ' · '}סה״כ החודש בכל השנים: ${fmtVal(stackTotal)}${isCount ? ' ' + countNoun : ''}</div>`)
               const svgRect = svgRef.current.getBoundingClientRect()
               tip.style('left', (event.clientX - svgRect.left - 70) + 'px').style('top', (segY + margin.top - 84) + 'px')
             })
@@ -202,11 +208,11 @@ export default function MonthlyBars({ data, compareData, year, compareYear, colo
         .attr('font-size', '9px')
         .attr('font-family', 'var(--font-main)')
         .attr('opacity', 0)
-        .text(d => d.total >= 1000 ? `${Math.round(d.total/1000)}k` : Math.round(d.total))
+        .text(d => (!isCount && d.total >= 1000) ? `${Math.round(d.total/1000)}k` : Math.round(d.total))
         .transition().delay(800).duration(300)
         .attr('opacity', 1)
     }
-  }, [data, compareData, dims, year, compareYear, color, compareColor, chartType, series])
+  }, [data, compareData, dims, year, compareYear, color, compareColor, chartType, series, unit, countNoun])
 
   const legendItems = Array.isArray(series) && series.length > 1
     ? [

@@ -11,6 +11,8 @@
  * costed, because a partial one flatters.
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import CheckDropdown from '../components/CheckDropdown'
+import MonthlyBars, { YEAR_COLORS } from '../components/charts/MonthlyBars'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useTenant } from '../hooks/useTenant'
@@ -36,6 +38,8 @@ const STATUS = [
 ]
 const statusOf = v => STATUS.find(s => s.value === v) || STATUS[0]
 
+const HEB_MONTHS = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
+
 const emptyQuote = (vatRate) => ({
   title: '', customer_name: '', customer_phone: '', event_date: '', guests: '',
   items: [{ item_name: '', quantity: 1, unit: 'unit', unit_price: '' }],
@@ -53,6 +57,10 @@ export default function EventQuotesPage() {
   const [loading, setLoading] = useState(true)
   const [edit, setEdit]       = useState(null)
   const [deleteId, setDeleteId] = useState(null)
+  // Same scope rule as the receipts list (19.11.26): open on the current month,
+  // widen on demand, and roll over by itself at each month and year boundary.
+  const [perYears, setPerYears]   = useState(() => [new Date().getFullYear()])
+  const [perMonths, setPerMonths] = useState(() => [new Date().getMonth() + 1])
   const [saving, setSaving]   = useState(false)
 
   const vatRate = settings?.vatRate ?? 18
@@ -76,6 +84,50 @@ export default function EventQuotesPage() {
   }, [user])
 
   useEffect(() => { load() }, [load])
+
+  const yearOf  = q => parseInt(String(q.event_date || '').slice(0, 4), 10) || null
+  const monthOf = q => parseInt(String(q.event_date || '').slice(5, 7), 10) || null
+
+  const availYears = useMemo(() => {
+    const ys = new Set([new Date().getFullYear()])
+    for (const q of quotes) { const y = yearOf(q); if (y) ys.add(y) }
+    return [...ys].sort((a, b) => b - a)
+  }, [quotes])
+
+  // A quote with no date yet is not scheduled anywhere — it must stay visible
+  // in every scope, otherwise a draft would vanish the moment it is created.
+  const visible = useMemo(() => quotes.filter(q => {
+    if (!q.event_date) return true
+    const y = yearOf(q), m = monthOf(q)
+    if (perYears.length && !perYears.includes(y)) return false
+    if (perMonths.length && !perMonths.includes(m)) return false
+    return true
+  }), [quotes, perYears, perMonths])
+
+  const isDefaultPeriod = perYears.length === 1 && perYears[0] === new Date().getFullYear() &&
+                          perMonths.length === 1 && perMonths[0] === new Date().getMonth() + 1
+  const periodLabel = useMemo(() => {
+    const ys = perYears.length ? [...perYears].sort((a, b) => b - a).join(' + ') : 'כל השנים'
+    if (!perMonths.length) return ys
+    return `${[...perMonths].sort((a, b) => a - b).map(m => HEB_MONTHS[m - 1]).join(', ')} ${ys}`
+  }, [perYears, perMonths])
+
+  // Events per month, one series per year. The chart always spans twelve
+  // months — a month filter would leave a single bar — but it does follow the
+  // year selection, so "2025 + 2026" compares exactly those two.
+  const chartYears = useMemo(() => {
+    const ys = perYears.length ? [...perYears] : [...new Set(quotes.map(yearOf).filter(Boolean))]
+    return ys.sort((a, b) => a - b)
+  }, [perYears, quotes])
+  const monthlySeries = useMemo(() => chartYears.map(y => ({
+    year: y,
+    data: Array.from({ length: 12 }, (_, i) => ({
+      month: i + 1,
+      total: quotes.filter(q => yearOf(q) === y && monthOf(q) === i + 1).length,
+      count: quotes.filter(q => yearOf(q) === y && monthOf(q) === i + 1).length,
+    })),
+  })), [chartYears, quotes])
+  const hasEventsInChart = monthlySeries.some(sr => sr.data.some(d => d.total > 0))
 
   const totals = useMemo(() => edit ? quoteTotals(edit) : null, [edit])
 
@@ -152,6 +204,42 @@ export default function EventQuotesPage() {
         </button>
       </div>
 
+      {/* ── Period scope ───────────────────────────────────────────────────── */}
+      {quotes.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <CheckDropdown icon={Calendar} allLabel="כל השנים" width={isMobile ? 150 : 170}
+            options={availYears.map(y => ({ value: y, label: String(y) }))}
+            values={perYears} onChange={setPerYears} />
+          <CheckDropdown icon={Calendar} allLabel="כל השנה" width={isMobile ? 150 : 170}
+            options={HEB_MONTHS.map((lbl, i) => ({ value: i + 1, label: lbl }))}
+            values={perMonths} onChange={setPerMonths} />
+          <span style={{ fontSize: 12.5, color: 'var(--text-mute)', whiteSpace: 'nowrap' }}>
+            מוצג: {periodLabel} · {visible.length} אירועים
+          </span>
+          {!isDefaultPeriod && (
+            <button onClick={() => { setPerYears([new Date().getFullYear()]); setPerMonths([new Date().getMonth() + 1]) }}
+              style={{ padding: '6px 12px', background: 'none', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12, color: 'var(--text-mute)', cursor: 'pointer', fontFamily: 'var(--font-main)', whiteSpace: 'nowrap' }}>
+              חזרה לחודש הנוכחי
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Events per month, split by year ────────────────────────────────── */}
+      {hasEventsInChart && (
+        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 16px', boxShadow: 'var(--shadow-card)' }}>
+          <div style={{ margin: '0 0 6px', fontSize: 14.5, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Calendar size={15} color="var(--accent)" /> מספר אירועים בכל חודש
+          </div>
+          <MonthlyBars data={monthlySeries[0]?.data || []} series={monthlySeries.length > 1 ? monthlySeries : null}
+            year={chartYears.join(' + ')} unit="count" countNoun="אירועים"
+            color={YEAR_COLORS[0]} />
+          {monthlySeries.length === 1 && (
+            <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-dim)', paddingTop: 4 }}>{chartYears[0]}</div>
+          )}
+        </div>
+      )}
+
       {quotes.length === 0 && (
         <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-mute)', background: 'var(--panel)', border: '1px dashed var(--border)', borderRadius: 'var(--r-card)' }}>
           <FileText size={34} style={{ opacity: 0.35 }} />
@@ -160,8 +248,19 @@ export default function EventQuotesPage() {
         </div>
       )}
 
+      {quotes.length > 0 && visible.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-mute)', background: 'var(--panel)', border: '1px dashed var(--border)', borderRadius: 'var(--r-card)' }}>
+          <p style={{ fontWeight: 600, color: 'var(--text)', margin: '0 0 4px' }}>אין אירועים ב{periodLabel}</p>
+          <p style={{ fontSize: 14, margin: 0 }}>ההצעות הקודמות שמורות — ניתן להרחיב את התצוגה</p>
+          <button onClick={() => setPerMonths([])}
+            style={{ marginTop: 12, padding: '9px 18px', borderRadius: 10, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+            הצג את כל השנה
+          </button>
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(330px, 1fr))', gap: 14 }}>
-        {quotes.map(q => {
+        {visible.map(q => {
           const t = quoteTotals(q)
           const st = statusOf(q.status)
           return (
