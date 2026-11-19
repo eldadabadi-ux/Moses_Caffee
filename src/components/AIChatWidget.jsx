@@ -1,6 +1,11 @@
 /**
  * AIChatWidget — floating AI assistant for the receipts app.
  * Desktop: draggable + height-resizable card. Mobile: full-screen panel.
+ *
+ * It is anchored to the LEFT edge (19.11.26): the app is RTL, so the sidebar
+ * and its collapsed rail own the right edge — a bubble there covered the menu
+ * and its text. The left edge holds no fixed furniture, and the card is still
+ * draggable anywhere.
  * Adapted from the CRM bot (brand-blue, single-user, no tenant/memory panel).
  */
 import { useState, useRef, useEffect, useCallback } from 'react'
@@ -116,7 +121,7 @@ export default function AIChatWidget() {
   function startDrag(e) {
     if (isMobile || e.button !== 0) return
     e.preventDefault()
-    const pos = dPosRef.current ?? { x: window.innerWidth - DESKTOP_W - 16, y: window.innerHeight - dHRef.current - 130 }
+    const pos = dPosRef.current ?? { x: 16, y: window.innerHeight - dHRef.current - 130 }
     dragRef.current = { active: true, startMX: e.clientX, startMY: e.clientY, startX: pos.x, startY: pos.y }
     document.body.style.userSelect = 'none'; document.body.style.cursor = 'grabbing'
   }
@@ -148,7 +153,7 @@ export default function AIChatWidget() {
   const mobileCardStyle = { position: 'fixed', top: vvTop, left: 0, right: 0, height: vvHeight, borderRadius: 0, background: '#fff', boxShadow: 'none', zIndex: 99999, display: 'grid', gridTemplateRows: 'auto 1fr auto', overflow: 'hidden', direction: 'rtl' }
   const desktopCardStyle = dPos
     ? { position: 'fixed', top: dPos.y, left: dPos.x, width: DESKTOP_W, height: dH, borderRadius: '20px', background: '#fff', boxShadow: '0 12px 40px rgba(0,0,0,0.18)', zIndex: 9999, display: 'grid', gridTemplateRows: 'auto 1fr auto 8px', overflow: 'hidden', direction: 'rtl' }
-    : { position: 'fixed', bottom: '130px', right: '16px', width: DESKTOP_W, height: dH, borderRadius: '20px', background: '#fff', boxShadow: '0 12px 40px rgba(0,0,0,0.18)', zIndex: 9999, display: 'grid', gridTemplateRows: 'auto 1fr auto 8px', overflow: 'hidden', direction: 'rtl', animation: 'ai-widget-in 220ms ease' }
+    : { position: 'fixed', bottom: '130px', left: '16px', width: DESKTOP_W, height: dH, borderRadius: '20px', background: '#fff', boxShadow: '0 12px 40px rgba(0,0,0,0.18)', zIndex: 9999, display: 'grid', gridTemplateRows: 'auto 1fr auto 8px', overflow: 'hidden', direction: 'rtl', animation: 'ai-widget-in 220ms ease' }
 
   return createPortal(
     <>
@@ -159,7 +164,7 @@ export default function AIChatWidget() {
 
       {!open && (
         <button onClick={handleOpen} aria-label="פתח עוזר חכם"
-          style={{ position: 'fixed', bottom: isMobile ? '80px' : '130px', right: '16px', width: '52px', height: '52px', borderRadius: '50%', background: BRAND, border: 'none', cursor: 'pointer', display: 'grid', placeItems: 'center', boxShadow: '0 4px 14px rgba(37,99,235,0.45)', zIndex: 99999, transition: 'transform 150ms ease, box-shadow 150ms ease' }}
+          style={{ position: 'fixed', bottom: isMobile ? '80px' : '130px', left: '16px', width: '52px', height: '52px', borderRadius: '50%', background: BRAND, border: 'none', cursor: 'pointer', display: 'grid', placeItems: 'center', boxShadow: '0 4px 14px rgba(37,99,235,0.45)', zIndex: 99999, transition: 'transform 150ms ease, box-shadow 150ms ease' }}
           onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; e.currentTarget.style.boxShadow = '0 6px 18px rgba(37,99,235,0.55)' }}
           onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = '0 4px 14px rgba(37,99,235,0.45)' }}>
           <MessageCircle size={23} color="#fff" />
