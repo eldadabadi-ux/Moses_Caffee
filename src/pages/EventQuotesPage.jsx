@@ -13,6 +13,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import CheckDropdown from '../components/CheckDropdown'
 import { loadEventItems, saveEventItem, deleteEventItem, rememberQuoteLines } from '../lib/eventItems'
+import ItemNameCombo from '../components/events/ItemNameCombo'
 import MonthlyBars, { YEAR_COLORS } from '../components/charts/MonthlyBars'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -153,11 +154,15 @@ export default function EventQuotesPage() {
   }
 
   async function removeCatalogItem(it) {
-    if (!window.confirm(`להסיר את "${it.name}" מרשימת הפריטים? הצעות קיימות לא ישתנו.`)) return
+    const before = catalog
+    setCatalog(c => c.filter(x => x.id !== it.id))      // disappear immediately
     try {
       await deleteEventItem(it.id)
-      setCatalog(c => c.filter(x => x.id !== it.id))
-    } catch (e) { toast.error(e?.message || 'ההסרה נכשלה') }
+      toast.success(`"${it.name}" הוסר מהרשימה`)
+    } catch (e) {
+      setCatalog(before)                                 // put it back if the server refused
+      toast.error(e?.message || 'ההסרה נכשלה')
+    }
   }
 
   async function addCatalogItem(name, unit, price) {
@@ -166,6 +171,13 @@ export default function EventQuotesPage() {
       if (saved) setCatalog(c => [...c.filter(x => x.id !== saved.id), saved].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he')))
       return true
     } catch (e) { toast.error(e?.message || 'השמירה נכשלה'); return false }
+  }
+
+  /** A name typed straight into a line joins the catalogue — no extra step. */
+  async function rememberTypedName(line) {
+    const name = String(line?.item_name || '').trim()
+    if (!name || catalogByName.has(name.toLowerCase())) return
+    await addCatalogItem(name, line.unit, line.unit_price === '' || line.unit_price == null ? null : Number(line.unit_price))
   }
 
   const totals = useMemo(() => edit ? quoteTotals(edit) : null, [edit])
@@ -396,8 +408,16 @@ export default function EventQuotesPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {edit.items.map((l, i) => (
                   <div key={i} style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2.2fr 0.8fr 1fr 1fr auto auto', gap: 7, alignItems: 'center' }}>
-                    <input value={l.item_name} onChange={e => applyCatalogName(i, e.target.value)}
-                      style={{ ...inp, height: 38 }} placeholder="שם הפריט" dir="auto" list="quote-catalog" />
+                    <ItemNameCombo
+                      value={l.item_name}
+                      onChange={name => setLine(i, { item_name: name, cost_per_base_unit: undefined })}
+                      onPick={it => setLine(i, { item_name: it.name, unit: it.unit || 'unit', unit_price: it.unit_price ?? '', cost_per_base_unit: undefined })}
+                      catalog={catalog}
+                      onDelete={removeCatalogItem}
+                      onAddNew={name => addCatalogItem(name, l.unit, l.unit_price === '' ? null : Number(l.unit_price))}
+                      onCommit={() => rememberTypedName(l)}
+                      unitLabel={u => (QUOTE_UNITS.find(x => x.value === u) || {}).label || u}
+                      style={{ ...inp, height: 38 }} />
                     <input type="number" min="0" step="any" value={l.quantity} onChange={e => setLine(i, { quantity: e.target.value })}
                       style={{ ...inp, height: 40 }} placeholder="כמות" />
                     <select value={l.unit} onChange={e => setLine(i, { unit: e.target.value })} style={{ ...inp, height: 40 }}>
@@ -416,11 +436,6 @@ export default function EventQuotesPage() {
                   </div>
                 ))}
               </div>
-              {/* Only catalogue items are suggested — raw materials from the
-                  receipts would send the quote out at cost prices. */}
-              <datalist id="quote-catalog">
-                {catalog.map(c => <option key={c.id} value={c.name} />)}
-              </datalist>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 7, flexWrap: 'wrap' }}>
                 <button onClick={addLine}
