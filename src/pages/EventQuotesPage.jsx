@@ -14,6 +14,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import CheckDropdown from '../components/CheckDropdown'
 import { loadEventItems, saveEventItem, deleteEventItem, rememberQuoteLines } from '../lib/eventItems'
 import ItemNameCombo from '../components/events/ItemNameCombo'
+import { uploadQuoteFile, quoteFileUrl, deleteQuoteFile, fmtSize } from '../lib/eventFiles'
+import ImageViewer from '../components/ImageViewer'
 import MonthlyBars, { YEAR_COLORS } from '../components/charts/MonthlyBars'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -26,7 +28,7 @@ import Modal from '../components/ui/Modal'
 import DateInput from '../components/ui/DateInput'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { FileText, Plus, Trash2, Pencil, Users, Calendar, Wand2, X , List } from 'lucide-react'
+import { FileText, Plus, Trash2, Pencil, Users, Calendar, Wand2, X, List, Paperclip, Download, TrendingUp } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const fmt = n => `₪${(Number(n) || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -44,6 +46,7 @@ const HEB_MONTHS = ['ינואר','פברואר','מרץ','אפריל','מאי','
 
 const emptyQuote = (vatRate) => ({
   title: '', customer_name: '', customer_phone: '', event_date: '', event_end_date: '', guests: '',
+  attachments: [],
   items: [{ item_name: '', quantity: 1, unit: 'unit', unit_price: '' }],
   vat_rate: vatRate, discount_pct: '', margin_pct: 35, status: 'draft', notes: '',
 })
@@ -62,6 +65,8 @@ export default function EventQuotesPage() {
   const [showCatalog, setShowCatalog] = useState(false)
   const [showNotes, setShowNotes]     = useState(false)
   const [multiDay, setMultiDay]       = useState(false)
+  const [uploading, setUploading]     = useState(false)
+  const [lightboxUrl, setLightboxUrl] = useState(null)
   const [loading, setLoading] = useState(true)
   const [edit, setEdit]       = useState(null)
   const [deleteId, setDeleteId] = useState(null)
@@ -165,6 +170,59 @@ export default function EventQuotesPage() {
   })), [chartYears, quotes])
   const hasEventsInChart = monthlySeries.some(sr => sr.data.some(d => d.total > 0))
 
+  /**
+   * Only an ACCEPTED quote is money (operator decision 20.11.26): a draft is a
+   * thought and a sent quote is a hope. Profit needs every line costed — the
+   * wand prices a line from what the ingredient actually cost — so a quote
+   * without costs contributes revenue but is counted as "profit unknown".
+   */
+  const accepted = useMemo(() => quotes.filter(q => q.status === 'accepted'), [quotes])
+
+  const moneyOf = useCallback((q) => {
+    const t = quoteTotals(q)
+    return {
+      revenue: t.total || 0,                      // what the customer pays, VAT included
+      net: t.net || 0,                            // the business's own revenue
+      cost: t.fully_costed ? (t.cost || 0) : 0,
+      profit: t.fully_costed ? (t.profit || 0) : 0,
+      costed: !!t.fully_costed,
+    }
+  }, [])
+
+  /** Profit per month, one series per year — the same shape the count chart uses. */
+  const profitSeries = useMemo(() => chartYears.map(y => ({
+    year: y,
+    data: Array.from({ length: 12 }, (_, i) => {
+      const rows = accepted.filter(q => yearOf(q) === y && monthOf(q) === i + 1)
+      const profit = rows.reduce((sum, q) => sum + moneyOf(q).profit, 0)
+      return { month: i + 1, total: Math.round(profit * 100) / 100, count: rows.length }
+    }),
+  })), [chartYears, accepted, moneyOf])
+  const hasProfit = profitSeries.some(sr => sr.data.some(d => d.total !== 0))
+
+  /** Month / quarter / year roll-up of the accepted events. */
+  const summary = useMemo(() => {
+    const now = new Date()
+    const y = now.getFullYear(), m = now.getMonth() + 1
+    const q = Math.ceil(m / 3)
+    const bucket = (test) => {
+      const rows = accepted.filter(test)
+      const agg = rows.reduce((a, r) => {
+        const v = moneyOf(r)
+        return { revenue: a.revenue + v.revenue, net: a.net + (v.costed ? v.net : 0), cost: a.cost + v.cost, profit: a.profit + v.profit, unknown: a.unknown + (v.costed ? 0 : 1) }
+      }, { revenue: 0, net: 0, cost: 0, profit: 0, unknown: 0 })
+      // Measured on the costed quotes only — mixing in quotes with no cost
+      // would quietly dilute the percentage.
+      return { ...agg, count: rows.length, margin: agg.net > 0 ? Math.round((agg.profit / agg.net) * 100) : null }
+    }
+    return {
+      month:   bucket(r => yearOf(r) === y && monthOf(r) === m),
+      quarter: bucket(r => yearOf(r) === y && Math.ceil(monthOf(r) / 3) === q),
+      year:    bucket(r => yearOf(r) === y),
+      labels: { month: HEB_MONTHS[m - 1], quarter: `רבעון ${q}`, year: String(y) },
+    }
+  }, [accepted, moneyOf])
+
   const catalogByName = useMemo(
     () => new Map(catalog.map(c => [String(c.name || '').trim().toLowerCase(), c])),
     [catalog])
@@ -208,6 +266,41 @@ export default function EventQuotesPage() {
     await addCatalogItem(name, line.unit, line.unit_price === '' || line.unit_price == null ? null : Number(line.unit_price))
   }
 
+  /**
+   * Files are uploaded immediately — a quote being edited may not be saved for
+   * a while, and a conference programme should not be lost to a closed tab.
+   * An unsaved new quote gets a temporary id so its folder is stable.
+   */
+  async function addFiles(fileList) {
+    const files = [...(fileList || [])]
+    if (!files.length) return
+    setUploading(true)
+    try {
+      const quoteId = edit.id || edit._tmpId || (Math.random().toString(36).slice(2, 10))
+      const added = []
+      for (const f of files) {
+        try { added.push(await uploadQuoteFile(user.id, quoteId, f)) }
+        catch (e) { toast.error(`${f.name}: ${e?.message || 'העלאה נכשלה'}`) }
+      }
+      if (added.length) {
+        setEdit(q => ({ ...q, _tmpId: quoteId, attachments: [...(q.attachments || []), ...added] }))
+        toast.success(added.length === 1 ? 'הקובץ צורף' : `${added.length} קבצים צורפו`)
+      }
+    } finally { setUploading(false) }
+  }
+
+  async function openAttachment(a) {
+    const url = await quoteFileUrl(a.path)
+    if (!url) { toast.error('הקובץ אינו זמין'); return }
+    if (/^image\//.test(a.type || '')) setLightboxUrl(url)
+    else window.open(url, '_blank', 'noopener')
+  }
+
+  async function removeAttachment(a) {
+    setEdit(q => ({ ...q, attachments: (q.attachments || []).filter(x => x.path !== a.path) }))
+    try { await deleteQuoteFile(a.path) } catch (e) { console.warn('[event-files] delete', e?.message) }
+  }
+
   const totals = useMemo(() => edit ? quoteTotals(edit) : null, [edit])
 
   // ── line editing ───────────────────────────────────────────────────────────
@@ -245,6 +338,7 @@ export default function EventQuotesPage() {
         event_end_date: edit.event_end_date || null,
         guests: edit.guests === '' ? null : Number(edit.guests),
         items: edit.items.filter(l => (l.item_name || '').trim()),
+        attachments: edit.attachments || [],
         vat_rate: Number(edit.vat_rate) || 18,
         discount_pct: edit.discount_pct === '' ? null : Number(edit.discount_pct),
         margin_pct: edit.margin_pct === '' ? null : Number(edit.margin_pct),
@@ -334,6 +428,46 @@ export default function EventQuotesPage() {
         </div>
       )}
 
+      {/* ── Profit per month + the period roll-up (accepted events only) ──── */}
+      {accepted.length > 0 && (
+        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 16px', boxShadow: 'var(--shadow-card)' }}>
+          <div style={{ margin: '0 0 2px', fontSize: 14.5, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+            <TrendingUp size={15} color="var(--accent)" /> רווח מאירועים
+            <span style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--text-mute)' }}>· הצעות שאושרו בלבד</span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 10, margin: '10px 0 4px' }}>
+            {['month', 'quarter', 'year'].map(k => {
+              const b = summary[k]
+              return (
+                <div key={k} style={{ background: 'var(--panel-2)', borderRadius: 12, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-mute)', fontWeight: 600 }}>
+                    {k === 'month' ? 'החודש' : k === 'quarter' ? 'הרבעון' : 'השנה'} · {summary.labels[k]}
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: b.profit > 0 ? 'var(--ok)' : 'var(--text)', marginTop: 2 }}>
+                    {fmt(b.profit)}{b.margin != null && b.profit !== 0 ? ` · ${b.margin}%` : ''}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-mute)', marginTop: 2 }}>
+                    הכנסה {fmt(b.revenue)} · {b.count === 1 ? 'אירוע אחד' : `${b.count} אירועים`}
+                    {b.unknown > 0 ? ` · ${b.unknown} ללא עלות` : ''}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {hasProfit ? (
+            <MonthlyBars data={profitSeries[0]?.data || []} series={profitSeries.length > 1 ? profitSeries : null}
+              year={chartYears.join(' + ')} color={YEAR_COLORS[2]} countNoun="אירועים" />
+          ) : (
+            <div style={{ fontSize: 12.5, color: 'var(--text-mute)', lineHeight: 1.6, padding: '6px 2px' }}>
+              עדיין אין רווח לחשב: כדי לדעת כמה הרווחת, תמחר את שורות ההצעה לפי העלות בפועל
+              (הכפתור עם השרביט בשורת הפריט) — המערכת תשווה אותן למחיר שגבית.
+            </div>
+          )}
+        </div>
+      )}
+
       {quotes.length === 0 && (
         <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-mute)', background: 'var(--panel)', border: '1px dashed var(--border)', borderRadius: 'var(--r-card)' }}>
           <FileText size={34} style={{ opacity: 0.35 }} />
@@ -375,6 +509,11 @@ export default function EventQuotesPage() {
                 )}
                 {q.guests > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Users size={13} /> {q.guests} אורחים</span>}
                 {q.customer_name && <span>{q.customer_name}</span>}
+                {(q.attachments || []).length > 0 && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="קבצים מצורפים">
+                    <Paperclip size={13} /> {q.attachments.length}
+                  </span>
+                )}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: t.per_guest ? '1fr 1fr' : '1fr', gap: 6, background: 'var(--panel-2)', borderRadius: 10, padding: '9px 10px' }}>
@@ -397,7 +536,7 @@ export default function EventQuotesPage() {
               )}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-                <button onClick={() => setEdit({ ...q, guests: q.guests ?? '', discount_pct: q.discount_pct ?? '', margin_pct: q.margin_pct ?? 35, items: q.items?.length ? q.items : [{ item_name: '', quantity: 1, unit: 'unit', unit_price: '' }] })}
+                <button onClick={() => setEdit({ ...q, guests: q.guests ?? '', event_end_date: q.event_end_date || '', attachments: q.attachments || [], discount_pct: q.discount_pct ?? '', margin_pct: q.margin_pct ?? 35, items: q.items?.length ? q.items : [{ item_name: '', quantity: 1, unit: 'unit', unit_price: '' }] })}
                   style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, padding: '8px', borderRadius: 'var(--r-btn)', border: '1px solid var(--accent)', background: 'var(--accent-bg)', color: 'var(--accent)', fontSize: 13.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
                   <Pencil size={14} /> ערוך
                 </button>
@@ -531,6 +670,34 @@ export default function EventQuotesPage() {
               </label>
             </div>
 
+            {/* Attachments — programmes, sketches, anything the customer sent */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 'var(--r-btn)', border: '1px dashed var(--border)', color: 'var(--text-mute)', fontSize: 13.5, cursor: uploading ? 'default' : 'pointer' }}>
+                  <Paperclip size={14} /> {uploading ? 'מעלה…' : 'צרף קבצים'}
+                  <input type="file" multiple disabled={uploading} onChange={e => { addFiles(e.target.files); e.target.value = '' }} style={{ display: 'none' }} />
+                </label>
+                <span style={{ fontSize: 12, color: 'var(--text-mute)' }}>כל סוג קובץ — תוכנית כנס, סקיצה, מסמך דרישות</span>
+              </div>
+              {(edit.attachments || []).length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 7 }}>
+                  {edit.attachments.map(a => (
+                    <span key={a.path} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 9px', borderRadius: 999, border: '1px solid var(--border)', background: 'var(--panel-2)', fontSize: 12.5 }}>
+                      <button type="button" onClick={() => openAttachment(a)} title="פתח"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text)', fontFamily: 'var(--font-main)', fontSize: 12.5, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <Download size={12} /> {a.name}
+                        <span style={{ color: 'var(--text-mute)' }}>({fmtSize(a.size)})</span>
+                      </button>
+                      <button type="button" onClick={() => removeAttachment(a)} title="הסר קובץ"
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-mute)', display: 'flex' }}>
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Live totals */}
             {totals && (
               <div style={{ background: 'var(--panel-2)', borderRadius: 12, padding: '9px 12px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', columnGap: 18, rowGap: 2, fontSize: 13.5 }}>
@@ -600,6 +767,8 @@ export default function EventQuotesPage() {
           </div>
         </Modal>
       )}
+
+      {lightboxUrl && <ImageViewer src={lightboxUrl} alt="קובץ מצורף" onClose={() => setLightboxUrl(null)} />}
 
       {deleteId && (
         <ConfirmDialog isOpen title="למחוק את ההצעה?" message="הפעולה אינה הפיכה."

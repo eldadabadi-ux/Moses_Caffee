@@ -12,5 +12,6 @@ export {
   bookIcon,
   bookOf,
   isCafeBook,
+  isBuiltinBook,
   inBook,
 } from '../../functions/api/_lib/books.js'

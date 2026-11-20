@@ -31,6 +31,7 @@ import { deleteReceiptFile, signedReceiptUrl, uploadReceiptFile } from '../lib/s
 import { fetchLegacyInlineImage } from '../lib/receiptImage'
 import { vendorSimilarity, AUTO_THRESHOLD } from '../lib/supplierMatch'
 import { BOOKS, DEFAULT_BOOK, bookOf } from '../lib/books'
+import { loadCustomBooks, allBooks, createBook, deleteBook } from '../lib/receiptBooks'
 import SupplierConfirmQueue from '../components/receipts/SupplierConfirmQueue'
 import Modal from '../components/ui/Modal'
 import SearchInput from '../components/ui/SearchInput'
@@ -81,6 +82,8 @@ export default function ReceiptsPage() {
   const navigate = useNavigate()
   const [receipts, setReceipts]         = useState(() => getCached('receipts') || [])
   const [categories, setCategories]     = useState([])
+  // Receipt types beyond the two built-ins (client request 20.11.26).
+  const [customBooks, setCustomBooks]   = useState([])
   const [loading, setLoading]           = useState(() => !hasCached('receipts'))
   const [search, setSearch]             = useState('')
     // The list opens on the CURRENT month and widens on demand (client request
@@ -127,6 +130,7 @@ export default function ReceiptsPage() {
   // Which ledger the list shows. Catering events are catalogued apart from the
   // café and stay out of every statistic (client request #17). The choice is
   // remembered so a catering session doesn't have to re-pick it per scan.
+  const books = useMemo(() => allBooks(customBooks), [customBooks])
   const [bookView, setBookView] = useState(() => {
     try { return localStorage.getItem('moses_book_view') || DEFAULT_BOOK } catch { return DEFAULT_BOOK }
   })
@@ -146,7 +150,7 @@ export default function ReceiptsPage() {
   const [reviewImage, setReviewImage]   = useState(null)
   const [approving, setApproving]       = useState(false)
   const [cropSrc, setCropSrc]           = useState(null)
-  const [form, setForm]                 = useState({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt' })
+  const [form, setForm]                 = useState({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt', book: DEFAULT_BOOK })
   const vatRate = settings?.vatRate ?? 18
   const [imagePreview, setImagePreview] = useState(null)
 
@@ -213,6 +217,33 @@ export default function ReceiptsPage() {
   }, [])
 
   useEffect(() => { try { localStorage.setItem('moses_book_view', bookView) } catch {} }, [bookView])
+
+  useEffect(() => {
+    if (!user) return
+    loadCustomBooks(user.id).then(setCustomBooks).catch(() => {})
+  }, [user])
+
+  /** A type whose documents are gone can be removed; the built-ins never. */
+  async function addBook() {
+    const label = window.prompt('שם הסוג החדש (למשל: קייטרינג חיצוני)')
+    if (!label?.trim()) return
+    try {
+      const created = await createBook(user.id, orgId, label, books.map(b => b.value))
+      setCustomBooks(c => [...c, created])
+      setBookView(created.key)
+      toast.success(`הסוג "${created.label}" נוצר`)
+    } catch (e) { toast.error(e?.message || 'יצירת הסוג נכשלה') }
+  }
+
+  async function removeBook(b) {
+    if (!window.confirm(`למחוק את הסוג "${b.label}"?`)) return
+    try {
+      await deleteBook(user.id, { id: b.id, key: b.value, label: b.label })
+      setCustomBooks(c => c.filter(x => x.id !== b.id))
+      if (bookView === b.value) setBookView(DEFAULT_BOOK)
+      toast.success('הסוג נמחק')
+    } catch (e) { toast.error(e?.message || 'המחיקה נכשלה') }
+  }
 
   useEffect(() => { loadData() }, [])
   useEffect(() => { loadCategories() }, [])
@@ -802,6 +833,7 @@ export default function ReceiptsPage() {
       receipt_date: form.receipt_date || new Date().toISOString().slice(0, 10),
       amount: totalAmt, currency: 'ILS',
       category_text: catName, category_id, ...imgPatch,
+      book: /^[a-z0-9_-]{2,24}$/.test(form.book || '') ? form.book : DEFAULT_BOOK,
       items: cleanItems.length ? cleanItems : null,
       installments: saneInstallments(form.installments),
     }
@@ -950,7 +982,7 @@ export default function ReceiptsPage() {
   }
 
   function resetForm() {
-    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt', installments:'' })
+    setForm({ amount:'', vendor_name:'', category_text:'שונות', receipt_date: new Date().toISOString().slice(0,10), receipt_image:'', amount_before_vat:'', vat_amount:'', items:[], doc_type:'receipt', installments:'', book: bookView })
     setImagePreview(null)
   }
 
@@ -964,7 +996,7 @@ export default function ReceiptsPage() {
       ? r.vat_amount
       : (t > 0 ? Math.round((t - (before || 0)) * 100) / 100 : '')
     setForm({
-      amount: r.amount||'', vendor_name: r.vendor_name||'', category_text: r.category_text||'שונות',
+      amount: r.amount||'', vendor_name: r.vendor_name||'', category_text: r.category_text||'שונות', book: bookOf(r),
       receipt_date: r.receipt_date||new Date().toISOString().slice(0,10), receipt_image: r.receipt_image||'',
       amount_before_vat: before, vat_amount: vat,
       items: Array.isArray(r.items) ? r.items.map(it => ({ ...it })) : [],
@@ -1196,8 +1228,8 @@ export default function ReceiptsPage() {
         {/* Book of account — the café and the catering events are separate ledgers,
             so the switch is a top-level tab, not a filter chip. */}
         {flags.events_book && (
-          <div style={{ display:'flex', gap:6 }}>
-            {BOOKS.map(b => {
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center' }}>
+            {books.map(b => {
               const on = bookView === b.value
               // Count what the CURRENT view holds, so the archive shows archive counts.
               const n = ((archiveView ? archived : receipts) || []).filter(r => bookOf(r) === b.value).length
@@ -1206,14 +1238,24 @@ export default function ReceiptsPage() {
                   style={{ display:'flex', alignItems:'center', gap:6, padding:'7px 14px', borderRadius:10, border:`1.5px solid ${on ? 'var(--accent)' : 'var(--border)'}`, background: on ? 'var(--accent-bg)' : 'var(--panel)', color: on ? 'var(--accent)' : 'var(--text-mute)', fontSize:'13.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
                   <span>{b.icon}</span>{b.label}
                   <span style={{ fontSize:'12px', fontWeight:600, opacity:0.75, fontVariantNumeric:'tabular-nums' }}>{n}</span>
+                  {b.custom && on && n === 0 && (
+                    <span onClick={e => { e.stopPropagation(); removeBook(b) }} title="מחק סוג"
+                      style={{ display:'flex', alignItems:'center', color:'var(--danger)', marginInlineStart:2 }}>
+                      <X size={13} />
+                    </span>
+                  )}
                 </button>
               )
             })}
+            <button onClick={addBook} title="הוסף סוג קבלות חדש"
+              style={{ display:'flex', alignItems:'center', gap:5, padding:'7px 12px', borderRadius:10, border:'1.5px dashed var(--border)', background:'none', color:'var(--text-mute)', fontSize:'13px', fontWeight:600, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+              <Plus size={14} /> סוג חדש
+            </button>
           </div>
         )}
-        {flags.events_book && bookView === 'events' && (
+        {flags.events_book && bookView !== DEFAULT_BOOK && (
           <div style={{ fontSize:'12.5px', color:'var(--text-mute)', lineHeight:1.6 }}>
-            🎪 ספר האירועים מנוהל בנפרד — המסמכים כאן אינם נספרים בדשבורד, בקטגוריות, בעלויות הספקים או בתובנות של בית הקפה.
+            {books.find(b => b.value === bookView)?.icon} {books.find(b => b.value === bookView)?.label} מנוהל בנפרד — המסמכים כאן אינם נספרים בדשבורד, בקטגוריות, בעלויות הספקים או בתובנות של בית הקפה.
           </div>
         )}
 
@@ -1501,17 +1543,17 @@ export default function ReceiptsPage() {
             {/* Book of account — orthogonal to document type (client request #17) */}
             {flags.events_book && <div>
               <label style={LS}>ספר חשבונות</label>
-              <div style={{ display:'flex', gap:'6px' }}>
-                {BOOKS.map(b => (
+              <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                {books.map(b => (
                   <button key={b.value} type="button" onClick={() => setReviewBook(b.value)}
                     style={{ flex:1, padding:'10px 6px', borderRadius:'10px', border:`1.5px solid ${reviewBook === b.value ? 'var(--accent)' : 'var(--border)'}`, background: reviewBook === b.value ? 'var(--accent-bg)' : 'var(--panel)', color: reviewBook === b.value ? 'var(--accent)' : 'var(--text-mute)', fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
                     {b.icon} {b.label}
                   </button>
                 ))}
               </div>
-              {reviewBook === 'events' && (
+              {reviewBook !== DEFAULT_BOOK && (
                 <div style={{ marginTop:8, fontSize:'12.5px', color:'var(--text-mute)', lineHeight:1.6 }}>
-                  🎪 מסמך של אירוע נשמר בנפרד ו<strong>לא נכנס</strong> לסטטיסטיקות, לתובנות ולהשוואות של בית הקפה.
+                  {books.find(b => b.value === reviewBook)?.icon} המסמך נשמר תחת "{books.find(b => b.value === reviewBook)?.label}" ו<strong>לא נכנס</strong> לסטטיסטיקות, לתובנות ולהשוואות של בית הקפה.
                 </div>
               )}
             </div>}
@@ -1712,6 +1754,25 @@ export default function ReceiptsPage() {
               <DateInput value={form.receipt_date} onChange={e => setForm(p => ({ ...p, receipt_date: e.target.value }))} style={{ height:'44px' }} />
             </div>
           </div>
+          {flags.events_book && (
+            <div>
+              <label style={LS}>סוג הקבלה</label>
+              <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                {books.map(b => (
+                  <button key={b.value} type="button" onClick={() => setForm(p => ({ ...p, book: b.value }))}
+                    style={{ padding:'9px 12px', borderRadius:'10px', border:`1.5px solid ${form.book === b.value ? 'var(--accent)' : 'var(--border)'}`, background: form.book === b.value ? 'var(--accent-bg)' : 'var(--panel)', color: form.book === b.value ? 'var(--accent)' : 'var(--text-mute)', fontSize:'12.5px', fontWeight:700, cursor:'pointer', fontFamily:'var(--font-main)', whiteSpace:'nowrap' }}>
+                    {b.icon} {b.label}
+                  </button>
+                ))}
+              </div>
+              {form.book !== DEFAULT_BOOK && (
+                <div style={{ marginTop:6, fontSize:'12px', color:'var(--text-mute)', lineHeight:1.6 }}>
+                  מסמך שאינו של בית הקפה מנוהל בנפרד ואינו נספר בדשבורד ובתובנות.
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={formGrid}>
             <div>
               <label style={LS}>סכום (₪) *</label>
