@@ -16,6 +16,7 @@ const NAV_FLAG = {
   reconcile: 'reconciliation',
   products: 'product_compare',
   insights: 'insights',
+  revenue: 'sales',
 }
 
 // Navigation tree — every section + its options.
@@ -74,6 +75,10 @@ const NAV = [
   },
   {
     id: 'insights', label: 'תובנות', icon: Lightbulb, to: '/insights',
+    children: [],
+  },
+  {
+    id: 'revenue', label: 'הכנסות', icon: TrendingUp, to: '/revenue',
     children: [],
   },
   {

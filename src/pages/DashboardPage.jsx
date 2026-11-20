@@ -7,6 +7,8 @@ import { countsAsDoc } from '../lib/installments'
 import { BarChart2, TrendingUp, TrendingDown, Calendar, Tag, X, Store } from 'lucide-react'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import MonthlyBars   from '../components/charts/MonthlyBars'
+import RevenueVsExpenses from '../components/RevenueVsExpenses'
+import { useFeatureFlags } from '../lib/flags'
 import CategoryDonut, { COLORS } from '../components/charts/CategoryDonut'
 import CategoryDrilldown from '../components/CategoryDrilldown'
 import ChartTypeToggle from '../components/charts/ChartTypeToggle'
@@ -81,6 +83,7 @@ export default function DashboardPage() {
   // The top filters select SEVERAL values at once (client request 15.11.26):
   // years, categories and suppliers are each a checkbox multi-select, and the
   // combined selection drives the WHOLE dashboard — KPIs, every chart, drill-down.
+  const flags = useFeatureFlags()
   const [years,         setYears]         = useState([thisYear])
   const [filterCats,    setFilterCats]    = useState([])   // L1 category names
   const [filterVendors, setFilterVendors] = useState([])   // keys: supplier_id or "name:<raw>"
@@ -408,6 +411,12 @@ export default function DashboardPage() {
         <KpiCard label="מספר קבלות" value={active.filter(countsAsDoc).length} sub={`${active.filter(r => countsAsDoc(r) && r.ai_extracted).length} נסרקו ב-AI`} icon={BarChart2} color="#7c3aed" />
         {!isMobile && <KpiCard label="קטגוריות פעילות" value={l1Data.length} sub={`${vendorDist.length} ספקים`} icon={Tag} color="#d97706" />}
       </div>
+
+      {/* Income side — only for a tenant that bought the module (flag OFF by default) */}
+      {flags.sales && (
+        <RevenueVsExpenses years={years} expenses={total} expenseMonthly={monthlyData}
+          filtersActive={filterCats.length > 0 || filterVendors.length > 0} isMobile={isMobile} />
+      )}
 
       {/* ── Empty state ───────────────────────────────────────────────────────── */}
       {active.length === 0 && (

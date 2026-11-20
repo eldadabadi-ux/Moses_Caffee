@@ -16,7 +16,10 @@ export { FLAG_DEFAULTS, FLAG_KEYS, resolveFlags } from '../../functions/api/_lib
  * already limits the rows to globals plus this org's overrides.
  */
 export function useFeatureFlags() {
-  const [flags, setFlags] = useState(FLAG_DEFAULTS)
+  // `_loaded` tells a gate whether this is still the code default or the
+  // tenant's real answer. It matters only for a flag that defaults OFF: the
+  // first render would otherwise deny a module the tenant actually bought.
+  const [flags, setFlags] = useState({ ...FLAG_DEFAULTS, _loaded: false })
 
   useEffect(() => {
     let alive = true
@@ -27,8 +30,8 @@ export function useFeatureFlags() {
         // The caller's org is whichever non-null org_id came back — RLS returns
         // only their own, so there is nothing to disambiguate.
         const orgId = data.find(r => r.org_id)?.org_id || null
-        setFlags(resolveFlags(data, orgId))
-      } catch { /* keep the defaults */ }
+        setFlags({ ...resolveFlags(data, orgId), _loaded: true })
+      } catch { if (alive) setFlags(f => ({ ...f, _loaded: true })) }   // offline → code defaults stand
     })()
     return () => { alive = false }
   }, [])

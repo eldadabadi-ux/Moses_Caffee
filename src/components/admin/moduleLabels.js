@@ -8,5 +8,6 @@ export const MODULE_LABELS = {
   insights: 'תובנות',
   price_alerts: 'התראות מחיר',
   mail_ingest: 'קליטת מייל',
+  sales: 'הכנסות ומכירות',
 }
 export const moduleLabel = (key) => MODULE_LABELS[key] || key

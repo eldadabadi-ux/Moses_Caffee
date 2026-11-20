@@ -100,3 +100,15 @@ architecture audit (`docs/ARCHITECTURE-AUDIT-2026.md`).
    bypass tenant isolation, store blobs in rows, load unbounded lists, or add a band-aid — do NOT
    implement it as asked. Explain the risk and propose the clean alternative first.
 6. **Keep components thin.** Pages render; data lives in hooks; domain logic lives in pure helpers.
+7. **A new module must not be able to harm an existing customer** (binding condition stated by the
+   product owner, 20.11.26). For anything that is not a fix to an already-shipped feature:
+   - **Additive schema only.** New tables, and new columns only on new tables. Never `ALTER`/`DROP` a
+     column an existing feature reads; never a migration that rewrites existing rows.
+   - **Its flag defaults to `false`** in `FLAG_DEFAULTS` — every pre-existing module defaults ON, a new
+     one is the exception — and it is gated at all three levels: route (`FlagGate`), navigation
+     (`NAV_FLAG`), and server (endpoints answer 403 while the module is off).
+   - **A declared touch-list.** Name every existing file the module will edit BEFORE writing code;
+     anything beyond that list needs the owner's explicit approval. All other code goes in new files.
+   - **Prove it, don't promise it.** Before shipping: `git diff --stat` matches the touch-list, the three
+     suites are green, and a tenant with the flag OFF is exercised in a browser with zero queries against
+     the new tables.

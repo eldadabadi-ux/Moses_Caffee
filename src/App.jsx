@@ -16,6 +16,7 @@ import AIChatWidget from './components/AIChatWidget'
 import CookieConsent from './components/CookieConsent'
 import Sidebar, { SidebarRail } from './components/Sidebar'
 import MfaGate from './components/MfaGate'
+import ErrorBoundary from './components/ErrorBoundary'
 import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Store } from 'lucide-react'
 
 /**
@@ -25,6 +26,10 @@ import { Receipt, Tag, Camera, RefreshCw, LogOut, BarChart2, Settings, Menu, Sto
  */
 function FlagGate({ flag, children }) {
   const flags = useFeatureFlags()
+  // Decide only once the tenant's own flags have arrived. Sending a paying
+  // customer home for the split second before they load is a bug you only see
+  // on a module that defaults OFF.
+  if (!flags._loaded) return <LoadingSpinner />
   return flags[flag] ? children : <Navigate to="/" replace />
 }
 
@@ -48,6 +53,7 @@ const AdminPage       = lazy(() => import('./pages/AdminPage'))
 const ReconciliationPage = lazy(() => import('./pages/ReconciliationPage'))
 const ProductComparePage = lazy(() => import('./pages/ProductComparePage'))
 const InsightsPage = lazy(() => import('./pages/InsightsPage'))
+const RevenuePage  = lazy(() => import('./pages/RevenuePage'))
 
 // Reactive mobile detection
 function useIsMobile() {
@@ -347,6 +353,7 @@ function AppShell() {
             <Route path="/reconcile"  element={<FlagGate flag="reconciliation"><ReconciliationPage /></FlagGate>} />
             <Route path="/products"   element={<FlagGate flag="product_compare"><ProductComparePage /></FlagGate>} />
             <Route path="/insights"   element={<FlagGate flag="insights"><InsightsPage /></FlagGate>} />
+            <Route path="/revenue"    element={<FlagGate flag="sales"><RevenuePage /></FlagGate>} />
             <Route path="/archive"    element={<ArchivePage />} />
             <Route path="/settings"   element={<SettingsPage />} />
             <Route path="/admin"      element={<AdminPage />} />
@@ -391,6 +398,7 @@ export default function App() {
             }}
           />
           <Suspense fallback={<LoadingSpinner />}>
+            <ErrorBoundary>
             <Routes>
               <Route path="/login"          element={<LoginPage />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -399,6 +407,7 @@ export default function App() {
               <Route path="/accessibility"  element={<AccessibilityPage />} />
               <Route path="/*"              element={<AppShell />} />
             </Routes>
+            </ErrorBoundary>
           </Suspense>
           <CookieConsent />
         </BrowserRouter>

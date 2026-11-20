@@ -42,6 +42,13 @@ export const FLAG_DEFAULTS = {
   product_compare: true,  // "השוואת מוצרים" — cross-supplier price-per-unit report
   insights: true,         // "תובנות" — the periodic insights report
   mail_ingest: true,      // email import: mailbox connect/scan + the inbound address
+
+  // THE ONE MODULE THAT DEFAULTS OFF. Revenue (daily takings, product
+  // profitability, selling hours) is new ground, sold separately, and must not
+  // appear for a single existing tenant until an operator switches it on for
+  // them (binding condition, 20.11.26). Off = no screen, no menu entry, no
+  // query — see guardrail 7 in CLAUDE.md.
+  sales: false,
 }
 
 export const FLAG_KEYS = Object.keys(FLAG_DEFAULTS)
@@ -53,6 +60,7 @@ export const FLAG_KEYS = Object.keys(FLAG_DEFAULTS)
  */
 export const MODULE_FLAGS = [
   'bot_tools', 'events_book', 'reconciliation', 'product_compare', 'insights', 'price_alerts', 'mail_ingest',
+  'sales',
 ]
 
 /**
