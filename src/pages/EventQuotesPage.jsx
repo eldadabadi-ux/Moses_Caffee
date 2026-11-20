@@ -12,6 +12,7 @@
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import CheckDropdown from '../components/CheckDropdown'
+import { loadEventItems, saveEventItem, deleteEventItem, rememberQuoteLines } from '../lib/eventItems'
 import MonthlyBars, { YEAR_COLORS } from '../components/charts/MonthlyBars'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
@@ -24,7 +25,7 @@ import Modal from '../components/ui/Modal'
 import DateInput from '../components/ui/DateInput'
 import LoadingSpinner from '../components/ui/LoadingSpinner'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import { FileText, Plus, Trash2, Pencil, Users, Calendar, Wand2, X } from 'lucide-react'
+import { FileText, Plus, Trash2, Pencil, Users, Calendar, Wand2, X , List } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 const fmt = n => `₪${(Number(n) || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -54,6 +55,11 @@ export default function EventQuotesPage() {
 
   const [quotes, setQuotes]   = useState([])
   const [history, setHistory] = useState([])     // flattened purchase lines, for costing
+  // The catering catalogue — what is SOLD at an event, priced to sell. Kept
+  // apart from the scanned products, which are raw material at cost.
+  const [catalog, setCatalog] = useState([])
+  const [showCatalog, setShowCatalog] = useState(false)
+  const [showNotes, setShowNotes]     = useState(false)
   const [loading, setLoading] = useState(true)
   const [edit, setEdit]       = useState(null)
   const [deleteId, setDeleteId] = useState(null)
@@ -76,6 +82,7 @@ export default function EventQuotesPage() {
         supabase.from('receipts').select('vendor_name, items, receipt_date').eq('user_id', user.id).eq('book', 'cafe'),
       ])
       setQuotes(qs || [])
+      setCatalog(await loadEventItems(user.id))
       setHistory(flattenItems(recs || []).map(f => ({
         name: f.name, price_per_base_unit: f.price_per_base_unit ?? null, base_unit: f.base_unit ?? null,
       })))
@@ -129,6 +136,38 @@ export default function EventQuotesPage() {
   })), [chartYears, quotes])
   const hasEventsInChart = monthlySeries.some(sr => sr.data.some(d => d.total > 0))
 
+  const catalogByName = useMemo(
+    () => new Map(catalog.map(c => [String(c.name || '').trim().toLowerCase(), c])),
+    [catalog])
+
+  /** Typing or picking a catalogue name fills in its unit and selling price. */
+  function applyCatalogName(i, name) {
+    const hit = catalogByName.get(String(name || '').trim().toLowerCase())
+    if (!hit) { setLine(i, { item_name: name, cost_per_base_unit: undefined }); return }
+    setLine(i, {
+      item_name: name,
+      unit: hit.unit || "יח'",
+      unit_price: hit.unit_price ?? '',
+      cost_per_base_unit: undefined,
+    })
+  }
+
+  async function removeCatalogItem(it) {
+    if (!window.confirm(`להסיר את "${it.name}" מרשימת הפריטים? הצעות קיימות לא ישתנו.`)) return
+    try {
+      await deleteEventItem(it.id)
+      setCatalog(c => c.filter(x => x.id !== it.id))
+    } catch (e) { toast.error(e?.message || 'ההסרה נכשלה') }
+  }
+
+  async function addCatalogItem(name, unit, price) {
+    try {
+      const saved = await saveEventItem(user.id, orgId, { name, unit, unit_price: price })
+      if (saved) setCatalog(c => [...c.filter(x => x.id !== saved.id), saved].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he')))
+      return true
+    } catch (e) { toast.error(e?.message || 'השמירה נכשלה'); return false }
+  }
+
   const totals = useMemo(() => edit ? quoteTotals(edit) : null, [edit])
 
   // ── line editing ───────────────────────────────────────────────────────────
@@ -151,6 +190,7 @@ export default function EventQuotesPage() {
 
   async function save() {
     if (!edit.title.trim()) { toast.error('צריך שם לאירוע'); return }
+    setShowNotes(false)
     setSaving(true)
     try {
       const payload = {
@@ -171,6 +211,9 @@ export default function EventQuotesPage() {
         ? await supabase.from('event_quotes').update(payload).eq('id', edit.id)
         : await supabase.from('event_quotes').insert(payload)
       if (error) throw error
+      // The catalogue learns from the work: a line typed here is available
+      // next time, with the price that was actually quoted.
+      await rememberQuoteLines(user.id, orgId, payload.items, catalog)
       toast.success(edit.id ? 'ההצעה עודכנה' : 'ההצעה נוצרה')
       setEdit(null); load()
     } catch (e) { toast.error('שגיאה בשמירה: ' + (e.message || '')) }
@@ -318,7 +361,7 @@ export default function EventQuotesPage() {
       {/* ── Editor ─────────────────────────────────────────────────────────── */}
       {edit && (
         <Modal isOpen onClose={() => setEdit(null)} title={edit.id ? 'עריכת הצעת מחיר' : 'הצעת מחיר חדשה'} size="lg">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }} dir="rtl">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} dir="rtl">
 
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2fr 1fr', gap: 10 }}>
               <Field label="שם האירוע">
@@ -353,8 +396,8 @@ export default function EventQuotesPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
                 {edit.items.map((l, i) => (
                   <div key={i} style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '2.2fr 0.8fr 1fr 1fr auto auto', gap: 7, alignItems: 'center' }}>
-                    <input value={l.item_name} onChange={e => setLine(i, { item_name: e.target.value, cost_per_base_unit: undefined })}
-                      style={{ ...inp, height: 40 }} placeholder="שם הפריט" dir="auto" list="quote-products" />
+                    <input value={l.item_name} onChange={e => applyCatalogName(i, e.target.value)}
+                      style={{ ...inp, height: 38 }} placeholder="שם הפריט" dir="auto" list="quote-catalog" />
                     <input type="number" min="0" step="any" value={l.quantity} onChange={e => setLine(i, { quantity: e.target.value })}
                       style={{ ...inp, height: 40 }} placeholder="כמות" />
                     <select value={l.unit} onChange={e => setLine(i, { unit: e.target.value })} style={{ ...inp, height: 40 }}>
@@ -373,24 +416,41 @@ export default function EventQuotesPage() {
                   </div>
                 ))}
               </div>
-              <datalist id="quote-products">
-                {[...new Set(history.map(h => h.name))].slice(0, 300).map(n => <option key={n} value={n} />)}
+              {/* Only catalogue items are suggested — raw materials from the
+                  receipts would send the quote out at cost prices. */}
+              <datalist id="quote-catalog">
+                {catalog.map(c => <option key={c.id} value={c.name} />)}
               </datalist>
 
-              <button onClick={addLine}
-                style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 'var(--r-btn)', border: '1px dashed var(--border)', background: 'none', color: 'var(--text-mute)', fontSize: 13.5, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
-                <Plus size={14} /> הוסף פריט
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 7, flexWrap: 'wrap' }}>
+                <button onClick={addLine}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 'var(--r-btn)', border: '1px dashed var(--border)', background: 'none', color: 'var(--text-mute)', fontSize: 13.5, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  <Plus size={14} /> הוסף שורה
+                </button>
+                <button onClick={() => setShowCatalog(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 'var(--r-btn)', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-dim)', fontSize: 13.5, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                  <List size={14} /> רשימת הפריטים ({catalog.length})
+                </button>
+                <span style={{ fontSize: 12, color: 'var(--text-mute)' }}>פריט חדש נשמר לרשימה בעת שמירת ההצעה</span>
+              </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: 10 }}>
-              <Field label='הנחה (%)'><input type="number" min="0" max="100" value={edit.discount_pct} onChange={e => setEdit({ ...edit, discount_pct: e.target.value })} style={inp} /></Field>
-              <Field label='מע"מ (%)'><input type="number" min="0" value={edit.vat_rate} onChange={e => setEdit({ ...edit, vat_rate: e.target.value })} style={inp} /></Field>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 13, color: 'var(--text-mute)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                הנחה
+                <input type="number" min="0" max="100" value={edit.discount_pct} onChange={e => setEdit({ ...edit, discount_pct: e.target.value })}
+                  style={{ ...inp, height: 32, width: 66, fontSize: 14 }} />%
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                מע"מ
+                <input type="number" min="0" value={edit.vat_rate} onChange={e => setEdit({ ...edit, vat_rate: e.target.value })}
+                  style={{ ...inp, height: 32, width: 66, fontSize: 14 }} />%
+              </label>
             </div>
 
             {/* Live totals */}
             {totals && (
-              <div style={{ background: 'var(--panel-2)', borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 5, fontSize: 14 }}>
+              <div style={{ background: 'var(--panel-2)', borderRadius: 12, padding: '9px 12px', display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', columnGap: 18, rowGap: 2, fontSize: 13.5 }}>
                 <Row label="סכום ביניים" value={fmt(totals.subtotal)} />
                 {totals.discount > 0 && <Row label={`הנחה ${totals.discount_pct}%`} value={`− ${fmt(totals.discount)}`} />}
                 <Row label={`מע"מ ${totals.vat_rate}%`} value={fmt(totals.vat)} />
@@ -405,13 +465,54 @@ export default function EventQuotesPage() {
               </div>
             )}
 
-            <Field label="הערות"><textarea value={edit.notes} onChange={e => setEdit({ ...edit, notes: e.target.value })} style={{ ...inp, height: 64, paddingTop: 8, resize: 'vertical' }} dir="auto" /></Field>
+            {(showNotes || edit.notes) ? (
+              <Field label="הערות"><textarea value={edit.notes} onChange={e => setEdit({ ...edit, notes: e.target.value })} style={{ ...inp, height: 44, paddingTop: 7, resize: 'vertical' }} dir="auto" autoFocus={showNotes && !edit.notes} /></Field>
+            ) : (
+              <button onClick={() => setShowNotes(true)}
+                style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                + הוספת הערה
+              </button>
+            )}
 
             <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setEdit(null)} style={{ flex: 1, padding: 12, borderRadius: 'var(--r-btn)', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-dim)', fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>ביטול</button>
-              <button onClick={save} disabled={saving} style={{ flex: 2, padding: 12, borderRadius: 'var(--r-btn)', border: 'none', background: saving ? 'var(--border)' : 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: saving ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
+              <button onClick={() => setEdit(null)} style={{ flex: 1, padding: 10, borderRadius: 'var(--r-btn)', border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text-dim)', fontSize: 14, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>ביטול</button>
+              <button onClick={save} disabled={saving} style={{ flex: 2, padding: 10, borderRadius: 'var(--r-btn)', border: 'none', background: saving ? 'var(--border)' : 'var(--accent)', color: '#fff', fontSize: 14, fontWeight: 700, cursor: saving ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
                 {saving ? 'שומר…' : 'שמור הצעה'}
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── The catering catalogue ─────────────────────────────────────────── */}
+      {showCatalog && (
+        <Modal isOpen onClose={() => setShowCatalog(false)} title="רשימת הפריטים לאירועים" size="sm">
+          <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ margin: 0, fontSize: 13.5, color: 'var(--text-mute)', lineHeight: 1.6 }}>
+              אלה הפריטים שאתה מוכר באירוע, עם מחיר המכירה שלהם. הם נפרדים מהמוצרים שנסרקו
+              מהקבלות — שם מופיעים חומרי הגלם במחירי העלות.
+            </p>
+
+            <CatalogAdd onAdd={addCatalogItem} />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: '46dvh', overflowY: 'auto' }}>
+              {catalog.length === 0 && (
+                <div style={{ fontSize: 13.5, color: 'var(--text-mute)', padding: '10px 2px' }}>
+                  הרשימה ריקה. הוסף פריט כאן, או פשוט רשום אותו בהצעת מחיר — הוא יישמר אוטומטית.
+                </div>
+              )}
+              {catalog.map(it => (
+                <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--panel-2)' }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
+                  <span style={{ fontSize: 13, color: 'var(--text-mute)', whiteSpace: 'nowrap' }}>
+                    {it.unit_price != null ? fmt(it.unit_price) : '—'} / {(QUOTE_UNITS.find(u => u.value === it.unit) || {}).label || it.unit}
+                  </span>
+                  <button onClick={() => removeCatalogItem(it)} title="הסר מהרשימה"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4, display: 'flex' }}>
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         </Modal>
@@ -427,6 +528,38 @@ export default function EventQuotesPage() {
 
 const inp = { display: 'block', width: '100%', boxSizing: 'border-box', height: 44, padding: '0 12px', borderRadius: 'var(--r-btn)', border: '1.5px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontSize: 15, fontFamily: 'var(--font-main)', outline: 'none' }
 const lbl = { display: 'block', fontSize: 13.5, fontWeight: 600, color: 'var(--text-dim)', marginBottom: 6 }
+
+/** Add one catalogue entry — its own state, so typing here never re-renders the quote. */
+function CatalogAdd({ onAdd }) {
+  const [name, setName]   = useState('')
+  const [unit, setUnit]   = useState('unit')
+  const [price, setPrice] = useState('')
+  const [busy, setBusy]   = useState(false)
+  async function submit() {
+    if (!name.trim() || busy) return
+    setBusy(true)
+    const ok = await onAdd(name.trim(), unit, price === '' ? null : Number(price))
+    setBusy(false)
+    if (ok) { setName(''); setPrice('') }
+  }
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 0.9fr 0.9fr auto', gap: 6, alignItems: 'center' }}>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="מגש פירות" dir="auto"
+        onKeyDown={e => { if (e.key === 'Enter') submit() }}
+        style={{ ...inp, height: 38 }} />
+      <select value={unit} onChange={e => setUnit(e.target.value)} style={{ ...inp, height: 38 }}>
+        {QUOTE_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+      </select>
+      <input type="number" min="0" step="any" value={price} onChange={e => setPrice(e.target.value)} placeholder="מחיר"
+        onKeyDown={e => { if (e.key === 'Enter') submit() }}
+        style={{ ...inp, height: 38 }} />
+      <button onClick={submit} disabled={busy || !name.trim()}
+        style={{ height: 38, padding: '0 14px', borderRadius: 'var(--r-btn)', border: 'none', background: (busy || !name.trim()) ? 'var(--border)' : 'var(--accent)', color: '#fff', fontSize: 13.5, fontWeight: 700, cursor: (busy || !name.trim()) ? 'default' : 'pointer', fontFamily: 'var(--font-main)' }}>
+        הוסף
+      </button>
+    </div>
+  )
+}
 
 function Field({ label, children }) {
   return <div><label style={lbl}>{label}</label>{children}</div>
