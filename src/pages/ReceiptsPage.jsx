@@ -1134,7 +1134,7 @@ export default function ReceiptsPage() {
             options={HEB_MONTHS.map((lbl, i) => ({ value: i + 1, label: lbl }))}
             values={perMonths} onChange={setPerMonths} />
           <span style={{ fontSize:'12.5px', color:'var(--text-mute)', whiteSpace:'nowrap' }}>
-            מוצג: {periodLabel} · {filtered.length} מסמכים
+            מוצג: {periodLabel} · {filtered.length === 1 ? 'מסמך אחד' : `${filtered.length} מסמכים`}
           </span>
           {!isDefaultPeriod && (
             <button onClick={() => { setPerYears([new Date().getFullYear()]); setPerMonths([new Date().getMonth() + 1]) }}

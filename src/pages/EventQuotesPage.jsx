@@ -43,7 +43,7 @@ const statusOf = v => STATUS.find(s => s.value === v) || STATUS[0]
 const HEB_MONTHS = ['ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר']
 
 const emptyQuote = (vatRate) => ({
-  title: '', customer_name: '', customer_phone: '', event_date: '', guests: '',
+  title: '', customer_name: '', customer_phone: '', event_date: '', event_end_date: '', guests: '',
   items: [{ item_name: '', quantity: 1, unit: 'unit', unit_price: '' }],
   vat_rate: vatRate, discount_pct: '', margin_pct: 35, status: 'draft', notes: '',
 })
@@ -61,6 +61,7 @@ export default function EventQuotesPage() {
   const [catalog, setCatalog] = useState([])
   const [showCatalog, setShowCatalog] = useState(false)
   const [showNotes, setShowNotes]     = useState(false)
+  const [multiDay, setMultiDay]       = useState(false)
   const [loading, setLoading] = useState(true)
   const [edit, setEdit]       = useState(null)
   const [deleteId, setDeleteId] = useState(null)
@@ -93,6 +94,32 @@ export default function EventQuotesPage() {
 
   useEffect(() => { load() }, [load])
 
+  /** Every month an event touches — a conference can run across a month end. */
+  const monthsSpanned = (q) => {
+    const from = String(q.event_date || '').slice(0, 10)
+    if (!from) return []
+    const to = String(q.event_end_date || '').slice(0, 10) || from
+    const out = []
+    let y = +from.slice(0, 4), m = +from.slice(5, 7)
+    const yEnd = +to.slice(0, 4), mEnd = +to.slice(5, 7)
+    // Bounded by construction: the end can never precede the start (DB check).
+    while (y < yEnd || (y === yEnd && m <= mEnd)) {
+      out.push({ y, m })
+      if (m === 12) { y++; m = 1 } else m++
+      if (out.length > 120) break
+    }
+    return out
+  }
+  /** Hebrew counts one and two differently — "1 ימים" reads as a bug. */
+  const daysLabel = (n) => n === 1 ? 'יום אחד' : n === 2 ? 'יומיים' : `${n} ימים`
+  const dayCount = (q) => {
+    const from = String(q.event_date || '').slice(0, 10)
+    const to = String(q.event_end_date || '').slice(0, 10)
+    if (!from || !to || to === from) return 1
+    const ms = Date.parse(to + 'T00:00:00') - Date.parse(from + 'T00:00:00')
+    return ms > 0 ? Math.round(ms / 86400000) + 1 : 1
+  }
+
   const yearOf  = q => parseInt(String(q.event_date || '').slice(0, 4), 10) || null
   const monthOf = q => parseInt(String(q.event_date || '').slice(5, 7), 10) || null
 
@@ -106,10 +133,11 @@ export default function EventQuotesPage() {
   // in every scope, otherwise a draft would vanish the moment it is created.
   const visible = useMemo(() => quotes.filter(q => {
     if (!q.event_date) return true
-    const y = yearOf(q), m = monthOf(q)
-    if (perYears.length && !perYears.includes(y)) return false
-    if (perMonths.length && !perMonths.includes(m)) return false
-    return true
+    // A multi-day event belongs to every month it runs through, so a conference
+    // on 30.11–2.12 is found under both months.
+    return monthsSpanned(q).some(({ y, m }) =>
+      (!perYears.length || perYears.includes(y)) &&
+      (!perMonths.length || perMonths.includes(m)))
   }), [quotes, perYears, perMonths])
 
   const isDefaultPeriod = perYears.length === 1 && perYears[0] === new Date().getFullYear() &&
@@ -202,7 +230,10 @@ export default function EventQuotesPage() {
 
   async function save() {
     if (!edit.title.trim()) { toast.error('צריך שם לאירוע'); return }
-    setShowNotes(false)
+    if (edit.event_end_date && edit.event_date && edit.event_end_date < edit.event_date) {
+      toast.error('תאריך הסיום מוקדם מתאריך ההתחלה'); return
+    }
+    setShowNotes(false); setMultiDay(false)
     setSaving(true)
     try {
       const payload = {
@@ -211,6 +242,7 @@ export default function EventQuotesPage() {
         customer_name: edit.customer_name || null,
         customer_phone: edit.customer_phone || null,
         event_date: edit.event_date || null,
+        event_end_date: edit.event_end_date || null,
         guests: edit.guests === '' ? null : Number(edit.guests),
         items: edit.items.filter(l => (l.item_name || '').trim()),
         vat_rate: Number(edit.vat_rate) || 18,
@@ -269,7 +301,9 @@ export default function EventQuotesPage() {
             options={HEB_MONTHS.map((lbl, i) => ({ value: i + 1, label: lbl }))}
             values={perMonths} onChange={setPerMonths} />
           <span style={{ fontSize: 12.5, color: 'var(--text-mute)', whiteSpace: 'nowrap' }}>
-            {quotes.length === 0 ? 'התצוגה מתחילה בחודש הנוכחי' : `מוצג: ${periodLabel} · ${visible.length} אירועים`}
+            {quotes.length === 0
+              ? 'התצוגה מתחילה בחודש הנוכחי'
+              : `מוצג: ${periodLabel} · ${visible.length === 1 ? 'אירוע אחד' : `${visible.length} אירועים`}`}
           </span>
           {!isDefaultPeriod && (
             <button onClick={() => { setPerYears([new Date().getFullYear()]); setPerMonths([new Date().getMonth() + 1]) }}
@@ -331,7 +365,14 @@ export default function EventQuotesPage() {
               </div>
 
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 13, color: 'var(--text-mute)' }}>
-                {q.event_date && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Calendar size={13} /> {fmtDate(q.event_date)}</span>}
+                {q.event_date && (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Calendar size={13} />
+                    {q.event_end_date && q.event_end_date !== q.event_date
+                      ? `${fmtDate(q.event_date)} – ${fmtDate(q.event_end_date)} · ${daysLabel(dayCount(q))}`
+                      : fmtDate(q.event_date)}
+                  </span>
+                )}
                 {q.guests > 0 && <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Users size={13} /> {q.guests} אורחים</span>}
                 {q.customer_name && <span>{q.customer_name}</span>}
               </div>
@@ -389,9 +430,36 @@ export default function EventQuotesPage() {
             <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: 10 }}>
               <Field label="לקוח"><input value={edit.customer_name} onChange={e => setEdit({ ...edit, customer_name: e.target.value })} style={inp} dir="auto" /></Field>
               <Field label="טלפון"><input value={edit.customer_phone} onChange={e => setEdit({ ...edit, customer_phone: e.target.value })} style={inp} dir="ltr" /></Field>
-              <Field label="תאריך האירוע"><DateInput value={edit.event_date} onChange={e => setEdit({ ...edit, event_date: e.target.value })} style={{ height: 44 }} /></Field>
+              <Field label={edit.event_end_date ? 'מתאריך' : 'תאריך האירוע'}>
+                <DateInput value={edit.event_date} onChange={e => setEdit({ ...edit, event_date: e.target.value })} style={{ height: 44 }} />
+              </Field>
               <Field label="מספר אורחים"><input type="number" min="0" value={edit.guests} onChange={e => setEdit({ ...edit, guests: e.target.value })} style={inp} /></Field>
             </div>
+
+            {/* A conference runs over several days; one date would misstate it. */}
+            {(multiDay || edit.event_end_date) ? (
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: 10, alignItems: 'end' }}>
+                <Field label="עד תאריך">
+                  <DateInput value={edit.event_end_date} min={edit.event_date || null}
+                    onChange={e => setEdit({ ...edit, event_end_date: e.target.value })} style={{ height: 44 }} />
+                </Field>
+                <div style={{ fontSize: 13, color: 'var(--text-mute)', paddingBottom: 12 }}>
+                  {edit.event_end_date
+                    ? `${daysLabel(dayCount(edit))} של אירוע`
+                    : 'בחר את היום האחרון של האירוע'}
+                  {' · '}
+                  <button onClick={() => { setMultiDay(false); setEdit({ ...edit, event_end_date: '' }) }}
+                    style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                    יום אחד
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setMultiDay(true)}
+                style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'var(--font-main)' }}>
+                + אירוע של כמה ימים (כנס)
+              </button>
+            )}
 
             {/* Lines */}
             <div>
